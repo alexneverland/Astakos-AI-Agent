@@ -1,8 +1,78 @@
 from services.behavioral_event_extractor import (
+    _extract_event_batch,
     _align_extraction_results,
     normalize_extracted_event,
     run_behavioral_event_intake,
 )
+
+
+def test_extraction_receives_source_dates_for_relative_time(monkeypatch):
+    """Relative event dates must be grounded in each source, not batch run time."""
+    import json
+    import sys
+    from types import SimpleNamespace
+
+    captured = []
+
+    def invoke(_model, messages):
+        captured.append(messages[0].content)
+        return SimpleNamespace(content="[null, null]")
+
+    monkeypatch.setitem(sys.modules, "core.brain", SimpleNamespace(llm=object(), safe_llm_invoke=invoke))
+    assert _extract_event_batch([
+        {"content": "Χθες ήπια μια μπύρα", "date": "2026-09-30", "time": "23:50"},
+        {"content": "Χθες ήπια μια μπύρα", "date": "2026-10-02", "time": "00:10"},
+    ]) == [None, None]
+    payload = json.loads(captured[0].split("Messages:\n", 1)[1])
+    assert [item["source_date"] for item in payload] == ["2026-09-30", "2026-10-02"]
+    assert "relative dates" in captured[0]
+
+
+def test_intake_combines_all_channels_without_recounting_sources(tmp_path):
+    """Real history -> intake -> storage -> aggregation shares all three channels."""
+    from datetime import datetime
+    from memory import behavioral_event_state, conversation_history
+    from services.behavioral_pattern_aggregator import aggregate_behavioral_pattern_candidates
+
+    history_path = str(tmp_path / "history.db")
+    events_path = str(tmp_path / "events.db")
+    for day, channel in enumerate(("web", "telegram", "matrix"), start=1):
+        conversation_history.append_message(
+            role="user", content="Ήπια μια μπύρα", channel=channel,
+            timestamp=datetime(2026, 10, day, 20), db_path=history_path,
+        )
+    conversation_history.append_message(
+        role="assistant", content="Quoted report", channel="matrix", db_path=history_path,
+    )
+    conversation_history.append_message(
+        role="user", content="Third-party report", channel="web",
+        metadata={"untrusted_external_tool_names": ["browse_url"]}, db_path=history_path,
+    )
+
+    seen = []
+
+    def extract(messages):
+        seen.extend(message["channel"] for message in messages)
+        return [_extraction(item="beer") for _ in messages]
+
+    kwargs = dict(
+        db_path=events_path, initialization_rowid=1,
+        max_rowid_loader=lambda: conversation_history.get_max_rowid(db_path=history_path),
+        message_loader=lambda after: conversation_history.load_messages_after_rowid(
+            after_rowid=after, db_path=history_path,
+        ), extract_batch=extract,
+    )
+    result = run_behavioral_event_intake(**kwargs)
+    replay = run_behavioral_event_intake(**kwargs)
+    events = behavioral_event_state.list_events(db_path=events_path, initialize=False)
+    assert seen == ["web", "telegram", "matrix"]
+    assert result["confirmed"] == 3
+    assert result["skipped_untrusted"] == 1
+    assert replay["loaded"] == 0
+    assert {event["source_channel"] for event in events} == {"web", "telegram", "matrix"}
+    candidates = aggregate_behavioral_pattern_candidates(events)
+    assert len(candidates) == 1
+    assert candidates[0]["occurrence_count"] == 3
 
 
 def _source():

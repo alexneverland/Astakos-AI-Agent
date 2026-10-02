@@ -33,6 +33,12 @@ chroma_db - Copy/
 .goal_followup_sent
 runtime_snapshot.json
 scheduler_state.json
+behavioral_conversation_preferences.json
+behavioral_conversation_preferences.json.lock
+behavioral_initiative_state.json
+behavioral_initiative_state.json.lock
+.behavioral-initiative-*.tmp
+.behavioral-prefs-*.tmp
 last_location.json
 linkedin_draft.json
 run_telegram.lock

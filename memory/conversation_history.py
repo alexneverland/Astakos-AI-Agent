@@ -230,8 +230,11 @@ def append_message(
     mirror_target: str | None = None,
     mirror_content: str | None = None,
     timestamp: datetime | None = None,
+    message_id: str | None = None,
     db_path: str = CONVERSATION_DB_FILE,
 ) -> dict[str, Any]:
+    if message_id is not None and (not isinstance(message_id, str) or not message_id.strip() or len(message_id) > 100):
+        raise ValueError("Invalid stable conversation message identity")
     if mirror_target is not None and (
         channel != "web" or role not in {"user", "assistant"}
         or mirror_target not in {"matrix", "telegram"}
@@ -239,7 +242,7 @@ def append_message(
         raise ValueError("Web mirror requires a Web user/assistant row and supported target")
     ts = timestamp or datetime.now()
     message = {
-        "id": str(uuid.uuid4()),
+        "id": message_id or str(uuid.uuid4()),
         "session_id": session_id or default_session_id(ts),
         "channel": channel,
         "role": role,
@@ -253,7 +256,7 @@ def append_message(
 
     # [DEDUP GUARD]: Prevents rapid double-writes
     _key = _dedup_key(channel, role, content, message["metadata"], db_path)
-    if channel != "web" and _is_recent_duplicate(_key):
+    if message_id is None and channel != "web" and _is_recent_duplicate(_key):
         print(f"\033[93m[ConvHistory]: Dedup skip — {channel}/{role} '{content[:40]}'[0m")
         return message
 

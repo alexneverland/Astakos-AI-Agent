@@ -685,6 +685,7 @@ def build_prompt(
     channel: str | None = None,
     *,
     include_persisted_context: bool = True,
+    include_behavioral_context: bool = False,
 ) -> str:
     """The main Prompt synthesis engine."""
     from config import WORKING_MEMORY_FILE, BASE_DIR
@@ -726,6 +727,7 @@ def build_prompt(
     has_current_photo = "[CURRENT_PHOTO_PATH]" in memory_query
     
     memory_context_str = ""
+    behavioral_recent_context = ""
     clean_text = memory_query.lower()
     
     from core.nl_config import UTILS_IGNORE_WORDS
@@ -754,6 +756,8 @@ def build_prompt(
                 write_debug=True,
             )
             rendered_context = context.render()
+            if include_behavioral_context:
+                behavioral_recent_context = "\n".join(context.recent_lines)
             if rendered_context:
                 memory_context_str = "\n🧠 ═══ UNIFIED MEMORY CONTEXT ═══\n"
                 memory_context_str += rendered_context + "\n"
@@ -864,6 +868,13 @@ def build_prompt(
     )
 
     prompt += memory_context_str
+
+    if include_persisted_context and include_behavioral_context:
+        from services.behavioral_conversation_reply import prepare_behavioral_reply_context
+
+        prompt += prepare_behavioral_reply_context(
+            state_messages, channel=channel, shared_recent=behavioral_recent_context,
+        )
 
     gap_instruction = t("core.approval.capability_gap_instruction")
     proposal_prefix = t("core.approval.capability_proposal_prefix")

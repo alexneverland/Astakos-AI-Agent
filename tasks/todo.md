@@ -368,3 +368,82 @@
   - Verified offline: 179 focused routing, approval, project-access, Web,
     Telegram, and Matrix tests passed. Live Web/Element validation remains a
     separate owner check.
+
+## Behavioral conversation initiative (not routine creation)
+
+- [x] Audit existing collection across Web, Telegram and Matrix.
+  - Verified: 76 focused offline tests; real temporary cross-channel history
+    becomes one aggregated pattern without assistant/external contamination or
+    recounting a processed batch. Read-only live counts confirm all channels.
+  - Repair: extraction receives source dates for relative-date interpretation;
+    RED/GREEN covers the model input contract, not live semantic certainty.
+  - Collection remains message-triggered via background queue, not nightly.
+
+- [x] Record the clarified purpose and proposed module order.
+  - Acceptance: natural replies and spontaneous conversation are separated
+    from nightly routine detection; existing Matrix tasks are preserved.
+  - Verify: inspect `tasks/behavioral-conversation-spec.md` and documentation diff.
+
+- [x] Review the evidence contract before implementation.
+  - Owner instructed continuation. Window remains an explicit caller argument,
+    not an activated policy; provenance and negative cases are covered offline.
+  - Files: `tasks/behavioral-conversation-spec.md`.
+
+- [x] Implement `behavioral-evidence` with focused RED/GREEN tests.
+  - Acceptance: dated, bounded evidence distinguishes distinct dates from raw
+    references; invalid/stale/untrusted evidence produces no usable packet.
+  - Verify: evidence tests and existing aggregator/state regressions from spec.
+  - Likely files: `services/behavioral_conversation_evidence.py`,
+    `tests/test_behavioral_conversation_evidence.py`.
+  - Verified: 99 focused tests pass; existing detector is reused with opt-in
+    dates/source references, same-source deduplication and bounded packets.
+    Read-only manual packets contain both existing cross-channel patterns.
+
+### Checkpoint: evidence
+
+- [x] Focused tests and `git diff --check` pass.
+- [x] Owner reviews evidence output before consumer activation.
+- [x] Approve shared topic-suppression persistence before enabling consumers.
+
+- [x] Specify and implement `behavioral-reply` as a separate narrow slice.
+  - Acceptance: relevant optional commentary in normal cross-channel replies;
+    unrelated requests, planned events and opted-out topics are not lectured.
+  - Verify: temporary-state integration tests through actual shared context,
+    mocked LLM boundary and channel regression tests; owner live review later.
+  - Integration: `core/utils.py::build_prompt`, opt-in from Chat_Agent,
+    `services/behavioral_conversation_reply.py`, three prompt files and shared
+    `memory/behavioral_conversation_preferences.py` (ignored atomic JSON state).
+  - Offline verification covers semantic-decision boundaries, real temporary
+    opt-out/revoke/restart and concurrency state, actual prompt/channel wiring,
+    one returned Chat_Agent reply and untrusted-history exclusion.
+  - Live provider interpretation remains pending; specialists are unchanged.
+  - Verified: 33 reply/preference tests pass on the final implementation;
+    compilation and `git diff --check` pass. The earlier focused integration
+    run passed 95 tests; no full-suite run. Two dependency deprecation warnings.
+
+- [x] Specify durable delivery and approve `behavioral-initiative` policy.
+  - Acceptance: cooldown, opener frequency, semantic opt-out and retry identity
+    are agreed; exact storage/scheduler scope is reviewed before implementation.
+  - Verify: review the module contract and lifecycle against existing delivery.
+  - Approved: one opener/day, seven days/topic, fifteen minutes without shared
+    conversation/reminder activity; shared preferences, separate state and job.
+
+- [x] Implement `behavioral-initiative` in small tested slices.
+  - Acceptance: considerate opener only with fresh evidence and appropriate
+    context; quiet/mute/recent activity/opt-out suppress it; no duplicate after
+    failure or restart, no routine mutation or inactive-channel delivery.
+  - Verify: offline fixed-clock lifecycle/delivery tests and selected-channel
+    regressions; test storage and sending separately, each about five files max.
+  - Verified: 23 lifecycle, four state, three adapter/worker integration tests;
+    focused existing history/delivery/scheduler regressions also pass.
+  - Separate ignored atomic ledger, stable Matrix transaction/history identities,
+    current-context recheck, shared preferences and coalesced slow-queue polling.
+  - Exception: ambiguous Telegram or stale Matrix send is held for inspection,
+    never blindly retried. Live semantic/opener assessment remains pending.
+
+### Checkpoint: behavioral conversation
+
+- [x] Pre-PR combined focused verification: 153 passed, two dependency
+  deprecation warnings; staged diff check clean. No full-suite or live sends.
+- [ ] Owner verifies normal commentary and one appropriate opener live.
+- [ ] Record remaining exceptions honestly; no full-suite run by default.

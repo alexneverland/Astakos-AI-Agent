@@ -626,6 +626,7 @@ def chat_agent_node(state: AgentState):
         system_prompt_text,
         channel=state.get("channel"),
         include_persisted_context=not active_draft_edit_context_isolated,
+        include_behavioral_context=True,
     )
 
     safe_history = sanitize_history_for_gemini(prompt_history)

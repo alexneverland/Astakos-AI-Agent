@@ -5644,6 +5644,12 @@ def _build_external_scheduler() -> AstakosScheduler:
     """Register the single shared set of external-channel background jobs."""
     from services.web_mirror_delivery import drain_web_mirrors
     from services.pending_approval_delivery import drain_queued_matrix_approvals
+    from services.behavioral_initiative_scheduler import schedule_behavioral_initiative
+
+    def queue_behavioral_initiative() -> None:
+        """Keep model work off the shared scheduler's single thread."""
+        if _external_background_runtime_channel in {"telegram", "matrix"} and not shutdown_event.is_set():
+            schedule_behavioral_initiative(enqueue_slow_task)
 
     def drain_selected_web_mirrors() -> None:
         """Retry display-only Web copies through this process's selected transport."""
@@ -5668,6 +5674,7 @@ def _build_external_scheduler() -> AstakosScheduler:
     scheduler.register(job_morning_ai_briefing, interval_seconds=3600, name="ai_briefing", verbose=True)
     scheduler.register(job_morning_hn_briefing, interval_seconds=3600, name="hn_briefing", verbose=True)
     scheduler.register(job_goal_followup, interval_seconds=3600, name="goal_followup", verbose=True)
+    scheduler.register(queue_behavioral_initiative, interval_seconds=600, name="behavioral_initiative", verbose=False)
     return scheduler
 
 

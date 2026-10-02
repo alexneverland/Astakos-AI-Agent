@@ -146,6 +146,22 @@ class ExternalDeliveryRouter:
             raise ExternalDeliveryError("Selected Matrix mirror chunk failed") from exc
         return self._receipt("matrix", external_id)
 
+    def send_idempotent_matrix_text(self, text: str, *, transaction_id: str) -> DeliveryReceipt:
+        """Send a durable Matrix item only when its original channel is selected."""
+        channel, transport = self._selected_transport()
+        if channel != "matrix":
+            raise ExternalDeliveryError("Matrix target is not selected")
+        sender = getattr(transport, "send_idempotent_text", None)
+        if not callable(sender):
+            raise ExternalDeliveryError("Matrix idempotent sender unavailable")
+        if not text.strip() or not transaction_id.strip():
+            raise ValueError("Matrix delivery requires text and identity")
+        try:
+            external_id = sender(text, transaction_id=transaction_id)
+        except Exception as exc:
+            raise ExternalDeliveryError("Matrix idempotent delivery failed") from exc
+        return self._receipt(channel, external_id)
+
     def send_approval(self, request: ApprovalDeliveryRequest) -> DeliveryReceipt:
         """Send an approval only through the selected channel."""
         channel, transport = self._selected_transport()
