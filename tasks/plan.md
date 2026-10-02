@@ -5,7 +5,7 @@ Only active work is listed here; [todo.md](todo.md) records its status.
 Completed evidence remains in Git history and existing specs/runbooks.
 The [archived plan](archive/2026-10-02-plan.md) is not an active queue.
 
-## Ready for review: vacuum/GPS and bounded Web turns
+## Completed implementation: vacuum/GPS and bounded Web turns
 
 Owner-approved contract: [vacuum-location-boundary-spec.md](vacuum-location-boundary-spec.md).
 
@@ -19,8 +19,9 @@ Owner-approved contract: [vacuum-location-boundary-spec.md](vacuum-location-boun
   including mocked-hardware execution and real LangGraph budget exhaustion.
   Approval policy and recursion limits are unchanged. Owner live test remains.
 - Focused offline verification only: no real vacuum, provider/transport calls,
-  live data, runtime/config changes or full-suite rerun. Owner requested commit,
-  PR and Codex review; no merge is authorized yet.
+  live data, runtime/config changes or full-suite rerun. PR #211 Codex finding
+  is addressed with 25 focused Web regressions; owner authorized merge and
+  deletion of its task branch. Owner-controlled live verification remains.
 
 ## Remaining live verification
 

@@ -5,14 +5,15 @@ Last reconciled with the owner: 2026-10-02.
 this active checklist; evidence remains in Git history, specs/runbooks and the
 [archive](archive/2026-10-02-todo.md). Archived unchecked items are not this backlog.
 
-## Ready for review: vacuum/GPS and Web step boundary
+## Pending live verification: vacuum/GPS and Web step boundary
 
 Contract: [vacuum-location-boundary-spec.md](vacuum-location-boundary-spec.md).
 
-- [ ] Codex review of the completed repair; address verified actionable findings.
-  160 focused tests pass: strict GPS contract, normal cross-channel approvals,
-  unchanged external-content protection, one mocked-device execution and real
-  Web graph-budget handling. No limit increase or full-suite run.
+PR #211 implementation and its Codex correction are complete; owner authorized
+merge and task-branch deletion. Verification: 160 focused regressions, followed
+by 25 focused Web tests covering the review correction. No limit increase or
+full-suite run.
+
 - [ ] Owner-controlled live vacuum/Web test after review. Offline verification
   does not prove live model interpretation or physical hardware behavior.
 
