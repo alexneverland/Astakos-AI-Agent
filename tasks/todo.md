@@ -9,8 +9,35 @@ Unchecked entries in that dated snapshot are historical, not the active backlog.
 ## Open: await owner direction
 
 - [ ] Document and verify private Matrix backup/recovery prerequisites.
-  Preserve a recoverable boundary for Synapse signing key/config and PostgreSQL
-  data without exposing secrets. Keep this separate from Astakos code work.
+  Read-only inventory and proposed spec are complete: see
+  `matrix-backup-recovery-spec.md`. age 1.3.2 and restricted local recovery-key
+  setup are complete; harmless encrypt/decrypt round trip passed. Owner-confirmed
+  vault storage and the owner-copied retrieved key also passed fixture decryption.
+  Package/encrypt/explicit-upload slice is implemented with focused offline
+  coverage. Guarded capture and CLI integration are implemented offline: verify
+  actual PostgreSQL target, pause/restart Synapse, copy stopped crypto/media and
+  remove owned plaintext. First local live capture passed with vault identity
+  decryption, no remaining owned plaintext staging, healthy server/HTTP 200 and
+  bot restart; owner confirmed chat delivery. Deployment `.env` capture and the
+  first private encrypted Drive upload/download are now verified, without secret
+  values in logs/chat. The original publicly link-readable Astakos parent was
+  unchanged; Matrix uses an independent owner-only folder. Opt-in bot-runtime
+  export now has 55 focused fixture tests, including encrypted CLI packaging;
+  a new real artifact now includes those settings and passed vault-key decryption,
+  full manifest validation and private Drive download hash verification.
+  Synapse is healthy; bot/watchdog restarted, awaiting owner chat confirmation.
+  Separate 03:00 Windows task is registered; its actual Scheduler invocation
+  passed with exit 0, uploaded artifact, verified bot startup and healthy server.
+  72 focused tests passed. Isolated restore of the actual Scheduler artifact
+  passed: native PostgreSQL roles/database restore, pinned Synapse startup,
+  restored token/room/sync and copied bot crypto loading. No outbound sends;
+  production healthy/HTTP 200. Temporary Docker resources removed; owner removed
+  plaintext rehearsal directory (absence verified) and confirmed removal of local
+  secret identities/fixtures. Public recipient retained; secret is in the vault.
+  Next: first timed-run observation
+  and owner Element recovery-key/replacement-host limitations.
+  Astakos's own `.env` and existing nightly task are unchanged.
+  Existing Astakos backup is unchanged; full client/host-loss recovery is not claimed.
 - [ ] Observe normal behavioral commentary and one appropriate opener live.
   Include relevance, unrelated requests, semantic topic opt-out/re-enable and
   absence of repetitive nagging. Implementation/offline tests are complete;
