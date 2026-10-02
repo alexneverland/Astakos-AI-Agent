@@ -23,6 +23,34 @@ Owner-approved contract: [vacuum-location-boundary-spec.md](vacuum-location-boun
   is addressed with 25 focused Web regressions; owner authorized merge and
   deletion of its task branch. Owner-controlled live verification remains.
 
+## Daily data-only backup (owner approved)
+
+Contract: [daily-data-backup-spec.md](daily-data-backup-spec.md).
+Build selection/verified cold package, then verified Drive upload and scoped
+retention, then visible writer pause/resume and schedule switch to 00:00.
+Preserve all unrelated live-verification entries below and the 03:00 Matrix job.
+Do not activate an incomplete backup or discard the last known-good artifact.
+54 focused tests pass. Live Web/Matrix pause and restart in their original
+consoles succeeded. A cold 47-file, 64,334,713-byte package was extracted into an
+isolated directory and every file matched its manifest SHA-256; this verifies
+byte restoration, not application-level recovery on a replacement host.
+Owner authorized removal of eight broken legacy JSON photo-index entries and
+recycling seven matching outputs; Chroma cleanup is explicitly deferred.
+Owner authorized making the configured Drive folder owner-only. After OAuth
+reconnection, upload size/checksum and private permissions were verified; old
+daily folders were trashed and one managed ZIP remains active.
+Owner ran the registration script; Scheduler readback confirmed the 00:00
+trigger, scripts/nightly_data_backup.py action, venv interpreter and project
+working directory. Observing the first scheduled execution remains pending.
+The 03:00 Matrix task is unchanged. Manual execution of the actual daily
+Scheduler task completed on 2026-10-02 in about 88 seconds (LastTaskResult=0,
+status=complete, 47 files). The timed 00:00 invocation remains to be observed.
+PR #212 Codex findings are addressed with failing-then-passing regressions:
+include persisted meal history and recipe library, and preserve supervisor
+recovery after descendant shutdown failure without overlapping old writers.
+26 focused backup/watchdog/launcher tests pass for this repair. The earlier
+47-file live capture predates the added skill data; no new live run is claimed.
+
 ## Remaining live verification
 
 1. **Matrix nightly backup:** observe the first timed 03:00 run and recovery in

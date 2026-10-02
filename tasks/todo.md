@@ -19,9 +19,32 @@ full-suite run.
 
 ## Pending natural/live verification
 
+## Daily data-only backup
+
+- [x] Build and fixture-test the selective cold package and indexed assets.
+- [x] Verify single upload and scoped retention on mocked Drive failures.
+- [x] Resolve broken legacy photo-index entries with owner authorization;
+  Chroma cleanup remains explicitly deferred.
+- [x] Verify live pause/resume in the original Web/Matrix consoles, cold capture,
+  isolated extraction with matching SHA-256, private Drive upload and retention.
+  This is byte-level restore evidence, not replacement-host application recovery.
+- [x] Switch the existing 00:00 task action to scripts/nightly_data_backup.py.
+  Owner ran the registration script; Scheduler readback confirmed the new
+  action, venv interpreter and working directory. The 03:00 Matrix job is unchanged.
+- [x] Run the actual Scheduler task manually: 2026-10-02 22:07:54 to 22:09:22
+  local, LastTaskResult=0 and complete 47-file backup; original consoles resumed.
+- [x] Address PR #212 Codex findings: persist meal/recipe data in the package
+  and recover supervisors after descendant shutdown failure. 26 focused tests
+  pass; live evidence above predates the additional skill data.
+- [ ] Observe the first scheduled data-only backup and separately verify
+  application-level recovery on an isolated installation.
+
+## Existing natural/live verification (preserved)
+
 - [ ] Observe the first timed 03:00 Matrix backup and original-terminal continuity.
   PR #210 is merged; manual Scheduler invocation, encrypted private upload and
-  isolated server/bot restore are complete. Existing 22:00 backup is unchanged.
+  isolated server/bot restore are complete. The separate daily data backup now
+  has a 00:00 trigger and its new action is activated and manually verified.
 - [ ] Separately scope Element recovery-key and replacement-host verification.
   Current evidence does not prove complete client/host-loss recovery.
 - [ ] Observe normal behavioral commentary, topic opt-out/re-enable and one

@@ -69,10 +69,18 @@ def run():
                 cwd="C:\\astakos_v2",
                 creationflags=creationflags,
             )
+            return process
 
         start()
         dirs = [d for d in WATCH_DIRS if os.path.exists(d)]
-        for changes in watch(*dirs):
+        for changes in watch(*dirs, rust_timeout=1000, yield_on_timeout=True):
+            from services.daily_backup_runtime import checkpoint
+            # Backup owns the stopped child; do not stop it again in start().
+            def resume():
+                nonlocal process
+                process = None
+                return start()
+            process = checkpoint("telegram", process, resume)
             py_changes = [c for c in changes if str(c[1]).endswith(".py") or str(c[1]).endswith("prompts.md")]
             if py_changes:
                 for _, path in py_changes:

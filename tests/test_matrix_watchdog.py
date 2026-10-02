@@ -4,6 +4,14 @@ from __future__ import annotations
 
 import os
 import signal
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def offline_daily_backup_boundary(monkeypatch):
+    """Legacy watcher tests must not publish real runtime coordination files."""
+    from services import daily_backup_runtime
+    monkeypatch.setattr(daily_backup_runtime, "checkpoint", lambda role, process, restart: process)
 
 
 def test_watchdog_backup_pause_preserves_parent_and_adopts_child(monkeypatch, tmp_path):

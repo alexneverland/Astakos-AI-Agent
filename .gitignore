@@ -107,3 +107,4 @@ astakos_routines.json
 .matrix-backup-paused.json
 .matrix-backup-maintenance.lock
 .matrix-backup-request-*
+.daily-backup-*

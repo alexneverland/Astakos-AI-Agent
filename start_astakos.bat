@@ -25,7 +25,7 @@ echo.
 echo  Starting Web and selected external channel...
 cd /d %~dp0
 call venv\Scripts\activate
-start "Astakos Web Server" cmd /k "cd /d %~dp0 && call venv\Scripts\activate && uvicorn api.server:server --host 0.0.0.0 %SERVER_ARGS% %RELOAD_ARGS%"
+start "Astakos Web Server" cmd /k "cd /d %~dp0 && call venv\Scripts\activate && python run_web.py"
 timeout /t 3 /nobreak >nul
 python run_external.py
 goto end
@@ -35,7 +35,7 @@ echo.
 echo  Starting Web Server only...
 cd /d %~dp0
 call venv\Scripts\activate
-uvicorn api.server:server --host 0.0.0.0 %SERVER_ARGS% %RELOAD_ARGS%
+python run_web.py
 goto end
 
 :telegram
