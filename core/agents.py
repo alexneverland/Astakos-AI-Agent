@@ -1242,7 +1242,7 @@ def web_agent_node(state: AgentState):
 
     if web_errors and not web_successes:
         guarded_reply = build_web_failure_reply(
-            last_msg_text,
+            latest_user_text,
             recent_web_tool_results,
         )
         from langchain_core.messages import AIMessage as _AIMsg

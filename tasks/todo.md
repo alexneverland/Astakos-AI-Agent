@@ -1,5 +1,22 @@
 # Tasks: Web Research Providers, Slice 1
 
+## Supplied-link failure reply (2026-10-02)
+
+- [x] Reproduce native `browse_url` on the reported Skroutz URL: returned the
+  existing `reason=cloudflare` protection sentinel, not readable product data.
+- [x] Use the latest user text, not the last tool response, in the failure guard.
+  Reuse canonical website-target recognition; localize known protocol causes
+  without exposing raw diagnostics or inventing page contents.
+- [x] Focused RED/GREEN regressions cover Greek/English and Web/Matrix/Telegram.
+  Generic searches, unknown failures and unverified-search boundaries remain safe.
+  Verified: 69 combined guard tests passed; after adding the tool-only URL
+  negative case, all 12 slice tests passed. Two dependency warnings;
+  compilation and diff check clean. No full-suite run or outbound chat sends.
+- [x] Owner retried the link in normal chat and reported successful reading and
+  a correct answer. The protected-failure reply is verified offline; this fix
+  improves failure reporting, not guaranteed access to protected sites.
+
+
 - [x] Define normalized provider contracts and registry.
   - Acceptance: selective provider IDs are validated; duplicate canonical URLs are removed; failures are isolated.
   - Verify: focused offline unit tests.

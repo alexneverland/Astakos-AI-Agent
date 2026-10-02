@@ -1,5 +1,18 @@
 # Spec and Implementation Plan: Web Research Providers, Slice 1
 
+## Supplied-link failure reporting
+
+The Web_Agent failure guard uses the current owner's message to recognize an
+already-supplied website through the canonical target recognizer. It must not
+ask for the same link again. Known browse error protocol codes produce localized
+causes; unknown diagnostics stay generic, with no raw paths or external prose.
+The owner may supply a screenshot or page details instead. Tool protections,
+transport routing, search fallbacks and provider settings are unchanged.
+Focused offline guard tests and one read-only native-tool reproduction cover
+this slice. The owner reported that the next ordinary-chat attempt read the
+page successfully and answered correctly; the failure reply is tested offline.
+
+
 ## Objective
 
 Add a small provider layer owned by the existing `Web_Agent` so one research

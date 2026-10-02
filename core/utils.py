@@ -1070,11 +1070,25 @@ def filter_recent_web_tool_results(messages: list) -> list:
     return results
 
 def build_web_failure_reply(user_text: str, tool_results: list) -> str:
+    """Render current-turn failures without exposing untrusted diagnostics."""
     for _, result_text in tool_results:
         if is_unverified_search_fallback(result_text):
             _, separator, visible_text = result_text.partition("\n")
             if separator and visible_text.strip():
                 return visible_text.strip()
+
+    from core.capability_lookup import _looks_like_specific_web_target
+
+    if _looks_like_specific_web_target(user_text):
+        reply = t("core.utils.web_link_failure_reply")
+        for name, result_text in reversed(tool_results):
+            if name != "browse_url":
+                continue
+            # Parse the tool protocol only, never infer a cause from page/error prose.
+            failure = re.match(r"^\[WEB_TOOL_ERROR\]\[browse_url\]\[reason=([a-z_]+)\]", result_text)
+            if failure and failure.group(1) in {"timeout", "cloudflare", "generic"}:
+                return reply + " " + t(f"core.utils.web_failure_reasons.{failure.group(1)}")
+        return reply
 
     qty_intents = list(UTILS_QTY_INTENTS)
     is_qty = any(w in user_text.lower() for w in qty_intents)
