@@ -20,6 +20,7 @@ import threading
 import ipaddress
 import html
 from core.i18n import t
+from collections.abc import Iterator
 import sys
 import re
 import secrets
@@ -648,6 +649,30 @@ def _load_shared_history_entries(
     return history
 
 
+def _bounded_web_graph_events(messages_for_graph: list, limit: int) -> Iterator[dict]:
+    """Preserve terminal approvals or report an exhausted turn without replay."""
+    from langgraph.errors import GraphRecursionError
+
+    terminal_approval = False
+    try:
+        for event in graph.stream(
+            {"messages": messages_for_graph, "channel": "web"},
+            {"recursion_limit": limit},
+        ):
+            approval = event.get("approval_check") or {}
+            terminal_approval = (
+                approval.get("approval_status") in ("blocked", "pending")
+                and bool(approval.get("messages"))
+            )
+            yield event
+    except GraphRecursionError:
+        print("[Web->Graph]: Step budget exhausted; preserving terminal approval"
+              if terminal_approval else "[Web->Graph]: Step budget exhausted; turn incomplete")
+        yield {"graph_limit": {"graph_budget_exhausted": True, "messages": [] if terminal_approval else [
+                AIMessage(content=t("api.server.graph_budget_exhausted")),
+        ]}}
+
+
 def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
     """
     Runs the synchronous LangGraph stream off the main event loop.
@@ -661,15 +686,16 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
     external_tool_names: set[str] = set()
     tool_args_by_id: dict[str, dict] = {}
     saved_local_draft = False
+    graph_budget_exhausted = False
 
     t_graph_0 = perf_counter()
-    for event in graph.stream(
-        {"messages": messages_for_graph, "channel": "web"},
-        {"recursion_limit": limit},
-    ):
+    for event in _bounded_web_graph_events(messages_for_graph, limit):
         trace.process_event(event)
         for node, data in event.items():
             if data is None:
+                continue
+            graph_budget_exhausted = graph_budget_exhausted or bool(data.get("graph_budget_exhausted"))
+            if node == "graph_limit" and not data.get("messages"):
                 continue
             for event_message in data.get("messages", []):
                 for tool_call in getattr(event_message, "tool_calls", None) or []:
@@ -684,7 +710,7 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
                     if getattr(msg, "type", "") == "tool":
                         from core.untrusted_content import (
                             format_untrusted_tool_result,
-                            is_untrusted_external_tool_call,
+                            is_untrusted_external_tool_result_content,
                         )
                         tool_name = str(getattr(msg, "name", ""))
                         if tool_name == "relay_local_payload":
@@ -694,7 +720,9 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
                                 clean_message(getattr(msg, "content", "")),
                             )
                         tool_args = tool_args_by_id.get(str(getattr(msg, "tool_call_id", "")), {})
-                        is_external = is_untrusted_external_tool_call(tool_name, tool_args)
+                        is_external = is_untrusted_external_tool_result_content(
+                            tool_name, tool_args, str(getattr(msg, "content", "")),
+                        )
                         if is_external:
                             external_tool_names.add(tool_name)
                         tool_content = clean_message(getattr(msg, "content", "")).strip()
@@ -737,6 +765,7 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
         "external_tool_names": sorted(external_tool_names),
         "graph_elapsed_ms": graph_elapsed_ms,
         "saved_local_draft": saved_local_draft,
+        "graph_budget_exhausted": graph_budget_exhausted,
     }
 
 # ────────────────────────────────────────────────────────────────
@@ -1631,6 +1660,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         )
         tool_result_fallbacks = []
         external_tool_names: list[str] = []
+        graph_budget_exhausted = False
         provenance_messages_for_reply: list = []
 
         from core.planner import get_fresh_pending_plan_confirmation
@@ -1736,19 +1766,22 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             tool_result_fallbacks = graph_result["tool_result_fallbacks"]
             external_tool_names = graph_result["external_tool_names"]
             graph_elapsed_ms = graph_result["graph_elapsed_ms"]
+            graph_budget_exhausted = bool(graph_result.get("graph_budget_exhausted"))
             _trace.mark_phase("graph_call_ms", graph_elapsed_ms)
             _trace.mark_phase("graph_stream_ms", graph_elapsed_ms)
 
         t_build_0 = perf_counter()
 
-        if should_attach_linkedin_draft_reply(
+        if not graph_budget_exhausted and should_attach_linkedin_draft_reply(
             isolated_user_input,
             tool_result_fallbacks,
             recent_linkedin_prompt_active=linkedin_prompt_active,
         ):
             final_ai_response = build_linkedin_draft_ready_reply(tool_result_fallbacks)
 
-        if any(looks_like_terminal_messenger_draft_result(r) for r in tool_result_fallbacks):
+        if not graph_budget_exhausted and any(
+            looks_like_terminal_messenger_draft_result(r) for r in tool_result_fallbacks
+        ):
             final_ai_response = build_messenger_draft_ready_reply(tool_result_fallbacks)
 
         if not final_ai_response:

@@ -1735,6 +1735,7 @@
   },
   "api": {
     "server": {
+      "graph_budget_exhausted": "This turn reached its step limit and stopped before completion. Earlier actions may have completed; check their results before trying again.",
       "routine_outcome_acknowledged": "Acknowledged: in progress",
       "routine_outcome_skipped_today": "Skipped today",
       "routine_outcome_paused": "Paused indefinitely",

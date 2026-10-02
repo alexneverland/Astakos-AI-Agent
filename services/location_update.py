@@ -36,30 +36,32 @@ def parse_geo_uri(value: str) -> tuple[float, float] | None:
     return latitude, longitude
 
 
-def sync_live_location_out_of_home_state(latitude: float, longitude: float) -> None:
-    """Update the routine home-context flag from a trusted live GPS point."""
+def location_is_home(latitude: float, longitude: float) -> bool | None:
+    """Resolve configured home geometry without changing any context state."""
     from config import HOME_COORDS, HOME_RADIUS_M
-    from memory.routine_db import get_context_state, set_context_state
 
     try:
         home_lat, home_lon = float(HOME_COORDS[0]), float(HOME_COORDS[1])
         home_radius_m = float(HOME_RADIUS_M)
     except (IndexError, TypeError, ValueError):
-        return
-    if (home_lat, home_lon) == (0.0, 0.0) or home_radius_m <= 0:
-        return
+        return None
+    if (not all(math.isfinite(value) for value in
+                (latitude, longitude, home_lat, home_lon, home_radius_m))
+            or not -90 <= home_lat <= 90 or not -180 <= home_lon <= 180
+            or not -90 <= latitude <= 90 or not -180 <= longitude <= 180
+            or (home_lat, home_lon) == (0.0, 0.0) or home_radius_m <= 0):
+        return None
+    return _haversine_distance_meters(home_lat, home_lon, latitude, longitude) <= home_radius_m
 
-    earth_radius_m = 6_371_000
-    lat_delta = math.radians(latitude - home_lat)
-    lon_delta = math.radians(longitude - home_lon)
-    arc = (
-        math.sin(lat_delta / 2) ** 2
-        + math.cos(math.radians(home_lat))
-        * math.cos(math.radians(latitude))
-        * math.sin(lon_delta / 2) ** 2
-    )
-    distance_m = 2 * earth_radius_m * math.asin(math.sqrt(arc))
-    desired_value = "true" if distance_m > home_radius_m else "false"
+
+def sync_live_location_out_of_home_state(latitude: float, longitude: float) -> None:
+    """Update the routine home-context flag from a trusted live GPS point."""
+    from memory.routine_db import get_context_state, set_context_state
+
+    is_home = location_is_home(latitude, longitude)
+    if is_home is None:
+        return
+    desired_value = "false" if is_home else "true"
     state = get_context_state("user_out_of_home") or {}
     current_value = str(state.get("value") or "").strip().lower()
     expires_at = str(state.get("expires_at") or "").strip()

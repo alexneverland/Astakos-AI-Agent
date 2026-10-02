@@ -217,6 +217,10 @@ def is_untrusted_external_tool_result_content(
     normalized_name = str(tool_name or "")
     if normalized_name in PERSISTED_PROVENANCE_RESULT_TOOL_NAMES:
         return UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER in str(content or "")
+    if normalized_name == "get_current_location":
+        from core.location_result import is_validated_location_result
+
+        return not is_validated_location_result(content)
     if normalized_name == "set_local_reminder":
         action = str((tool_args or {}).get("action", "")).strip().lower()
         if action in REMINDER_EXTERNAL_READ_ACTIONS:

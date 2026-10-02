@@ -3488,45 +3488,34 @@ def _is_home(lat: float, lon: float, home_lat: float = 0.0, home_lon: float = 0.
 
 @tool
 def get_current_location() -> str:
-    """
-    Returns the last recorded GPS coordinate of {config.USER_NAME} from last_location.json.
-    Used to know where the user is in real-time.
+    """Return typed GPS data: current/stale/missing/invalid and configured home presence.
+
+    is_home=null means unknown; stale points do not establish current presence.
     """
     import json
-    import os
     import time
-    from datetime import datetime
     from config import GPS_STORAGE_FILE
-
-    if not os.path.exists(GPS_STORAGE_FILE):
-        return "📍 No recorded location found. Ask {config.USER_NAME} to send Live Location."
+    from core.location_result import finite_number, location_payload, LOCATION_MAX_AGE_SECONDS
+    from services.location_update import location_is_home
 
     try:
         with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            lat = data.get("lat")
-            lon = data.get("lon")
-            ts = data.get("timestamp", 0)
-
-            # Calculation of "freshness"
-            diff_minutes = int((time.time() - ts) / 60)
-            last_seen = datetime.fromtimestamp(ts).strftime('%H:%M:%S')
-
-            if diff_minutes > 1440:
-                return f"📍 Location is very old ({diff_minutes // 60}h old, last updated {last_seen})."
-
-            maps_link = f"https://maps.google.com/?q={lat},{lon}"
-            home_status = "🏠 Is HOME" if _is_home(float(lat), float(lon)) else "🚶 Is OUT of home"
-
-            return (
-                f"📍 Coordinates: {lat}, {lon}\n"
-                f"{home_status}\n"
-                f"🗺️ <a href='{maps_link}'>View on Map</a>\n"
-                f"⏱️ Updated {diff_minutes} minutes ago (at {last_seen})."
-            )
-
-    except Exception as e:
-        return f"❌ Error reading GPS: {str(e)}"
+        if not isinstance(data, dict):
+            return location_payload("invalid")
+        lat, lon, ts = (data.get(key) for key in ("lat", "lon", "timestamp"))
+        now = time.time()
+        if (not all(finite_number(value) for value in (lat, lon, ts))
+                or not -90 <= lat <= 90 or not -180 <= lon <= 180
+                or ts <= 0 or ts > now):
+            return location_payload("invalid")
+        if now - ts > LOCATION_MAX_AGE_SECONDS:
+            return location_payload("stale", lat, lon, ts)
+        return location_payload("current", lat, lon, ts, location_is_home(lat, lon))
+    except FileNotFoundError:
+        return location_payload("missing")
+    except (OSError, ValueError, TypeError):
+        return location_payload("invalid")
 
 @tool
 def control_spotify(

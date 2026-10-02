@@ -11,6 +11,12 @@ from starlette.requests import Request
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 
+@pytest.fixture(autouse=True)
+def isolated_external_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep legacy approval mocks independent of the owner's selected transport."""
+    monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "telegram")
+
+
 @pytest.mark.parametrize(
     "tool_name",
     [
