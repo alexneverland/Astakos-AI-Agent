@@ -2855,11 +2855,13 @@ def handle_message(
                         if getattr(msg, "type", "") == "tool":
                             from core.untrusted_content import (
                                 format_untrusted_tool_result,
-                                is_untrusted_external_tool_call,
+                                is_untrusted_external_tool_result_content,
                             )
                             tool_name = str(getattr(msg, "name", ""))
                             tool_args = tool_args_by_id.get(str(getattr(msg, "tool_call_id", "")), {})
-                            is_external = is_untrusted_external_tool_call(tool_name, tool_args)
+                            is_external = is_untrusted_external_tool_result_content(
+                                tool_name, tool_args, str(getattr(msg, "content", "")),
+                            )
                             if is_external:
                                 external_tool_names.add(tool_name)
                             tool_content = clean_message(getattr(msg, "content", "")).strip()

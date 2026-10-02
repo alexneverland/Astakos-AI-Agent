@@ -47,11 +47,13 @@ def _post_chat(
     active_draft_status: tuple[bool, str, dict | None] = (False, "missing", None),
     saved_local_draft: bool = False,
     voice_mode: bool = False,
+    graph_budget_exhausted: bool = False,
 ) -> tuple[object, dict[str, MagicMock]]:
     """Run one Web message under isolated completion and graph dependencies."""
     graph_runner = MagicMock(side_effect=lambda *args, **kwargs: {
         **_graph_result(*args, **kwargs),
         "saved_local_draft": saved_local_draft,
+        "graph_budget_exhausted": graph_budget_exhausted,
     })
     selector = MagicMock(
         side_effect=selector_returns
@@ -416,3 +418,16 @@ def test_web_routine_action_does_not_confirm_pending_asset(client: TestClient) -
     assert response.status_code == 200
     assert response.json()["response"] == "Natural graph reply."
     asset_confirmed.assert_not_called()
+
+
+def test_exhausted_web_turn_does_not_replace_result_with_draft_success(client: TestClient) -> None:
+    """A pending draft cannot overwrite the incomplete-turn response."""
+    with (
+        patch("core.utils.should_attach_linkedin_draft_reply", return_value=True),
+        patch("core.utils.build_linkedin_draft_ready_reply", side_effect=AssertionError("must not claim success")),
+        patch("core.utils.looks_like_terminal_messenger_draft_result", return_value=True),
+        patch("core.utils.build_messenger_draft_ready_reply", side_effect=AssertionError("must not claim success")),
+    ):
+        response, _ = _post_chat(client, graph_budget_exhausted=True)
+    assert response.status_code == 200
+    assert response.json()["response"] == "Natural graph reply."
