@@ -155,8 +155,7 @@ def test_boot_interrupt_cleans_adopted_child(monkeypatch, tmp_path):
 def test_matrix_group_fallback_targets_only_owned_tree(monkeypatch, failure):
     """Never kill a shim first and lose the ability to stop its descendants."""
     import boot
-    import subprocess
-    from types import SimpleNamespace
+    import services.windows_process_tree as windows_tree
     class Group:
         pid = 80
         matrix_process_group = True
@@ -170,21 +169,24 @@ def test_matrix_group_fallback_targets_only_owned_tree(monkeypatch, failure):
                 raise OSError("fixture")
         def wait(self, timeout):
             self.waits.append(timeout)
-            if self.running:
-                raise subprocess.TimeoutExpired("fixture", timeout)
             return 0
         def terminate(self):
             pytest.fail("Do not terminate the shim before its descendants")
     process = Group()
     called = []
-    def stop_tree(command, **kwargs):
-        called.append(command)
-        process.running = False
-        return SimpleNamespace(returncode=0)
-    monkeypatch.setattr(boot.subprocess, "run", stop_tree)
+    class Tree:
+        def __init__(self, pid):
+            called.append(pid)
+        def wait(self, timeout):
+            return not process.running
+        def terminate(self):
+            process.running = False
+        def close(self):
+            called.append("closed")
+    monkeypatch.setattr(windows_tree, "WindowsProcessTree", Tree)
     boot._terminate_child(process)
     assert not process.running
-    assert called == [["taskkill.exe", "/PID", "80", "/T", "/F"]]
+    assert called == [80, "closed"]
 
 
 def test_matrix_runtime_directories_are_gitignored() -> None:

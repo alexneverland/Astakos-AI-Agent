@@ -7,17 +7,18 @@ import pytest
 
 @pytest.mark.skipif(os.name != "nt", reason="Real Windows venv shim/worker lifecycle")
 @pytest.mark.parametrize("recovery", [False, True])
-def test_boot_cleanup_stops_real_venv_worker(tmp_path, monkeypatch, recovery):
+@pytest.mark.parametrize("mode", ["normal", "early-exit", "hung"])
+def test_boot_cleanup_stops_real_venv_worker(tmp_path, monkeypatch, recovery, mode):
     """Stopping the boot Popen must also stop its actual venv interpreter worker."""
     import ctypes
     import subprocess
     import time
     import boot
     from pathlib import Path
-    ready, stopped = tmp_path / "worker-pid", tmp_path / "stopped"
+    ready, stopped, draining = tmp_path / "worker-pid", tmp_path / "stopped", tmp_path / "draining"
     program = (
         "import os,signal,time; from pathlib import Path; "
-        "signal.signal(signal.SIGBREAK, lambda *a: (Path(" + repr(str(stopped)) + ").touch(), exit(0))); "
+        "signal.signal(signal.SIGBREAK, lambda *a: (Path(" + repr(str(draining)) + ").touch(), time.sleep(" + str(60 if mode == "hung" else 2) + "), Path(" + repr(str(stopped)) + ").touch(), exit(0))); "
         "Path(" + repr(str(ready)) + ").write_text(str(os.getpid()))\n"
         "for _ in range(1200): time.sleep(0.05)"
     )
@@ -62,9 +63,31 @@ def test_boot_cleanup_stops_real_venv_worker(tmp_path, monkeypatch, recovery):
         assert worker_pid != process.pid, "Fixture must exercise the actual venv shim"
         worker_handle = kernel.OpenProcess(0x100001, False, worker_pid)
         assert worker_handle
+        if mode != "normal":
+            original_signal = process.send_signal
+            def signal_then_exit_fixture_launcher(value):
+                original_signal(value)
+                deadline = time.monotonic() + 5
+                while not draining.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                assert draining.exists()
+                # Emulate the reported early launcher departure, never a live bot.
+                assert kernel.TerminateProcess(int(process._handle), 1)
+                process.wait(timeout=5)
+                assert not stopped.exists()
+            process.send_signal = signal_then_exit_fixture_launcher
+        if mode == "hung":
+            from services.windows_process_tree import WindowsProcessTree
+            original_wait = WindowsProcessTree.wait
+            monkeypatch.setattr(WindowsProcessTree, "wait", lambda self, timeout: original_wait(self, 0.15 if timeout == 120 else timeout))
         boot._terminate_child(process)
-        assert kernel.WaitForSingleObject(worker_handle, 1000) == 0
-        assert stopped.exists(), "The actual worker must run its graceful handler"
+        assert kernel.WaitForSingleObject(worker_handle, 0) == 0
+        assert host.poll() is None, "Cleanup must not touch the independent console host"
+        assert draining.exists(), "The actual worker must receive the graceful signal"
+        if mode == "normal":
+            assert stopped.exists(), "Normal shutdown must complete the graceful handler"
+        elif mode == "hung":
+            assert not stopped.exists()
     finally:
         kernel.FreeConsole()
         if worker_handle:

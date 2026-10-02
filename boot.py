@@ -53,23 +53,22 @@ def _terminate_child(process: subprocess.Popen | None) -> None:
     if process is None or process.poll() is not None:
         return
     if os.name == "nt" and getattr(process, "matrix_process_group", False):
+        from services.windows_process_tree import WindowsProcessTree
+        tree = WindowsProcessTree(process.pid)
         try:
-            process.send_signal(signal.CTRL_BREAK_EVENT)
-            process.wait(timeout=120)
-            return
-        except (OSError, subprocess.TimeoutExpired):
-            if process.poll() is not None:
-                return
-            # Only this still-owned launcher's descendants, never arbitrary
-            # Python processes. Do not terminate the shim before its tree.
-            result = subprocess.run(
-                ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
-            )
-            if result.returncode and process.poll() is None:
+            try:
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+                graceful = tree.wait(120)
+            except OSError:
+                graceful = False
+            if not graceful:
+                tree.terminate()
+            if not tree.wait(5):
                 raise RuntimeError("matrix_group_shutdown_failed")
             process.wait(timeout=5)
             return
+        finally:
+            tree.close()
     process.terminate()
     try:
         process.wait(timeout=10)

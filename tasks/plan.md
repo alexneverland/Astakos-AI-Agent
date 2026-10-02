@@ -115,6 +115,10 @@ All three slices are implemented: 112 focused tests passed, compilation and diff
 checks passed. Same-terminal output was verified with a disposable subprocess.
 The subsequent venv-worker cleanup review is addressed: 54 focused lifecycle
 tests pass, including native group shutdown of initial and recovery shim/workers.
+The launcher-exits-first follow-up retains process handles before signaling and
+awaits every captured identity, using those same handles for timeout cleanup.
+58 focused tests pass; early launcher departure is explicitly emulated in native
+fixtures (not claimed as naturally reproduced on this installed Python build).
 Live overnight terminal continuity is still pending. An already running watchdog
 must be normally restarted to load its own updated maintenance logic.
 

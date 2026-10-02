@@ -103,6 +103,12 @@ Unchecked entries in that dated snapshot are historical, not the active backlog.
   tree fallback. 54 focused lifecycle tests passed. Native venv fixtures verify
   actual worker handler/exits for both initial and recovery launches; permanent
   orphaning was not reproduced on this installed Python build.
+  Latest launcher-exits-first finding addressed with pre-signal retained Windows
+  handles and whole-snapshot wait/termination, independent of launcher lifetime.
+  58 focused tests passed. Native fixtures cover delayed handlers, explicitly
+  emulated early shim exit and a blocked handler with a shortened test deadline.
+  Delay alone did not reproduce native early shim departure on this Python build.
+  No production process control, nightly task changes or full-suite execution.
 - [x] Keep the watchdog and original terminal through the backup pause, with
   startup evidence logged as well as displayed; reject unrelated/live writers.
 - [x] Run focused lifecycle/capture tests and update the operator runbook.
