@@ -45,6 +45,11 @@ working directory. Observing the first scheduled execution remains pending.
 The 03:00 Matrix task is unchanged. Manual execution of the actual daily
 Scheduler task completed on 2026-10-02 in about 88 seconds (LastTaskResult=0,
 status=complete, 47 files). The timed 00:00 invocation remains to be observed.
+PR #212 Codex findings are addressed with failing-then-passing regressions:
+include persisted meal history and recipe library, and preserve supervisor
+recovery after descendant shutdown failure without overlapping old writers.
+26 focused backup/watchdog/launcher tests pass for this repair. The earlier
+47-file live capture predates the added skill data; no new live run is claimed.
 
 ## Remaining live verification
 

@@ -33,6 +33,9 @@ full-suite run.
   action, venv interpreter and working directory. The 03:00 Matrix job is unchanged.
 - [x] Run the actual Scheduler task manually: 2026-10-02 22:07:54 to 22:09:22
   local, LastTaskResult=0 and complete 47-file backup; original consoles resumed.
+- [x] Address PR #212 Codex findings: persist meal/recipe data in the package
+  and recover supervisors after descendant shutdown failure. 26 focused tests
+  pass; live evidence above predates the additional skill data.
 - [ ] Observe the first scheduled data-only backup and separately verify
   application-level recovery on an isolated installation.
 

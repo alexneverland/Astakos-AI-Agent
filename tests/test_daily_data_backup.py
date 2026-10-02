@@ -60,6 +60,28 @@ def test_missing_indexed_asset_fails_without_publishing_package(tmp_path: Path) 
     assert not (tmp_path / "backup.zip").exists()
 
 
+def test_package_preserves_nested_meal_history_and_saved_recipes(tmp_path: Path) -> None:
+    """Persisted skill data belongs in recovery; skill code and secrets do not."""
+    root = tmp_path / "installation"
+    root.mkdir()
+    fixture_tree(root)
+    skills = root / "astakos_skills"
+    skills.mkdir()
+    for name in ("food_history.json", "recipe_library.json"):
+        (skills / name).write_text('{"fixture": true}', encoding="utf-8")
+    (skills / "recipe_expert.py").write_text("fixture code")
+    (skills / "credentials.json").write_text("fixture secret")
+    archive = tmp_path / "backup.zip"
+    manifest = build_data_package(root, archive, assert_quiescent=lambda: None)
+    with zipfile.ZipFile(archive) as package:
+        for name in ("food_history.json", "recipe_library.json"):
+            member = f"astakos_skills/{name}"
+            assert member in manifest["files"]
+            assert json.loads(package.read(member)) == {"fixture": True}
+        assert "astakos_skills/recipe_expert.py" not in package.namelist()
+        assert "astakos_skills/credentials.json" not in package.namelist()
+
+
 def test_live_writer_guard_prevents_capture(tmp_path: Path) -> None:
     """Never copy stores when the coordinator cannot prove quiescence."""
     root = tmp_path / "installation"
@@ -154,6 +176,57 @@ def test_checkpoint_stops_owned_child_and_resumes_once(monkeypatch, tmp_path: Pa
     old.send_signal.assert_called_once()
     restart.assert_called_once()
     assert json.loads((tmp_path / ".daily-backup-matrix.json").read_text())["child_pid"] == 43
+
+
+@pytest.mark.parametrize("role", ["web", "matrix", "telegram"])
+def test_descendant_shutdown_failure_acknowledges_and_recovers_once(monkeypatch, tmp_path: Path, role: str) -> None:
+    """Abort capture but retain the supervisor and resume after old writers exit."""
+    old = MagicMock(pid=42)
+    old.poll.side_effect = [None, 0]
+    new = MagicMock(pid=43)
+    tree = MagicMock()
+    tree.wait.side_effect = [False, False, True]
+    from services import windows_process_tree
+    monkeypatch.setattr(windows_process_tree, "WindowsProcessTree", lambda _: tree)
+    held = iter([True, True, False])
+    monkeypatch.setattr(runtime, "pause_held", lambda root: next(held))
+    runtime.atomic_json(tmp_path / ".daily-backup-request.json", {
+        "nonce": "failed-drain", "at": time.time(),
+        "participants": {role: {"parent_pid": os.getpid(), "child_pid": 42}}})
+    restarted = []
+    def restart():
+        assert tree.wait.call_count == 3
+        restarted.append(new)
+        return new
+    def sleep(seconds):
+        assert not restarted
+        ack = json.loads((tmp_path / f".daily-backup-{role}-ack.json").read_text())
+        assert ack == {"nonce": "failed-drain", "error": "graceful_shutdown_failed"}
+    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    assert runtime.checkpoint(role, old, restart, root=tmp_path) is new
+    assert restarted == [new]
+    assert json.loads((tmp_path / f".daily-backup-{role}.json").read_text())["child_pid"] == 43
+    tree.close.assert_called_once()
+
+
+def test_shutdown_timeout_keeps_live_child_without_duplicate_restart(monkeypatch, tmp_path: Path) -> None:
+    """A still-running child must not be overlapped by a replacement writer."""
+    old = MagicMock(pid=42)
+    old.poll.return_value = None
+    old.wait.side_effect = runtime.subprocess.TimeoutExpired("fixture", 180)
+    tree = MagicMock()
+    from services import windows_process_tree
+    monkeypatch.setattr(windows_process_tree, "WindowsProcessTree", lambda _: tree)
+    held = iter([True, False])
+    monkeypatch.setattr(runtime, "pause_held", lambda root: next(held))
+    runtime.atomic_json(tmp_path / ".daily-backup-request.json", {
+        "nonce": "timeout", "at": time.time(),
+        "participants": {"matrix": {"parent_pid": os.getpid(), "child_pid": 42}}})
+    restart = MagicMock()
+    assert runtime.checkpoint("matrix", old, restart, root=tmp_path) is old
+    restart.assert_not_called()
+    assert json.loads((tmp_path / ".daily-backup-matrix-ack.json").read_text())["error"] == "graceful_shutdown_failed"
+    tree.close.assert_called_once()
 
 
 def test_real_packaging_finishes_and_resumes_before_any_upload(monkeypatch, tmp_path: Path) -> None:

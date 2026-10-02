@@ -70,29 +70,34 @@ def checkpoint(role: str, process: subprocess.Popen, restart: Callable[[], subpr
         return process
     tree = None
     stopped = process.poll() is not None
+    failed = False
     try:
-        if not stopped:
-            if os.name == "nt":
-                from services.windows_process_tree import WindowsProcessTree
-                tree = WindowsProcessTree(process.pid)
-            process.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT)
-            process.wait(timeout=180)
-            if tree is not None and not tree.wait(10):
-                raise BackupError("descendants_not_stopped")
-            stopped = True
-        atomic_json(root / f".daily-backup-{role}-ack.json", {"nonce": nonce, "parent_pid": os.getpid(), "stopped": True})
+        try:
+            if not stopped:
+                if os.name == "nt":
+                    from services.windows_process_tree import WindowsProcessTree
+                    tree = WindowsProcessTree(process.pid)
+                process.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT)
+                process.wait(timeout=180)
+                if tree is not None and not tree.wait(10):
+                    raise BackupError("descendants_not_stopped")
+            atomic_json(root / f".daily-backup-{role}-ack.json", {"nonce": nonce, "parent_pid": os.getpid(), "stopped": True})
+        except (OSError, subprocess.TimeoutExpired, BackupError):
+            failed = True
+            atomic_json(root / f".daily-backup-{role}-ack.json", {"nonce": nonce, "error": "graceful_shutdown_failed"})
         while pause_held(root):
             time.sleep(0.25)
+        if failed:
+            if process.poll() is None:
+                return process
+            # Preserve the supervisor, but never overlap a surviving old writer.
+            # The coordinator has already aborted; wait without force-killing.
+            while tree is not None and not tree.wait(10):
+                print(f"[Daily Backup]: {role} recovery waiting for old descendants.", flush=True)
+                time.sleep(1)
         replacement = restart()
         atomic_json(registry, {"parent_pid": os.getpid(), "child_pid": replacement.pid})
         return replacement
-    except (OSError, subprocess.TimeoutExpired) as error:
-        atomic_json(root / f".daily-backup-{role}-ack.json", {"nonce": nonce, "error": "graceful_shutdown_failed"})
-        while pause_held(root):
-            time.sleep(0.25)
-        if process.poll() is None:
-            return process
-        raise BackupError("shutdown_not_confirmed") from error
     finally:
         if tree is not None:
             tree.close()

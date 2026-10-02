@@ -12,7 +12,8 @@ parent be trashed. The separate 03:00 encrypted Matrix backup is unchanged.
 
 Include canonical SQLite databases and their cold WAL sidecars, the complete
 current Chroma directory, explicit runtime-state JSON files, personal persona,
-custom intents and indexed photo/document binaries. Exclude Git/code/tests,
+custom intents, persisted skill meal history/saved recipes, and indexed
+photo/document binaries. Exclude Git/code/tests,
 vendor, logs, TEMP, historical backups, unindexed outputs, credentials and .env.
 Record Git revision, inventory, checksums and indexed-file mappings in a manifest.
 Reject missing indexed assets, unsafe paths/links, concurrent runs, changes during
@@ -20,6 +21,11 @@ capture and unconfirmed writer shutdown. Never force-kill to manufacture success
 Failing capture/upload/recovery preserves the previous remote backup. Retention
 uses scoped parent, exact daily-backup identity and pagination, never broad Drive
 name matching. Partial uploads are not successful backups.
+
+On shutdown failure, acknowledge the failure so capture aborts and retain the
+supervisor. After pause release, keep an existing live child or wait for the
+captured old descendants to exit before restarting once. Never overlap writers
+or force-kill a descendant merely to restore availability.
 
 ## Implementation order
 
