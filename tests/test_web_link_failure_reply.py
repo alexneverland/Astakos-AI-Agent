@@ -74,3 +74,21 @@ def test_url_in_tool_error_is_not_a_user_supplied_link():
     ])
     assert i18n.t("core.utils.web_link_failure_reply") not in reply
     assert reply == i18n.t("core.utils.web_failure_reply", kind=i18n.t("prompts.ext_str_243"))
+
+
+@pytest.mark.parametrize("tool_name", ["research_web", "duckduckgo_search"])
+def test_url_without_failed_page_read_preserves_generic_failure(tool_name):
+    """A failed search is not evidence that the supplied page was opened."""
+    reply = build_web_failure_reply("https://example.org/item", [
+        (tool_name, f"[WEB_TOOL_ERROR][{tool_name}][reason=timeout] failed")
+    ])
+    assert reply == i18n.t("core.utils.web_failure_reply", kind=i18n.t("prompts.ext_str_243"))
+
+
+def test_successful_page_read_is_not_reported_as_failed():
+    """Even alongside another tool failure, readable page text is not a failure."""
+    reply = build_web_failure_reply("https://example.org/item", [
+        ("browse_url", "Readable product details"),
+        ("research_web", "[WEB_TOOL_ERROR][research_web][reason=timeout] failed"),
+    ])
+    assert i18n.t("core.utils.web_link_failure_reply") not in reply

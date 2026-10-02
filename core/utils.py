@@ -1079,11 +1079,13 @@ def build_web_failure_reply(user_text: str, tool_results: list) -> str:
 
     from core.capability_lookup import _looks_like_specific_web_target
 
-    if _looks_like_specific_web_target(user_text):
+    failed_page_reads = [
+        text for name, text in tool_results
+        if name == "browse_url" and looks_like_web_tool_error(text)
+    ]
+    if failed_page_reads and _looks_like_specific_web_target(user_text):
         reply = t("core.utils.web_link_failure_reply")
-        for name, result_text in reversed(tool_results):
-            if name != "browse_url":
-                continue
+        for result_text in reversed(failed_page_reads):
             # Parse the tool protocol only, never infer a cause from page/error prose.
             failure = re.match(r"^\[WEB_TOOL_ERROR\]\[browse_url\]\[reason=([a-z_]+)\]", result_text)
             if failure and failure.group(1) in {"timeout", "cloudflare", "generic"}:
