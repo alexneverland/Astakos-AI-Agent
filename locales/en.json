@@ -1850,7 +1850,13 @@
       "article_the": "the",
       "tool_result": "[Tool Result {name}]: {content}",
       "tool_call": "[Tool Call: {name}]",
-      "web_failure_reply": "Web sources failed. Please provide a specific link."
+      "web_failure_reply": "Web sources failed. Please provide a specific link.",
+      "web_link_failure_reply": "I could not reliably read the link you sent, so I cannot assess its contents. You can send a screenshot or paste the page details here.",
+      "web_failure_reasons": {
+        "cloudflare": "The tool reported that page protection prevented reading it.",
+        "timeout": "The tool reported that loading the page exceeded its time limit.",
+        "generic": "The page-reading tool encountered an error; the exact cause has not been confirmed."
+      }
     },
     "exceptions": {
       "routine_cooldown": "Routine #{id} on cooldown",
