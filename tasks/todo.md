@@ -1,6 +1,6 @@
 # Astakos: Current Tasks
 
-Last reconciled with the owner: 2026-10-02.
+Last reconciled with the owner: 2026-10-03.
 [plan.md](plan.md) defines scope and policy. Completed entries were removed from
 this active checklist; evidence remains in Git history, specs/runbooks and the
 [archive](archive/2026-10-02-todo.md). Archived unchecked items are not this backlog.
@@ -36,15 +36,18 @@ full-suite run.
 - [x] Address PR #212 Codex findings: persist meal/recipe data in the package
   and recover supervisors after descendant shutdown failure. 26 focused tests
   pass; live evidence above predates the additional skill data.
-- [ ] Observe the first scheduled data-only backup and separately verify
-  application-level recovery on an isolated installation.
+- [x] Observe the scheduled 2026-10-03 00:00 data-only run: complete, 47 files,
+  revision dd20296, LastTaskResult=0; finished at 00:00:47 local.
+- [ ] Separately verify application-level recovery on an isolated installation.
 
 ## Existing natural/live verification (preserved)
 
-- [ ] Observe the first timed 03:00 Matrix backup and original-terminal continuity.
-  PR #210 is merged; manual Scheduler invocation, encrypted private upload and
-  isolated server/bot restore are complete. The separate daily data backup now
-  has a 00:00 trigger and its new action is activated and manually verified.
+- [ ] Observe the next timed 03:00 Matrix backup after the headless-handle fix.
+  The 2026-10-03 timed run failed. Reproduction identified invalid inherited stdin
+  (WinError 6) in pythonw subprocess boundaries after console handoff. Explicit
+  DEVNULL input preserves fail-closed checks. A real Scheduler retry at 08:48:53
+  completed at 08:49:57 with LastTaskResult=0, encrypted verified upload and
+  the original watchdog/console restored. Safe stage diagnostics are retained.
 - [ ] Separately scope Element recovery-key and replacement-host verification.
   Current evidence does not prove complete client/host-loss recovery.
 - [ ] Observe normal behavioral commentary, topic opt-out/re-enable and one

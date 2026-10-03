@@ -41,10 +41,10 @@ reconnection, upload size/checksum and private permissions were verified; old
 daily folders were trashed and one managed ZIP remains active.
 Owner ran the registration script; Scheduler readback confirmed the 00:00
 trigger, scripts/nightly_data_backup.py action, venv interpreter and project
-working directory. Observing the first scheduled execution remains pending.
+working directory. The first scheduled execution succeeded on 2026-10-03.
 The 03:00 Matrix task is unchanged. Manual execution of the actual daily
 Scheduler task completed on 2026-10-02 in about 88 seconds (LastTaskResult=0,
-status=complete, 47 files). The timed 00:00 invocation remains to be observed.
+status=complete, 47 files). The timed 00:00 invocation also completed successfully.
 PR #212 Codex findings are addressed with failing-then-passing regressions:
 include persisted meal history and recipe library, and preserve supervisor
 recovery after descendant shutdown failure without overlapping old writers.
@@ -53,12 +53,20 @@ recovery after descendant shutdown failure without overlapping old writers.
 
 ## Remaining live verification
 
-1. **Matrix nightly backup:** observe the first timed 03:00 run and recovery in
+1. **Matrix nightly backup:** observe the next timed 03:00 run and recovery in
    the original visible terminal. PR #210 is merged; encrypted private Drive
    delivery, actual Scheduler invocation and isolated server/bot restore were
    already verified. Full Element key recovery and replacement-host recovery
    remain separately bounded verification, not a complete host-loss guarantee.
    Reference: [matrix-backup-recovery-spec.md](matrix-backup-recovery-spec.md).
+   The 2026-10-03 timed run failed in the headless stop guard. Native pythonw
+   reproduction showed WinError 6 with invalid inherited stdin. Non-interactive
+   backup subprocesses now use explicit DEVNULL input; stage/failure diagnostics
+   preserve the primary failure separately from recovery. Actual Scheduler retry
+   at 08:48:53 local completed at 08:49:57 with LastTaskResult=0, verified encrypted
+   upload and recovery under the same visible parent. Next timed run remains open.
+   The separate 00:00 data-only run succeeded on 2026-10-03: 47 files, revision
+   dd20296, completion at 00:00:47 local and LastTaskResult=0.
 2. **Behavioral conversation:** naturally observe relevant commentary, semantic
    topic opt-out/re-enable and an appropriate spontaneous opener. Reconcile new
    exceptions from actual observations. Implementation/offline tests are complete;

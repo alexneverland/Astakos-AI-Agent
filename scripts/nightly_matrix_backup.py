@@ -27,6 +27,46 @@ from services.matrix_backup import (
 from services.matrix_snapshot import SnapshotSettings, assert_bot_stopped, captured_snapshot
 
 
+def diagnostic_code(error: Exception) -> str:
+    """Expose only fixed local codes, never arbitrary exception messages."""
+    known_codes = {
+        "graceful_stop_timeout", "matrix_restart_not_verified", "matrix_restart_failed",
+        "matrix_bot_or_watchdog_running", "bot_quiescence_check_failed",
+        "visible_matrix_parent_required", "ambiguous_matrix_runtime",
+        "bot_console_attach_failed", "bot_signal_failed", "runtime_inspection_failed",
+        "snapshot_source_missing", "snapshot_containers_not_running",
+        "backup_destination_not_owner_only", "matrix_startup_in_progress",
+        "bot_runtime_store_mismatch", "synapse_mount_mismatch",
+    }
+    if isinstance(error, MatrixBackupError):
+        return str(error) if str(error) in known_codes else "matrix_backup_error"
+    if isinstance(error, OSError):
+        return "os_error"
+    if isinstance(error, subprocess.TimeoutExpired):
+        return "subprocess_timeout"
+    return "unexpected_error"
+
+
+def run_stage(work: Path, status: dict, stage: str, operation: Callable, *args) -> object:
+    """Persist stage boundaries and retain primary failure across recovery."""
+    status["stage"] = stage
+    try:
+        write_status(work, status)
+    except OSError:
+        if stage != "restore":
+            raise
+        # Telemetry must not prevent the mandatory runtime recovery attempt.
+    try:
+        return operation(*args)
+    except Exception as error:
+        if "failed_stage" not in status:
+            status.update(failed_stage=stage, error_code=diagnostic_code(error))
+        elif stage == "restore":
+            status["recovery_error_code"] = diagnostic_code(error)
+        write_status(work, status)
+        raise
+
+
 def write_status(work: Path, status: dict) -> None:
     """Atomically persist safe operational metadata, never raw exception text."""
     fd, name = tempfile.mkstemp(prefix="status-", dir=work)
@@ -49,15 +89,16 @@ def run_nightly(options: argparse.Namespace, runtime: object, *,
             status = {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}
             write_status(options.work_dir, status)
             try:
-                previous = runtime.preflight()
+                previous = run_stage(options.work_dir, status, "preflight", runtime.preflight)
                 try:
-                    runtime.stop(previous)
-                    result = capture()
+                    run_stage(options.work_dir, status, "stop", runtime.stop, previous)
+                    result = run_stage(options.work_dir, status, "capture", capture)
                     status.update(artifact=str(result.artifact), sha256=result.sha256)
                 finally:
-                    runtime.restore(previous)
-                file_id = upload(result.artifact, options.drive_folder, result.sha256)
-                status.update(status="uploaded", drive_file_id=file_id)
+                    run_stage(options.work_dir, status, "restore", runtime.restore, previous)
+                file_id = run_stage(options.work_dir, status, "upload", upload,
+                                    result.artifact, options.drive_folder, result.sha256)
+                status.update(status="uploaded", stage="complete", drive_file_id=file_id)
                 return status
             except Exception:
                 status.update(status="failed", code="nightly_backup_or_runtime_recovery_failed")
@@ -91,7 +132,7 @@ class WindowsRuntime:
     def powershell(command: str) -> str:
         """Execute fixed diagnostic commands with sanitized failure output."""
         result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
         if result.returncode:
             raise MatrixBackupError("runtime_inspection_failed")
