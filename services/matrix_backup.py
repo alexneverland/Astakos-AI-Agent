@@ -88,7 +88,7 @@ def secure_directory(path: Path) -> None:
             "if($LASTEXITCODE -ne 0){exit 1}; "
             "& icacls.exe $env:MATRIX_BACKUP_ACL_PATH /remove:d ('*'+$id) | Out-Null; "
             "if($LASTEXITCODE -ne 0){exit 1} }}",
-        ], env=env, capture_output=True, check=True, timeout=30)
+        ], env=env, stdin=subprocess.DEVNULL, capture_output=True, check=True, timeout=30)
         check = subprocess.run([
             "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
             "$a=[System.IO.Directory]::GetAccessControl($env:MATRIX_BACKUP_ACL_PATH); "
@@ -97,7 +97,7 @@ def secure_directory(path: Path) -> None:
             "$_.IdentityReference.Value "
             "-notin @($s,'S-1-5-18') -or $_.AccessControlType -ne 'Allow' }); "
             "if(-not $a.AreAccessRulesProtected -or $bad.Count -ne 0){exit 1}",
-        ], env=env, capture_output=True, timeout=30)
+        ], env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
         if check.returncode:
             raise MatrixBackupError("unsafe_staging_permissions")
     except Exception:
@@ -291,7 +291,7 @@ def create_encrypted_backup(
                     completed = runner([
                         settings.age_executable, "--encrypt", "-R", str(recipient),
                         "-o", str(partial), str(archive),
-                    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                        check=False, timeout=3600)
                     if completed.returncode != 0:
                         raise MatrixBackupError("encryption_failed")

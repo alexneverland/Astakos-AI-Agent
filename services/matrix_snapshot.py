@@ -95,7 +95,8 @@ def assert_bot_stopped() -> None:
     )
     try:
         result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=30)
         if result.returncode == 2:
             raise MatrixBackupError("matrix_bot_or_watchdog_running")
         if result.returncode:
@@ -156,11 +157,11 @@ def copy_frozen_file(source: Path, destination: Path) -> None:
 def docker_command(arguments: list[str], runner: Callable, *, output: Path | None = None) -> bytes:
     """Keep native binary dump output out of shell redirection and diagnostic logs."""
     if output is None:
-        result = runner(["docker", *arguments], stdout=subprocess.PIPE,
+        result = runner(["docker", *arguments], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                         stderr=subprocess.DEVNULL, check=False, timeout=180)
     else:
         with output.open("xb") as stream:
-            result = runner(["docker", *arguments], stdout=stream,
+            result = runner(["docker", *arguments], stdin=subprocess.DEVNULL, stdout=stream,
                             stderr=subprocess.DEVNULL, check=False, timeout=3600)
             stream.flush()
             os.fsync(stream.fileno())

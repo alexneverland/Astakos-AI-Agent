@@ -101,6 +101,100 @@ def test_upload_failure_is_not_success_but_runtime_is_running(options):
     assert "SECRET" not in (options.work_dir / "last-run.json").read_text()
 
 
+@pytest.mark.parametrize("stage", ["preflight", "stop", "capture", "restore", "upload"])
+def test_failure_stage_is_durable_and_diagnostics_are_bounded(options, stage):
+    """Keep actionable stage evidence without persisting arbitrary error text."""
+    import json
+    runtime = Runtime()
+    def fail(*args):
+        raise OSError("SECRET provider token and private path")
+    capture = lambda: SimpleNamespace(artifact=Path("fixture.age"), sha256="hash")
+    upload = lambda *args: "fixture-id"
+    if stage == "capture":
+        capture = fail
+    elif stage == "upload":
+        upload = fail
+    else:
+        setattr(runtime, stage, fail)
+    with pytest.raises(MatrixBackupError):
+        nightly.run_nightly(options, runtime, capture=capture, upload=upload)
+    status = json.loads((options.work_dir / "last-run.json").read_text())
+    assert status["failed_stage"] == stage
+    assert status["error_code"] == "os_error"
+    assert "SECRET" not in json.dumps(status)
+    assert "finished_at" in status
+
+
+def test_recovery_failure_does_not_erase_original_failure(options):
+    """Report both capture failure and recovery failure rather than masking one."""
+    import json
+    runtime = Runtime()
+    def capture():
+        raise OSError("SECRET capture")
+    def restore(previous):
+        raise MatrixBackupError("matrix_restart_not_verified")
+    runtime.restore = restore
+    with pytest.raises(MatrixBackupError):
+        nightly.run_nightly(options, runtime, capture=capture,
+                            upload=lambda *args: pytest.fail("No upload"))
+    status = json.loads((options.work_dir / "last-run.json").read_text())
+    assert status["failed_stage"] == "capture"
+    assert status["recovery_error_code"] == "matrix_restart_not_verified"
+    assert "SECRET" not in json.dumps(status)
+
+
+def test_restore_is_not_skipped_when_stage_status_write_fails(options, monkeypatch):
+    """An instrumentation failure must never bypass runtime recovery."""
+    runtime = Runtime()
+    original_write = nightly.write_status
+    def write(work, status):
+        if status.get("stage") == "restore":
+            raise OSError("fixture unavailable status sink")
+        original_write(work, status)
+    monkeypatch.setattr(nightly, "write_status", write)
+    nightly.run_nightly(options, runtime,
+                        capture=lambda: SimpleNamespace(artifact=Path("fixture.age"), sha256="hash"),
+                        upload=lambda *args: "fixture-id")
+    assert runtime.running and runtime.recovered
+
+
+@pytest.mark.skipif(nightly.os.name != "nt", reason="Native Windows pythonw handles")
+@pytest.mark.parametrize("boundary", ["powershell", "quiescence", "docker", "dump", "permissions"])
+def test_headless_scheduler_handles_do_not_break_subprocess_checks(tmp_path, boundary):
+    """Reproduce invalid stdin after console detach in a disposable pythonw process."""
+    import json
+    import subprocess
+    import sys
+    work = tmp_path / "diagnostic"
+    work.mkdir()
+    program = (
+        "import ctypes,subprocess; from pathlib import Path; "
+        "from scripts.nightly_matrix_backup import WindowsRuntime,write_status; "
+        "from services import matrix_snapshot as snapshot; "
+        "from services import matrix_backup_maintenance as maintenance; "
+        "kernel=ctypes.WinDLL('kernel32',use_last_error=True); kernel.FreeConsole(); "
+        "kernel.SetStdHandle(-10,ctypes.c_void_p(-1)); "
+        "actual_run=subprocess.run; "
+        "subprocess.run=lambda command,**kwargs: actual_run("
+        "['powershell.exe','-NoProfile','-NonInteractive','-Command','exit 0'],**kwargs); "
+        "maintenance.paused_watchdog_ids=lambda: []; "
+        + {
+            "powershell": "WindowsRuntime.powershell('exit 0'); ",
+            "quiescence": "snapshot.assert_bot_stopped(); ",
+            "docker": "snapshot.docker_command(['inspect','fixture'],subprocess.run); ",
+            "dump": "snapshot.docker_command(['exec','fixture'],subprocess.run,output=Path(" + repr(str(work / 'dump')) + ")); ",
+            "permissions": "from services.matrix_backup import secure_directory; secure_directory(Path(" + repr(str(work / 'private')) + ")); ",
+        }[boundary]
+        + "write_status(Path(" + repr(str(work)) + "),{'outcome':'success'})"
+    )
+    result = subprocess.run([str(Path(sys.executable).with_name("pythonw.exe")), "-c", program],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, timeout=20,
+                            creationflags=subprocess.CREATE_NO_WINDOW)
+    assert result.returncode == 0
+    assert json.loads((work / "last-run.json").read_text()) == {"outcome": "success"}
+
+
 @pytest.mark.parametrize("command,entry", [
     ('"C:\\astakos_v2\\venv\\Scripts\\python.exe" clients/matrix_bot.py', "clients/matrix_bot.py"),
     ('python.exe -u run_external.py', "run_external.py"),

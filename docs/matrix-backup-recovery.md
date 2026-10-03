@@ -380,7 +380,22 @@ public recipient remain; the vault is the retained recovery-identity location.
 Limitations: this is a same-host isolated restore, not a replacement-host or
 owner Element recovery-key test. Successful sync and crypto loading do not prove
 decryption of every old attachment/message or transparent client recovery after
-a server rollback. The first actual timed 03:00 run remains to be observed.
+a server rollback. The next timed 03:00 run after the headless-handle repair
+remains to be observed.
+
+### Headless Scheduler diagnostics
+
+The status file records `stage`, `failed_stage` and bounded `error_code` fields;
+`recovery_error_code` keeps a separate recovery failure without erasing the
+original failure. Arbitrary exception messages and secrets are not recorded.
+Non-interactive PowerShell, Docker, ACL and encryption subprocesses explicitly
+use DEVNULL stdin so an invalid console handle cannot break checks after handoff.
+
+The 2026-10-03 03:00 run failed. A native pythonw fixture reproduced WinError 6
+for inherited invalid stdin. The actual Scheduler retry with the repair completed
+at 08:49:57 local (about 63 seconds), LastTaskResult=0, with verified encrypted
+Drive delivery, healthy Synapse and Matrix resumed under the original watchdog.
+This is manual Scheduler evidence, not proof of the next timed invocation.
 
 ### Verification commands
 
