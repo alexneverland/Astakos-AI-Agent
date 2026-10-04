@@ -31,7 +31,9 @@ Offline regression reproduces the reported acknowledgement pollution and the
 Greek/English shift fact in different categories. Tests exercise final synthetic
 vector records and isolated profile storage, distinct weeks, failed/invalid model
 responses, and record changes during classification. Tool-then-sifter orchestration
-is covered without live providers or user data.
+is covered without live providers or user data. Stored photo-backed records are
+excluded from comparison, and photo provenance is revalidated after classification;
+both initial asset provenance and a concurrent provenance change have regressions.
 
 No cleanup of existing memories, original Chroma inspection, configuration,
 credentials, runtime changes, or full test-suite run. Natural model interpretation

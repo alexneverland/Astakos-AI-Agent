@@ -687,7 +687,7 @@ def _semantic_fact_duplicate(candidate: dict, query_emb: list[float]) -> tuple |
         ):
             metadata = dict(metadata or {})
             if (distance >= SIM_THRESHOLD_DISTANCE or "[USER_FACT]" not in document or len(document) > 2000
-                    or metadata.get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY)):
+                    or metadata.get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY) or metadata.get("photo_path")):
                 continue
             snapshots[record_id] = (record_id, document, metadata)
             nearby.append({"id": record_id, "fact": document[:2000],
@@ -747,7 +747,7 @@ class AstakosMemoryManager:
                         record_id, document, metadata = semantic_duplicate
                         current = _safe_chroma_get(ids=[record_id])
                         current_meta = (current.get("metadatas") or [{}])[0]
-                        fields = ("date", "time_scope", "category", "untrusted_external_tool_names")
+                        fields = ("date", "time_scope", "category", "untrusted_external_tool_names", "photo_path")
                         if (current.get("ids") == [record_id] and current.get("documents") == [document]
                                 and all(current_meta.get(key) == metadata.get(key) for key in fields)):
                             _audit_log("skip_duplicate", category=kwargs["category"], fact=fact[:100],

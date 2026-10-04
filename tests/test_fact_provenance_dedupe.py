@@ -109,7 +109,7 @@ def test_distinct_weeks_or_uncertain_comparison_preserve_both(isolated_store, mo
     assert len(vs.get_profile_facts()) == 2
 
 
-@pytest.mark.parametrize("change", ["text", "period", "deleted"])
+@pytest.mark.parametrize("change", ["text", "period", "deleted", "photo"])
 def test_changed_record_during_classification_is_not_suppressed(isolated_store, monkeypatch, change):
     manager, records = isolated_store
     assert manager.save("fact", fact="[USER_FACT] Lazaros works afternoons starting 2026-10-05.",
@@ -120,6 +120,8 @@ def test_changed_record_during_classification_is_not_suppressed(isolated_store, 
             records[0]["text"] = "[USER_FACT] This is now a different event."
         elif change == "period":
             records[0]["meta"]["time_scope"] = "2026-10-12"
+        elif change == "photo":
+            records[0]["meta"]["photo_path"] = "synthetic-photo.jpg"
         else:
             records.clear()
         return SimpleNamespace(text='{"duplicate_id": "0"}')
@@ -145,3 +147,23 @@ def test_failed_or_invalid_model_cannot_suppress_fact(isolated_store, monkeypatc
     assert manager.save("fact", fact="[USER_FACT] Different fact on 2026-10-12.",
                         category="lazaros", agent_name="sifter")
     assert len(records) == 2
+
+
+def test_photo_backed_record_cannot_suppress_user_fact(isolated_store, monkeypatch, tmp_path):
+    """An asset-derived stored fact is excluded even when its text is equivalent."""
+    manager, records = isolated_store
+    assert manager.save("fact", fact="[USER_FACT] Lazaros works afternoons starting 2026-10-05.",
+                        category="work", agent_name="photo",
+                        photo_path=str(tmp_path / "synthetic-photo.jpg"))
+    calls = []
+
+    def classify(*args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(text='{"duplicate_id": "0"}')
+
+    monkeypatch.setattr(gemini, "safe_gemini_call", classify)
+    assert manager.save("fact", fact="[USER_FACT] Ο Λάζαρος δουλεύει απόγευμα από 2026-10-05.",
+                        category="lazaros", agent_name="sifter")
+    assert not calls
+    assert len(records) == 2
+    assert len(vs.get_profile_facts()) == 2
