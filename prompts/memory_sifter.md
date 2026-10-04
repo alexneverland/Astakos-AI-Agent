@@ -28,6 +28,10 @@ RULES:
    - "lesson": technical lessons, bug fixes, rules.
    - "photos": photos/files with descriptions.
 8. Do not save simple courtesy replies, temporary drafts, jokes without future value.
+   USER_FACT must be grounded in the user's statements, not the assistant's acknowledgement,
+   wishes, or unconfirmed interpretation. Use context to resolve a user reference; do not
+   turn assistant-only claims into user facts. Preserve effective dates or periods separately
+   from the date the user reported them (e.g. next week's shift is not today's shift).
    If the new fact is an evolution of an existing state, use relation_type="follow_up" or "state_update".
 9. DO NOT save user questions - if the message is a question -> EMPTY.
 10. DO NOT save code editing session data: diffs, file paths, terminal outputs -> EMPTY.

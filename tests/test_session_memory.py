@@ -318,7 +318,7 @@ def test_memory_sifter_saves_temporary_family_memory_even_if_llm_returns_empty(m
     )
 
 
-def test_confirmed_memory_candidate_captures_family_watch():
+def test_contextual_gift_confirmation_defers_to_semantic_sifter():
     import datetime
     import memory.session_memory as session_memory
 
@@ -330,13 +330,9 @@ def test_confirmed_memory_candidate_captures_family_watch():
         now=datetime.datetime(2026, 6, 5, 19, 30),
     )
 
-    assert candidate["memory_type"] == "fact"
-    assert candidate["category"] == "family"
-    assert candidate["source"] == "telegram"
-    assert candidate["confidence"] == 0.9
-    assert "2026-06-05" in candidate["fact"]
-    assert "Rosefield Bangle S - White Gold" in candidate["fact"]
-    assert "Partner" in candidate["fact"]
+    # The user supplied a reference, not the product identity. An assistant
+    # confirmation must not become a user-authored fact without context resolution.
+    assert candidate is None
 
 
 def test_confirmed_memory_candidate_infers_project_category():

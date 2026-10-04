@@ -8,6 +8,8 @@ import memory.vector_store as vs
 from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
 from memory.vector_store import AstakosMemoryManager
 
+pytestmark = pytest.mark.usefixtures("offline_fact_storage")
+
 @pytest.fixture
 def memory_mgr():
     return AstakosMemoryManager()
