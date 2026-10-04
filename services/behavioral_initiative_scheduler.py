@@ -57,11 +57,19 @@ def run_behavioral_initiative_job() -> None:
         from services.external_delivery import external_delivery_router as router
         from services.routine_context import build_runtime_routine_context
 
-        def unavailable() -> bool:
+        def unavailable() -> bool | str:
             """Reuse owner quiet/mute state and stop/inactive-process gates."""
-            return (bot.shutdown_event.is_set() or bot._external_background_runtime_channel != resolve_external_channel()
-                    or bot.is_quiet_hours() or bot.is_proactive_muted()
-                    or has_recent_reminder_delivery(datetime.now()))
+            if bot.shutdown_event.is_set():
+                return "shutdown"
+            if bot._external_background_runtime_channel != resolve_external_channel():
+                return "inactive_runtime"
+            if bot.is_quiet_hours():
+                return "quiet_hours"
+            if bot.is_proactive_muted():
+                return "proactive_muted"
+            if has_recent_reminder_delivery(datetime.now()):
+                return "recent_reminder"
+            return False
 
         def send(channel: str, text: str, identity: str) -> Any:
             """Use stable Matrix identity; Telegram is single-attempt only."""

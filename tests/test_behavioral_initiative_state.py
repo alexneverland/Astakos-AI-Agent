@@ -44,3 +44,22 @@ def test_stable_history_identity_survives_repeat_and_restart(tmp_path):
     rows = load_messages(db_path=path)
     assert len(rows) == 1
     assert rows[0]["id"] == "behavioral-123"
+
+
+def test_optional_diagnostics_do_not_initialize_or_modify_delivery_state(tmp_path):
+    store = InitiativeStore(tmp_path / "state.json")
+    assert store.load_diagnostics() == {"last_check": None, "last_decision": None}
+    assert not list(tmp_path.iterdir())
+    event = {"reason": "model_no_topic", "model_evaluated": True}
+    store.record_diagnostic(event)
+    store.record_diagnostic({"reason": "already_evaluated", "model_evaluated": False})
+    assert store.load_diagnostics()["last_decision"] == event
+    assert not store.path.exists()
+
+
+def test_corrupt_telemetry_is_not_a_delivery_failure_or_exposed_payload(tmp_path):
+    store = InitiativeStore(tmp_path / "state.json")
+    store.diagnostic_path.write_text('{"version":1,"last_check":{"private_text":"secret"}}')
+    assert store.load_diagnostics()["error"] == "diagnostics_unavailable"
+    assert "secret" not in str(store.load_diagnostics())
+    assert store.load()["pending"] is None

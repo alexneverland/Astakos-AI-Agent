@@ -52,6 +52,9 @@ full-suite run.
   Current evidence does not prove complete client/host-loss recovery.
 - [ ] Observe normal behavioral commentary, topic opt-out/re-enable and one
   appropriate spontaneous opener during ordinary use, including non-repetition.
+- [ ] Observe initiative diagnostics on a natural scheduler tick: last check,
+  retained model evaluation and skip/error reason in Behavioral Patterns Debug.
+  Older evaluations have no recorded reason; do not infer one retrospectively.
 - [ ] Reconcile new behavioral exceptions from that observation. Known held
   delivery/recovery limitations are already documented in the plan and spec.
 

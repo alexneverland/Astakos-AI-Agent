@@ -30,6 +30,8 @@ def test_debug_behavioral_patterns_exposes_read_only_confirmed_candidates(monkey
         ]
 
     monkeypatch.setattr("memory.behavioral_event_state.list_events", fake_list_events)
+    monkeypatch.setattr("memory.behavioral_initiative_state.InitiativeStore.load_diagnostics",
+                        lambda _: {"last_check": None, "last_decision": None})
     client = TestClient(server)
 
     response = client.get(
@@ -57,6 +59,7 @@ def test_debug_behavioral_patterns_exposes_read_only_confirmed_candidates(monkey
             "required_distinct_dates": 3,
             "strongest_distinct_dates": 3,
         },
+        "initiative": {"last_check": None, "last_decision": None},
     }
 
 
@@ -86,8 +89,10 @@ def test_debug_dashboard_fetches_and_renders_behavioral_patterns():
     assert 'id="behavioral-patterns-section"' in dashboard
     assert "fetch('/debug/behavioral-patterns')" in dashboard
     assert "renderBehavioralPatterns" in dashboard
-    assert "renderBehavioralPatterns(pj.candidates || [], pj.summary || {})" in dashboard
-    assert "function renderBehavioralPatterns(candidates, summary)" in dashboard
+    assert "renderBehavioralPatterns(pj.candidates || [], pj.summary || {}, pj.initiative || {})" in dashboard
+    assert "function renderBehavioralPatterns(candidates, summary, initiative = {})" in dashboard
+    assert "escapeHtml(item.reason || '')" in dashboard
+    assert "initiative.last_decision" in dashboard
     assert "summary.confirmed_event_count" in dashboard
     assert "summary.strongest_distinct_dates" in dashboard
     assert "summary.required_distinct_dates" in dashboard

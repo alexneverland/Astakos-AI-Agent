@@ -38,6 +38,8 @@ behavioral_conversation_preferences.json.lock
 behavioral_initiative_state.json
 behavioral_initiative_state.json.lock
 .behavioral-initiative-*.tmp
+behavioral_initiative_state.diagnostics.json.lock
+.behavioral-diagnostic-*.tmp
 .behavioral-prefs-*.tmp
 last_location.json
 linkedin_draft.json

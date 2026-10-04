@@ -3453,10 +3453,13 @@ async def debug_behavioral_patterns(
         events = list_events(record_state="confirmed", initialize=False)
         candidates = aggregate_behavioral_pattern_candidates(events)
         summary = summarize_behavioral_pattern_progress(events)
+        from memory.behavioral_initiative_state import InitiativeStore
+
         return {
             "candidates": candidates,
             "count": len(candidates),
             "summary": summary,
+            "initiative": InitiativeStore(os.path.join(BASE_DIR, "behavioral_initiative_state.json")).load_diagnostics(),
         }
     except Exception:
         return {
