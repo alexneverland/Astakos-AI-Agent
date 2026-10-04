@@ -1,9 +1,20 @@
 # Astakos: Current Tasks
 
-Last reconciled with the owner: 2026-10-03.
+Last reconciled with the owner: 2026-10-04.
 [plan.md](plan.md) defines scope and policy. Completed entries were removed from
 this active checklist; evidence remains in Git history, specs/runbooks and the
 [archive](archive/2026-10-02-todo.md). Archived unchecked items are not this backlog.
+
+## Pending natural verification: user-fact provenance and dated duplicates
+
+Contract: [memory-fact-provenance-spec.md](memory-fact-provenance-spec.md).
+
+Implementation and the Codex photo-provenance correction are complete: 23 focused
+regressions pass. Existing memories are unchanged; cleanup is excluded.
+
+- [ ] Naturally observe a new dated update: no courtesy fact and no same-period
+  duplicate, while a genuinely different week's update remains distinct.
+  Model interpretation and extra background latency are not proven by offline fixtures.
 
 ## Pending live verification: vacuum/GPS and Web step boundary
 

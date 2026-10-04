@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: MIT
 # ================================================================
 
-from core.i18n import t
+from core.i18n import t, load_prompt
 import os
 import json
 import threading
@@ -656,6 +656,57 @@ def decide_memory_overwrite(
     }
 
 
+def _fact_duplicate_model_response(prompt: str) -> str:
+    """Call the helper model once, without holding database locks."""
+    from services.gemini import safe_gemini_call
+
+    return safe_gemini_call(prompt, retries=1).text
+
+
+def _semantic_fact_duplicate(candidate: dict, query_emb: list[float]) -> tuple | None:
+    """Classify nearby fact equivalence outside storage locks; never delete records."""
+    from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+    fact = str(candidate.get("fact") or "")
+    if ("[USER_FACT]" not in fact or len(fact) > 2000
+            or candidate.get("external_content_sources") or candidate.get("photo_path")):
+        return None
+    try:
+        with vector_lock, _cross_process_lock():
+            result = _safe_chroma_query(
+                query_embeddings=[query_emb], n_results=5,
+                include=["documents", "metadatas", "distances"],
+            )
+        if result.get("_error"):
+            return None
+        nearby = []
+        snapshots = {}
+        for record_id, document, metadata, distance in zip(
+            (result.get("ids") or [[]])[0], (result.get("documents") or [[]])[0],
+            (result.get("metadatas") or [[]])[0], (result.get("distances") or [[]])[0],
+        ):
+            metadata = dict(metadata or {})
+            if (distance >= SIM_THRESHOLD_DISTANCE or "[USER_FACT]" not in document or len(document) > 2000
+                    or metadata.get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY) or metadata.get("photo_path")):
+                continue
+            snapshots[record_id] = (record_id, document, metadata)
+            nearby.append({"id": record_id, "fact": document[:2000],
+                           "date": metadata.get("date"), "time_scope": metadata.get("time_scope"),
+                           "category": metadata.get("category")})
+        if not nearby:
+            return None
+        data = {"proposed": {"fact": fact[:2000], "date": datetime.now().strftime("%Y-%m-%d"),
+                             "time_scope": candidate.get("time_scope"), "category": candidate.get("category")},
+                "recorded": nearby}
+        prompt = load_prompt("memory_fact_duplicate.md").replace("{{data}}", json.dumps(data, ensure_ascii=False))
+        answer = json.loads(_fact_duplicate_model_response(prompt))
+        record_id = answer.get("duplicate_id") if isinstance(answer, dict) else None
+        return snapshots.get(record_id) if isinstance(record_id, str) else None
+    except Exception:
+        # Provider/parse failures cannot authorize suppressing a new fact.
+        return None
+
+
 class AstakosMemoryManager:
     """Central Memory Manager — the ONE and ONLY write point."""
 
@@ -689,8 +740,23 @@ class AstakosMemoryManager:
                 traceback.print_exc()
                 return False
 
+            semantic_duplicate = _semantic_fact_duplicate(kwargs, query_emb)
             with vector_lock, memory_lock, _cross_process_lock():
                 try:
+                    if semantic_duplicate is not None:
+                        record_id, document, metadata = semantic_duplicate
+                        current = _safe_chroma_get(ids=[record_id])
+                        current_meta = (current.get("metadatas") or [{}])[0]
+                        fields = ("date", "time_scope", "category", "untrusted_external_tool_names", "photo_path")
+                        if (current.get("ids") == [record_id] and current.get("documents") == [document]
+                                and all(current_meta.get(key) == metadata.get(key) for key in fields)):
+                            _audit_log("skip_duplicate", category=kwargs["category"], fact=fact[:100],
+                                       existing=document[:100], comparison="semantic_same_period")
+                            self._trigger_routine_reconciler(
+                                fact, kwargs["category"], kwargs.get("reason", "agent_inferred"),
+                                external_content_sources=kwargs.get("external_content_sources"),
+                            )
+                            return False
                     return self._save_fact(query_emb=query_emb, doc_emb=doc_emb, **kwargs)
                 except (EmbeddingsProviderSetupRequired, ProviderAuthError) as exc:
                     print(

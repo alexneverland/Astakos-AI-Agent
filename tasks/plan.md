@@ -1,9 +1,20 @@
 # Astakos: Current Plan
 
-Last reconciled with the owner: 2026-10-02.
+Last reconciled with the owner: 2026-10-04.
 Only active work is listed here; [todo.md](todo.md) records its status.
 Completed evidence remains in Git history and existing specs/runbooks.
 The [archived plan](archive/2026-10-02-plan.md) is not an active queue.
+
+## Pending natural verification: memory fact provenance and dated duplicates
+
+Contract: [memory-fact-provenance-spec.md](memory-fact-provenance-spec.md).
+Keep assistant acknowledgements out of deterministic USER_FACT writes; compare
+nearby facts through the canonical save path across categories and languages,
+preserving distinct periods and new information. Recheck a selected duplicate
+after classification, outside-lock model calls, and label Debug distance correctly.
+No existing-memory cleanup or original Chroma access. Offline final-storage tests
+are implemented, including the Codex correction for stored photo provenance;
+natural provider interpretation and latency remain to observe.
 
 ## Completed implementation: vacuum/GPS and bounded Web turns
 

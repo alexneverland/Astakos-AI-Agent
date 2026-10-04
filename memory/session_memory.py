@@ -1057,28 +1057,17 @@ def _extract_confirmed_memory_candidate(
     if len(source_text) < 8 and len(confirmation_text) < 20:
         return None
 
-    # Explicit confirmation from the AI is required — and whether the user gave explicit
-    # "Remember that X", we keep X, not meta-text like
-    # "the user requested to save".of_thought
-    detail = None
-    explicit_payload = _extract_explicit_memory_payload(source_text)
-    if confirmation_text:
-        memory_match = re.search(
-            t("prompts.ext_n_0_220"),
-            confirmation_text,
-            flags=re.IGNORECASE,
-        )
-        if memory_match:
-            detail = memory_match.group(0).strip()
-    if not detail:
-        # AI did not explicitly confirm → bypass, the LLM sifter will decide
+    # Confirmation is evidence of acknowledgement, never the fact's author.
+    # Context-dependent confirmations are resolved by the semantic sifter instead.
+    detail = _extract_explicit_memory_payload(source_text)
+    if not detail or not re.search(
+        t("prompts.ext_n_0_220"), confirmation_text, flags=re.IGNORECASE
+    ):
         return None
-    if explicit_payload and _looks_like_generic_memory_confirmation(detail):
-        detail = explicit_payload
     if len(detail) > 300:
         detail = detail[:297].rstrip() + "..."
 
-    category = _infer_memory_category(f"{safe_user} {safe_ai}")
+    category = _infer_memory_category(safe_user)
 
     ts = now or datetime.now()
     fact = t("memory.session_memory.user_fact", date=ts.strftime('%Y-%m-%d'), text=detail)
