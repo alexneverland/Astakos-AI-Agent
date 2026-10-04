@@ -1549,7 +1549,7 @@ async function fetchBehavioralPatterns(force = false) {
       renderBehavioralPatternLoadError();
       return;
     }
-    renderBehavioralPatterns(pj.candidates || [], pj.summary || {});
+    renderBehavioralPatterns(pj.candidates || [], pj.summary || {}, pj.initiative || {});
   } catch(e) {
     renderBehavioralPatternLoadError();
   } finally {
@@ -1579,14 +1579,24 @@ function behavioralPatternProgressText(summary) {
 }
 
 
-function renderBehavioralPatterns(candidates, summary) {
+function renderBehavioralPatterns(candidates, summary, initiative = {}) {
   const container = document.getElementById('behavioral-patterns-section');
   if (!container) return;
   const progressText = behavioralPatternProgressText(summary);
+  const diagnosticLine = (label, item) => item
+    ? '<p>' + label + ': ' + escapeHtml(item.at || '') + ' · '
+      + escapeHtml(item.reason || '') + ' · ' + escapeHtml(item.channel || '')
+      + (item.error_type ? ' · ' + escapeHtml(item.error_type) : '') + '</p>'
+    : '<p>' + label + ': No recorded check yet.</p>';
+  const diagnostics = '<h3>Spontaneous conversation</h3>'
+    + diagnosticLine('Last check', initiative.last_check)
+    + diagnosticLine('Last model evaluation', initiative.last_decision)
+    + (initiative.error ? '<p class="err">Diagnostics unavailable.</p>' : '')
+    + '<p style="color:var(--muted);font-size:12px">already_evaluated retains the previous decision; no extra model call. Reasons describe observed gates, not inferred model motives.</p>';
   if (!candidates.length) {
     container.innerHTML = '<div class="card" style="grid-column:span 2"><h2>🔎 BEHAVIORAL PATTERNS</h2>'
       + '<p role="status">' + progressText + '</p>'
-      + '<p style="color:var(--muted)">No confirmed patterns with enough evidence yet.</p></div>';
+      + '<p style="color:var(--muted)">No confirmed patterns with enough evidence yet.</p>' + diagnostics + '</div>';
     enhanceRenderedDashboard(container);
     return;
   }
@@ -1606,7 +1616,7 @@ function renderBehavioralPatterns(candidates, summary) {
     + '<p role="status">' + progressText + '</p>'
     + '<p style="color:var(--muted);font-size:12px">Read-only observations from confirmed events; they do not change routines, memory, or prompts.</p>'
     + '<div style="overflow-x:auto"><table><tr><th>Type</th><th>Action</th><th>Category</th><th>Subject</th><th>Item</th><th>Status</th><th>Events</th><th>First</th><th>Last</th></tr>'
-    + rows + '</table></div></div>';
+    + rows + '</table></div>' + diagnostics + '</div>';
   enhanceRenderedDashboard(container);
 }
 

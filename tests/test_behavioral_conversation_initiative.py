@@ -221,3 +221,45 @@ def test_cross_process_lock_excludes_second_sender(tmp_path):
     with FileLock(str(kw["store"].path) + ".lock"):
         assert run_initiative(**kw) == "held"
     assert not sent
+
+
+def test_diagnostics_preserve_model_decline_across_cached_polls(tmp_path):
+    kw, sent, _ = setup(tmp_path)
+    kw["classify"] = lambda _: dict(selected_index=None, blocked=False,
+                                   recently_discussed=False, message="")
+    assert run_initiative(**kw) == "skip"
+    assert run_initiative(**kw) == "skip"
+    diagnostic = kw["store"].load_diagnostics()
+    assert diagnostic["last_check"]["reason"] == "already_evaluated"
+    assert diagnostic["last_decision"]["reason"] == "model_no_topic"
+    assert diagnostic["last_decision"]["candidate_count"] == 1
+    assert not sent
+
+
+@pytest.mark.parametrize("condition,reason", [
+    ("quiet", "quiet_hours"), ("model", "model_error"),
+    ("transport", "delivery_error"), ("invalid", "invalid_model_decision"),
+])
+def test_diagnostic_reason_is_safe_and_does_not_change_delivery(tmp_path, condition, reason):
+    kw, sent, _ = setup(tmp_path)
+    if condition == "quiet":
+        kw["unavailable"] = lambda: "quiet_hours"
+    elif condition == "model":
+        kw["classify"] = lambda _: (_ for _ in ()).throw(RuntimeError("SECRET_PRIVATE_TEXT"))
+    elif condition == "transport":
+        kw["sender"] = lambda *args: (_ for _ in ()).throw(OSError("SECRET_PRIVATE_TEXT"))
+    else:
+        kw["classify"] = lambda _: {"message": "SECRET_PRIVATE_TEXT"}
+    assert run_initiative(**kw) in {"skip", "held"}
+    diagnostic = kw["store"].load_diagnostics()
+    assert diagnostic["last_check"]["reason"] == reason
+    assert "SECRET_PRIVATE_TEXT" not in str(diagnostic)
+    assert not sent
+
+
+def test_diagnostics_failure_cannot_prevent_or_repeat_delivery(tmp_path, monkeypatch):
+    kw, sent, _ = setup(tmp_path)
+    monkeypatch.setattr(kw["store"], "record_diagnostic", lambda _: (_ for _ in ()).throw(OSError()))
+    assert run_initiative(**kw) == "delivered"
+    assert run_initiative(**kw) == "skip"
+    assert len(sent) == 1

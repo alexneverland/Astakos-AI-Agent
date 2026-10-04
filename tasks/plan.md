@@ -72,6 +72,11 @@ recovery after descendant shutdown failure without overlapping old writers.
    exceptions from actual observations. Implementation/offline tests are complete;
    do not manufacture live messages to claim provider verification.
    Reference: [behavioral-conversation-spec.md](behavioral-conversation-spec.md).
+   Initiative telemetry keeps the last check and last model evaluation separately
+   in `behavioral_initiative_state.diagnostics.json`, shown by the authenticated
+   behavioral Debug section. Gate/decision/error codes explain skips without
+   recording chat text, model output or exception messages. Cached polls retain
+   the last evaluation; telemetry failure cannot change send/approval behavior.
 
 ## Standing boundaries, not pending tasks
 

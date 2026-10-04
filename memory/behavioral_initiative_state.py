@@ -20,6 +20,55 @@ class InitiativeStore:
         """Serialize workers without blocking the scheduler on another worker."""
         return FileLock(str(self.path) + ".lock", timeout=0)
 
+    @property
+    def diagnostic_path(self) -> Path:
+        """Keep optional telemetry separate from the authoritative send ledger."""
+        return self.path.with_suffix(".diagnostics.json")
+
+    def load_diagnostics(self) -> dict[str, Any]:
+        """Read the last check and model evaluation without creating files."""
+        try:
+            raw = json.loads(self.diagnostic_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict) or raw.get("version") != 1:
+                raise ValueError("Invalid diagnostic state")
+            allowed = {"run_id", "entry_point", "reason", "stage", "model_evaluated",
+                       "result", "at", "channel", "candidate_count", "selected_index",
+                       "blocked", "recently_discussed", "error_type"}
+            result: dict[str, Any] = {}
+            for key in ("last_check", "last_decision"):
+                item = raw.get(key)
+                if item is not None and (not isinstance(item, dict) or not set(item) <= allowed):
+                    raise ValueError("Invalid diagnostic entry")
+                if item is not None and any(
+                    not (value is None or type(value) in (bool, int) or
+                         (isinstance(value, str) and len(value) <= 160))
+                    for value in item.values()
+                ):
+                    raise ValueError("Invalid diagnostic value")
+                result[key] = item
+            return result
+        except FileNotFoundError:
+            return {"last_check": None, "last_decision": None}
+        except (OSError, ValueError):
+            return {"last_check": None, "last_decision": None, "error": "diagnostics_unavailable"}
+
+    def record_diagnostic(self, event: dict[str, Any]) -> None:
+        """Atomically retain bounded metadata; callers isolate telemetry failures."""
+        with FileLock(str(self.diagnostic_path) + ".lock", timeout=0):
+            previous = self.load_diagnostics()
+            state = {"version": 1, "last_check": event,
+                     "last_decision": event if event.get("model_evaluated") else previous["last_decision"]}
+            descriptor, temporary = tempfile.mkstemp(prefix=".behavioral-diagnostic-", suffix=".tmp", dir=self.path.parent)
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    json.dump(state, stream, ensure_ascii=False)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, self.diagnostic_path)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+
     @staticmethod
     def _validate(state: Any) -> None:
         """Validate persisted delivery identities and receipt lifecycle."""
