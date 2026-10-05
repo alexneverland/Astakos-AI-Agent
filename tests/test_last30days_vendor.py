@@ -2,6 +2,7 @@
 
 import ast
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -36,6 +37,24 @@ def _adapter() -> dict:
 def test_release_is_pinned() -> None:
     """The shipped skill must advertise the reviewed release."""
     assert 'version: "3.26.0"' in (SKILL / "SKILL.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("http_status", ["fixture-private-password", {"password": "fixture-private-password"}, True, 99, 600, 401])
+def test_public_auth_http_status_is_bounded_integer(http_status) -> None:
+    """The CodeQL-tainted HTTP field cannot carry provider strings or objects."""
+    tree = ast.parse((SKILL / "scripts/last30days.py").read_text(encoding="utf-8"))
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "public_device_auth_result")
+    namespace = {"re": re}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), "public_auth", "exec"), namespace)
+    public = namespace["public_device_auth_result"]({
+        "status": "error", "http_status": http_status,
+        "api_key": "fixture-private-password", "detail": "fixture-private-password",
+    })
+    if type(http_status) is int and 100 <= http_status <= 599:
+        assert public["http_status"] == http_status
+    else:
+        assert "http_status" not in public
+    assert "fixture-private-password" not in str(public)
 
 
 def test_python311_uses_verified_path_interpreter(monkeypatch) -> None:

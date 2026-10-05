@@ -63,3 +63,10 @@ provider result. It omits API keys, private device handles, unknown fields and
 free-form provider message/error bodies. Public authorization codes, status,
 HTTP status and persistence outcome remain available. Key persistence still
 uses the private result and is tested without writing real configuration.
+
+The remaining CodeQL alert #72 on commit `6c1a1fa` traces
+`fetch_api_key()`'s aggregate result through its `http_status` field to the
+public JSON. This particular flow is a false positive: the output accepts only
+an exact `int` in the HTTP status range 100..599, not provider strings, objects
+or booleans. Focused regression cases verify this boundary. No CodeQL rule is
+suppressed or disabled; the original raw-result output remains removed.
