@@ -5,6 +5,17 @@ Only active work is listed here; [todo.md](todo.md) records its status.
 Completed evidence remains in Git history and existing specs/runbooks.
 The [archived plan](archive/2026-10-02-plan.md) is not an active queue.
 
+## Current repair: shift temporal provenance
+
+Contract: [shift-temporal-provenance-spec.md](shift-temporal-provenance-spec.md).
+Preserve the semantic schedule end rather than interpreting a memory recording
+date as its effective start. Prevent the legacy fallback from overwriting that
+decision; uncertain dated facts must not change the existing schedule. Validate
+structured dates/values without new phrase lists. Offline persistence and
+Sunday/Monday resolver coverage and explicit cancellation are implemented;
+the Codex finding is addressed with 122 passing focused tests. Only natural
+live model interpretation remains pending. Backup documentation stays separate.
+
 ## Pending natural verification: memory fact provenance and dated duplicates
 
 Contract: [memory-fact-provenance-spec.md](memory-fact-provenance-spec.md).
