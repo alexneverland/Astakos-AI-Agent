@@ -1,6 +1,6 @@
 ---
 name: spec-driven-development
-description: Creates specs before coding. Use when starting a new project, feature, or significant change and no specification exists yet. Use when requirements are unclear, ambiguous, or only exist as a vague idea. Use when a single requirement spans several independently testable capabilities and needs decomposing into a capability map of modules before specifying.
+description: Creates specs before coding. Use when starting a new project, feature, or significant change and no specification exists yet. Use when drafting a PRD or requirements document with objectives and scope, or when requirements are unclear, ambiguous, or only exist as a vague idea. Use when a single requirement spans several independently testable capabilities and needs decomposing into a capability map of modules before specifying.
 ---
 
 # Spec-Driven Development
@@ -147,6 +147,12 @@ Don't silently fill in ambiguous requirements. The spec's entire purpose is to s
 [Anything unresolved that needs human input]
 ```
 
+**External spec tools:** This workflow is format-agnostic. If the project
+already uses OpenSpec or another specification system, keep that system's
+artifact format and storage conventions instead of creating a duplicate
+`SPEC.md`. This skill owns the clarification, content, and approval gates; the
+external tool owns how the approved spec is represented.
+
 **Reframe instructions as success criteria.** When receiving vague requirements, translate them into concrete conditions:
 
 ```
@@ -160,6 +166,12 @@ REFRAMED SUCCESS CRITERIA:
 ```
 
 This lets you loop, retry, and problem-solve toward a clear goal rather than guessing what "faster" means.
+
+**Stop after writing the spec (CRITICAL).** Once the spec is saved:
+
+1. Summarize it and list any Open Questions.
+2. Ask the human to approve it or request changes.
+3. **STOP YOUR TURN IMMEDIATELY.** Do NOT start Phase 2, invoke `planning-and-task-breakdown`, or write code in this turn. Planning starts only after the human approves the spec in a later turn.
 
 ### Phase 2: Plan
 
@@ -229,6 +241,7 @@ The spec is a living document, not a one-time artifact:
 - Implementing features not mentioned in any spec or task list
 - Making architectural decisions without documenting them
 - Skipping the spec because "it's obvious what to build"
+- Writing the spec and starting the plan or code in the same turn
 - One spec whose requirements span several independently testable capabilities
 - Module boundaries or build order decided implicitly during implementation because no capability map was approved up front
 
@@ -238,6 +251,7 @@ Before proceeding to implementation, confirm:
 
 - [ ] The spec covers all six core areas
 - [ ] The human has reviewed and approved the spec
+- [ ] The turn ended after saving the spec; approval came in a later turn
 - [ ] Success criteria are specific and testable
 - [ ] Boundaries (Always/Ask First/Never) are defined
 - [ ] The spec is saved to a file in the repository

@@ -2,7 +2,6 @@
 
 "use strict";
 
-const { execFileSync } = require("node:child_process");
 const { existsSync, readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
 
@@ -18,29 +17,25 @@ const manifestPaths = [
 ];
 
 function readManifestVersion(manifestPath) {
-  const manifest = JSON.parse(
-    readFileSync(resolve(vendorRoot, manifestPath), "utf8"),
-  );
+  const manifest = JSON.parse(readFileSync(resolve(vendorRoot, manifestPath), "utf8"));
   return manifest.version ?? manifest.plugins?.[0]?.version;
 }
 
 function readExpectedVersion() {
   if (existsSync(provenancePath)) {
-    const provenance = readFileSync(provenancePath, "utf8");
-    const match = provenance.match(/^- Release: `([^`]+)`$/m);
+    const match = readFileSync(provenancePath, "utf8").match(/^- Release: `([^`]+)`$/m);
     if (!match) {
       throw new Error(`${provenancePath} is missing a release entry`);
     }
     return match[1];
   }
-
-  return execFileSync("git", ["describe", "--tags", "--abbrev=0"], {
-    cwd: vendorRoot,
-    encoding: "utf8",
-  }).trim();
+  return readManifestVersion("plugin.json");
 }
 
 const expectedVersion = readExpectedVersion();
+if (!expectedVersion) {
+  throw new Error("plugin.json is missing a version field");
+}
 
 for (const manifestPath of manifestPaths) {
   const version = readManifestVersion(manifestPath);
