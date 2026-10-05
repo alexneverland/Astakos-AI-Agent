@@ -143,8 +143,12 @@ def test_scheduler_sends_nothing_for_the_just_recorded_kaggle_result():
     ("decision", "should_send"),
     [
         ('{"related_memory_ids": []}', True),
+        ('```json\n{"related_memory_ids": []}\n```', True),
+        ('Result:\n```json\n{"related_memory_ids": []}\n```', True),
         ('{"related_memory_ids": ["m1"]}', False),
+        ('```json\n{"related_memory_ids": ["m1"]}\n```', False),
         ('{"related_memory_ids": ["unknown"]}', False),
+        ('```json\n{"related_memory_ids": ["unknown"]}\n```', False),
         ('{"related_memory_ids": "m1"}', False),
         ('{"related_memory_ids": null}', False),
         ("not JSON", False),
@@ -167,7 +171,7 @@ def test_due_goal_requires_semantic_activity_not_just_nearest_memories(
         "documents": [["Went to the park", "Afternoon work shift", "Bought groceries"]],
         "metadatas": [[{"timestamp": (now - timedelta(days=1)).timestamp()}] * 3],
     }
-    if decision == '{"related_memory_ids": ["m1"]}':
+    if decision in ('{"related_memory_ids": ["m1"]}', '```json\n{"related_memory_ids": ["m1"]}\n```'):
         result["documents"][0][0] = "Improved the Kaggle submission today"
     clients_dir = tmp_path / "clients"
     clients_dir.mkdir()

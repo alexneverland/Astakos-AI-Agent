@@ -76,6 +76,7 @@ def recent_memories_show_goal_activity(
     """Semantically verify retrieved evidence; unavailable decisions raise for deferral."""
     from core.i18n import load_prompt
     from core.untrusted_content import format_untrusted_persisted_content
+    from core.utils import extract_json_from_text
     from services.gemini import safe_gemini_call
 
     if results.get("_error"):
@@ -110,7 +111,7 @@ def recent_memories_show_goal_activity(
     prompt = load_prompt("goal_followup_memory_activity.md").replace(
         "{{data}}", json.dumps(data, ensure_ascii=False),
     )
-    decision = json.loads(safe_gemini_call(prompt, retries=1).text)
+    decision = extract_json_from_text(safe_gemini_call(prompt, retries=1).text)
     related = decision.get("related_memory_ids") if isinstance(decision, dict) else None
     supplied_ids = {memory["id"] for memory in memories}
     if not isinstance(related, list) or any(
