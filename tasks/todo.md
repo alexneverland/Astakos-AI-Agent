@@ -12,7 +12,8 @@ Contract: [shift-temporal-provenance-spec.md](shift-temporal-provenance-spec.md)
 - [x] Reproduce the Sunday expiry overwrite and prevent conflicting fallback writes.
 - [x] Validate semantic dates/shift values and cover final state across Monday.
 - [ ] Naturally observe a weekly shift staying effective after the date boundary.
-- [ ] Review the scoped PR. No stored-memory cleanup is included.
+- [x] Address the Codex cancellation finding; 122 focused tests pass.
+  No stored-memory cleanup is included.
 
 ## Pending natural verification: user-fact provenance and dated duplicates
 

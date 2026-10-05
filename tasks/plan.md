@@ -12,8 +12,9 @@ Preserve the semantic schedule end rather than interpreting a memory recording
 date as its effective start. Prevent the legacy fallback from overwriting that
 decision; uncertain dated facts must not change the existing schedule. Validate
 structured dates/values without new phrase lists. Offline persistence and
-Sunday/Monday resolver coverage are implemented; live model interpretation and
-review remain pending. Existing backup documentation changes stay separate.
+Sunday/Monday resolver coverage and explicit cancellation are implemented;
+the Codex finding is addressed with 122 passing focused tests. Only natural
+live model interpretation remains pending. Backup documentation stays separate.
 
 ## Pending natural verification: memory fact provenance and dated duplicates
 
