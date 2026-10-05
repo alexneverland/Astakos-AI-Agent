@@ -22,8 +22,10 @@ bird-search attribution remain intact.
 
 `astakos_skills/research_last30days.py` continues to request `--emit md` and
 uses the existing 120-second timeout and localized error handling. The child
-uses the running Python interpreter (upstream requires Python >=3.12, as did
-v3.11.1) rather than an unrelated interpreter resolved through PATH.
+uses the running Python interpreter when it is >=3.12 (the upstream minimum,
+also required by v3.11.1). For a Python 3.11 application it probes PATH Python
+executables and the Windows `py -3` launcher, accepting only a verified >=3.12
+version. No interpreter is installed and the application runtime is unchanged.
 
 Upstream v3.26.0 permits paid ScrapeCreators Reddit backfill when fewer than
 five free items are found. Astakos keeps the former empty-only behavior by
@@ -48,3 +50,16 @@ Verified results on 2026-10-05:
   the six-case redirect file then passed with loopback-only access allowed.
 - All 136 imported release files match the pinned upstream bytes. Five
   pre-existing additional media assets remain unchanged.
+
+## Local review patches
+
+Following PR #218 review, the CLI's `public_device_auth_result` and its
+device-auth JSON output call are local security patches to the pinned release.
+The original 136-file byte comparison describes the import before this patch;
+all other imported files remain unmodified.
+
+Device-auth output uses a bounded public schema instead of serializing the
+provider result. It omits API keys, private device handles, unknown fields and
+free-form provider message/error bodies. Public authorization codes, status,
+HTTP status and persistence outcome remain available. Key persistence still
+uses the private result and is tested without writing real configuration.

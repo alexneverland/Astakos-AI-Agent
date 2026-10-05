@@ -22,6 +22,38 @@ from pathlib import Path
 MIN_PYTHON = (3, 12)
 
 
+def public_device_auth_result(results: dict) -> dict:
+    """Return only public device-flow fields, never provider bodies or secrets.
+
+    Astakos local security patch: persistence uses the private result separately.
+    Status text is generated locally rather than echoing provider error content.
+    """
+    messages = {
+        "success": "Authorization completed.",
+        "already_registered": "API key is already configured.",
+        "awaiting_authorization": "Enter the public code on the GitHub device page.",
+        "timeout": "Authorization timed out.",
+        "error": "Authorization failed; check the reason and HTTP status.",
+    }
+    status = next((key for key in messages if key == results.get("status")), "error")
+    public = {"status": status, "message": messages[status], "persisted": bool(results.get("persisted"))}
+    for reason in ("no_api_key", "upstream_error", "http_error", "request_failed"):
+        if results.get("reason") == reason:
+            public["reason"] = reason
+            break
+    http_status = results.get("http_status")
+    if type(http_status) is int and 100 <= http_status <= 599:
+        public["http_status"] = http_status
+    user_code = results.get("user_code")
+    if isinstance(user_code, str) and re.fullmatch(r"[A-Z0-9]{4}-[A-Z0-9]{4}", user_code):
+        public["user_code"] = user_code  # Public one-time code, not device_code.
+    if results.get("verification_uri") == "https://github.com/login/device":
+        public["verification_uri"] = "https://github.com/login/device"
+    if "clipboard_ok" in results:
+        public["clipboard_ok"] = bool(results["clipboard_ok"])
+    return public
+
+
 def ensure_supported_python(version_info: tuple[int, int, int] | object | None = None) -> None:
     if version_info is None:
         version_info = sys.version_info
@@ -3318,7 +3350,7 @@ def _main(
                 results["api_key"] = setup_wizard.mask_api_key(api_key)
             else:
                 results["persisted"] = False
-            print(json.dumps(results))
+            print(json.dumps(public_device_auth_result(results)))
             return 0
         sys.stderr.write("Running auto-setup...\n")
         results = setup_wizard.run_auto_setup(
