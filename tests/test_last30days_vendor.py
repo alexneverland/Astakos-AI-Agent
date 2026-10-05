@@ -34,6 +34,15 @@ def _adapter() -> dict:
     return namespace
 
 
+def _run_vendor_cli(runner: str, cwd: Path, *args: str) -> subprocess.CompletedProcess:
+    """Use the same verified >=3.12 launcher as production for CLI tests."""
+    command = _adapter()["_research_python_command"]()
+    return subprocess.run(
+        [*command, "-c", runner, str(SKILL / "scripts/last30days.py"), *args],
+        cwd=cwd, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+
+
 def test_release_is_pinned() -> None:
     """The shipped skill must advertise the reviewed release."""
     assert 'version: "3.26.0"' in (SKILL / "SKILL.md").read_text(encoding="utf-8")
@@ -84,6 +93,49 @@ def test_python311_never_runs_research_without_compatible_python(monkeypatch) ->
     assert not calls
 
 
+def test_real_cli_test_launcher_on_python311(monkeypatch, tmp_path) -> None:
+    """Simulate a 3.11 test host with a real compatible Python on PATH."""
+    compatible = _adapter()["_research_python_command"]()
+    monkeypatch.setattr(sys, "version_info", (3, 11, 9))
+    launcher_name = "py" if len(compatible) > 1 else "python"
+    monkeypatch.setattr(shutil, "which", lambda name: compatible[0] if name == launcher_name else None)
+    result = _run_vendor_cli("print('fixture-cli-ok')", tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "fixture-cli-ok"
+
+
+@pytest.mark.parametrize("error_kind", ["401", "503", "network"])
+def test_real_setup_http_boundary_never_logs_credentials(tmp_path, error_kind) -> None:
+    """Run real device-auth and profile handling, mocking only HTTP/auth I/O."""
+    runner = r'''
+import importlib.util, io, socket, sys
+from urllib.error import HTTPError, URLError
+from unittest.mock import patch
+spec = importlib.util.spec_from_file_location("research_cli", sys.argv[1])
+cli = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(cli)
+from lib import setup_wizard
+kind = sys.argv[2]
+sys.argv = [sys.argv[1], "setup", "--github"]
+secret = "fixture-private-credential"
+def http_failure(*args, **kwargs):
+    if kind == "network":
+        raise URLError(secret)
+    raise HTTPError("https://example.invalid/profile", int(kind), secret, {}, io.BytesIO(secret.encode()))
+def forbidden(*args, **kwargs):
+    raise AssertionError("External I/O forbidden")
+handle = {"device_code": "fixture-device-code", "user_code": "ABCD-1234", "interval": 1}
+with patch.object(cli.env, "get_config", return_value={}), patch.object(cli.env, "read_secret_env", return_value=None), patch.object(setup_wizard, "_start_device_flow", return_value=({}, handle)), patch.object(setup_wizard, "poll_device_auth", return_value="fixture-access-token"), patch.object(setup_wizard, "urlopen", side_effect=http_failure), patch.object(setup_wizard.time, "sleep"), patch.object(setup_wizard, "_device_handle_path", return_value=cli.Path("missing-fixture-handle")), patch.object(socket.socket, "connect", forbidden):
+    raise SystemExit(cli.main())
+'''
+    result = _run_vendor_cli(runner, tmp_path, error_kind)
+    assert result.returncode == 0, result.stderr
+    assert '"status": "error"' in result.stdout
+    assert "fixture-private" not in result.stdout + result.stderr
+    if error_kind != "network":
+        assert error_kind in result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("status", ["error", "success", "already_registered", "awaiting_authorization"])
 def test_device_auth_stdout_drops_provider_secrets(tmp_path, status) -> None:
     """Real CLI setup output must not echo provider error bodies or secrets."""
@@ -110,10 +162,7 @@ with patch.object(cli.env, "get_config", return_value={}), patch.object(cli.env,
         write_key.assert_not_called()
     raise SystemExit(code)
 '''
-    result = subprocess.run(
-        [sys.executable, "-c", runner, str(SKILL / "scripts/last30days.py"), status],
-        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", timeout=30,
-    )
+    result = _run_vendor_cli(runner, tmp_path, status)
     assert result.returncode == 0, result.stderr
     assert f'"status": "{status}"' in result.stdout
     assert '"user_code": "ABCD-1234"' in result.stdout
@@ -142,6 +191,7 @@ def test_old_or_failed_path_python_falls_back_to_windows_launcher(monkeypatch, p
 @pytest.mark.parametrize("configured", [None, "3"])
 def test_adapter_preserves_credit_policy(monkeypatch, configured) -> None:
     """No new paid backfill by default; an explicit process setting wins."""
+    monkeypatch.setattr(sys, "version_info", (3, 12, 0))
     if configured is None:
         monkeypatch.delenv("LAST30DAYS_REDDIT_SC_MIN_ITEMS", raising=False)
     else:
@@ -164,6 +214,7 @@ def test_adapter_preserves_credit_policy(monkeypatch, configured) -> None:
 @pytest.mark.parametrize("mode", ["failure", "timeout"])
 def test_adapter_keeps_error_handling(monkeypatch, mode) -> None:
     """An engine failure cannot be reported as a successful result."""
+    monkeypatch.setattr(sys, "version_info", (3, 12, 0))
     def run(argv, **kwargs):
         if mode == "timeout":
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
@@ -189,10 +240,7 @@ sys.argv = [sys.argv[1], "--emit", "md", "offline topic", "--mock", "--save-dir"
 with patch.object(cli.env, "get_config", return_value={}), patch.object(cli.env, "read_secret_env", return_value=None), patch.object(socket, "create_connection", forbidden), patch.object(socket.socket, "connect", forbidden), patch.object(socket.socket, "connect_ex", forbidden):
     raise SystemExit(cli.main())
 '''
-    result = subprocess.run(
-        [sys.executable, "-c", runner, str(SKILL / "scripts/last30days.py")],
-        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", timeout=30,
-    )
+    result = _run_vendor_cli(runner, tmp_path)
     assert result.returncode == 0, result.stderr
     assert "offline topic" in result.stdout
     assert len(result.stdout) > 100

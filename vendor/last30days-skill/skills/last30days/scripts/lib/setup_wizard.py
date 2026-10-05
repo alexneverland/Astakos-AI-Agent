@@ -1049,28 +1049,11 @@ def poll_device_auth(
 # Bounded retries for transient ScrapeCreators /profile 5xx (see #882).
 _PROFILE_FETCH_ATTEMPTS = 3
 _PROFILE_FETCH_RETRY_SLEEP_S = 1.0
-_PROFILE_ERROR_BODY_LIMIT = 200
 
 
-def _http_error_detail(exc: HTTPError, *, body_limit: int = _PROFILE_ERROR_BODY_LIMIT) -> str:
-    """Build a diagnosable HTTPError string including a truncated body.
-
-    The body is capped and never treated as a secret source of truth; callers
-    still must not log bearer tokens. Used so a 5xx is not a black box.
-    """
-    base = f"HTTP Error {exc.code}: {getattr(exc, 'reason', '') or ''}".rstrip(": ")
-    try:
-        raw = exc.read() or b""
-    except Exception:
-        return base
-    if not raw:
-        return base
-    text = raw.decode("utf-8", errors="replace").strip()
-    if not text:
-        return base
-    if len(text) > body_limit:
-        text = text[:body_limit] + "…"
-    return f"{base} body={text!r}"
+def _http_error_detail(exc: HTTPError) -> str:
+    """Report only the numeric HTTP status, never provider bodies or reasons."""
+    return f"HTTP Error {int(exc.code)}"
 
 
 def fetch_api_key(access_token: str) -> Dict[str, Any]:
@@ -1128,8 +1111,10 @@ def fetch_api_key(access_token: str) -> Dict[str, Any]:
                 "detail": detail,
             }
         except (URLError, OSError) as exc:
-            logger.warning("Failed to fetch API key: %s", exc)
-            return {"ok": False, "reason": "request_failed", "detail": str(exc)}
+            # Exception messages can contain credentials or authenticated URLs.
+            detail = "Profile request failed"
+            logger.warning("Failed to fetch API key: %s", detail)
+            return {"ok": False, "reason": "request_failed", "detail": detail}
 
     if data is None:
         # Defensive: loop exited without success or an explicit return.

@@ -53,10 +53,11 @@ Verified results on 2026-10-05:
 
 ## Local review patches
 
-Following PR #218 review, the CLI's `public_device_auth_result` and its
-device-auth JSON output call are local security patches to the pinned release.
+Following PR #218 review, the CLI's `public_device_auth_result`, its
+device-auth JSON output call and `lib/setup_wizard.py` profile error handling
+are local security patches to the pinned release.
 The original 136-file byte comparison describes the import before this patch;
-all other imported files remain unmodified.
+all other imported files remain unmodified apart from these two files.
 
 Device-auth output uses a bounded public schema instead of serializing the
 provider result. It omits API keys, private device handles, unknown fields and
@@ -70,3 +71,11 @@ public JSON. This particular flow is a false positive: the output accepts only
 an exact `int` in the HTTP status range 100..599, not provider strings, objects
 or booleans. Focused regression cases verify this boundary. No CodeQL rule is
 suppressed or disabled; the original raw-result output remains removed.
+
+The later Codex review identified a separate stderr leak at the profile HTTP
+boundary. That path now reports only numeric HTTP status or a fixed network
+failure message, never response bodies, server reasons or exception text.
+Real CLI/device-auth/profile regression tests mock only external I/O and cover
+401, 503 retry exhaustion and network failure. All CLI subprocess tests share
+the production compatible-interpreter resolver, including a simulated Python
+3.11 host launching real compatible Python. The focused suite passes 25 cases.
