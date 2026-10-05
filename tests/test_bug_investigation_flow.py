@@ -109,7 +109,7 @@ def test_failed_semantic_decision_does_not_authorize_investigation():
     assert result.get("bug_diagnosis_read_only") is not True
 
 
-@pytest.mark.parametrize("tool_name", ["write_code", "edit_project_file", "run_terminal_command"])
+@pytest.mark.parametrize("tool_name", ["write_code", "edit_project_file", "run_terminal_command", "create_file_tool"])
 def test_diagnosis_tool_boundary_rejects_non_allowlisted_calls(tool_name):
     """The backend rejects writes and terminal execution, even for read commands."""
     state = _bug_offer_state("Please investigate")
@@ -186,15 +186,34 @@ def test_diagnosis_agent_binds_only_reads_and_marks_final_report():
     fake_model.bind_tools.return_value.invoke.return_value = AIMessage(
         content="Observed: the timer reads a stale timestamp. Uncertain: restart behavior."
     )
-    with patch("core.agents.llm_heavy", fake_model):
+    with patch("core.agents.llm_heavy", fake_model), patch(
+        "core.agents.build_prompt", return_value="Offline Dev prompt"
+    ):
         result = dev_agent_node(state)
     tool_names = {tool.name for tool in fake_model.bind_tools.call_args.args[0]}
     assert "read_project_file" in tool_names
     assert "repo_mapper" not in tool_names
     assert "write_code" not in tool_names
     assert "run_terminal_command" not in tool_names
+    assert "create_file_tool" not in tool_names
     assert result["messages"][0].content.startswith("Bug diagnosis:")
     assert "ask for that explicitly in a new message" in result["messages"][0].content
+
+
+def test_normal_dev_agent_binds_direct_txt_generator() -> None:
+    """A normal TXT request exposes the native generator to the model offline."""
+    state = {
+        "channel": "web",
+        "messages": [HumanMessage(content="Create a TXT file with these notes.")],
+    }
+    fake_model = MagicMock()
+    fake_model.bind_tools.return_value.invoke.return_value = AIMessage(content="Ready.")
+    with patch("core.agents.llm_heavy", fake_model), patch(
+        "core.agents.build_prompt", return_value="Offline TXT prompt"
+    ):
+        dev_agent_node(state)
+    tools = fake_model.bind_tools.call_args.args[0]
+    assert sum(tool.name == "create_file_tool" for tool in tools) == 1
 
 
 def test_vague_assent_after_diagnosis_is_not_fix_authority():
