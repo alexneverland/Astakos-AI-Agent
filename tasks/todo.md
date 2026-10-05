@@ -5,6 +5,15 @@ Last reconciled with the owner: 2026-10-04.
 this active checklist; evidence remains in Git history, specs/runbooks and the
 [archive](archive/2026-10-02-todo.md). Archived unchecked items are not this backlog.
 
+## Current repair: shift temporal provenance
+
+Contract: [shift-temporal-provenance-spec.md](shift-temporal-provenance-spec.md).
+
+- [x] Reproduce the Sunday expiry overwrite and prevent conflicting fallback writes.
+- [x] Validate semantic dates/shift values and cover final state across Monday.
+- [ ] Naturally observe a weekly shift staying effective after the date boundary.
+- [ ] Review the scoped PR. No stored-memory cleanup is included.
+
 ## Pending natural verification: user-fact provenance and dated duplicates
 
 Contract: [memory-fact-provenance-spec.md](memory-fact-provenance-spec.md).

@@ -44,6 +44,16 @@ Rules:
 - You can return more than one object if a fact changes multiple context flags.
 - If the fact concerns a live/temporary life situation, prefer context_key/context_value instead of dynamic state:{{entity}}:{{activity}}.
 - If there is no clear routine/context impact, return [].
+- For current_shift, use only morning, afternoon or night and supply a definite
+  until_date for the stated schedule. Distinguish when the fact was recorded from
+  when the shift applies: a date prefix in a stored memory is not automatically
+  the shift's start date. Resolve relative dates using the fact's recording context.
+- A whole workweek schedule normally lasts through that workweek's Friday;
+  an explicitly different end date or a single-day schedule takes precedence.
+  Do not turn one day's shift into a whole week. Do not interpret acknowledgements,
+  wishes or historical descriptions as a new schedule. If temporal scope cannot
+  be determined reliably, omit current_shift instead of guessing or shortening
+  an active schedule. A genuine explicit correction may change or shorten it.
 
 Examples:
 

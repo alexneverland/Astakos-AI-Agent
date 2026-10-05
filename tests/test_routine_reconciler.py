@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import sys
+import pytest
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -16,6 +17,13 @@ from services.routine_reconciler import (
     _AUTO_APPLY_THRESHOLD,
     _DEBUG_ONLY_THRESHOLD,
 )
+
+
+@pytest.fixture(autouse=True)
+def offline_reconciliation_model(monkeypatch):
+    """Legacy rule tests must never invoke a cloud provider implicitly."""
+    monkeypatch.setattr("services.routine_reconciler._infer_llm_reconciliation_candidates",
+                        lambda *a, **k: [])
 
 
 def _make_routines_db(path, rows):

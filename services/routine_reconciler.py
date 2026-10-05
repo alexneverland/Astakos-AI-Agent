@@ -791,14 +791,10 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     shift_val = "afternoon" if _contains_any(normalized, _SHIFT_PM_TOKENS) else "morning"
 
     # 1. State Update (only if a specific week is mentioned)
-    if has_week_scope and has_work and not has_negated_shift_statement:
-        if dates:
-            try:
-                parsed_dt = datetime.strptime(dates[0], "%Y-%m-%d")
-                effective_dt = parsed_dt
-            except Exception:
-                effective_dt = now
-        elif explicit_weekday_dt is not None:
+    # A date in a persisted fact may be its recording date, not its event date.
+    # Only semantic extraction can resolve that provenance; never guess dates[0].
+    if has_week_scope and has_work and not has_negated_shift_statement and not dates:
+        if explicit_weekday_dt is not None:
             effective_dt = explicit_weekday_dt
         elif relative_day_dt is not None:
             effective_dt = relative_day_dt
@@ -1155,6 +1151,13 @@ def score_candidate_directive(
     )
 
     has_activity = bool(include_tokens) and any(tok in normalized_fact for tok in include_tokens)
+    if (matched_rule_name == "llm_extracted" and kind == "context_state_set"
+            and directive_key == "current_shift"
+            and directive.get("value") in {"morning", "afternoon", "night"} and until_date):
+        # Semantic extraction already resolved the owner and work domain into
+        # this canonical key. Requiring literal name/alias matches defeats it.
+        has_subject = True
+        has_activity = True
     has_scope    = bool(until_date)
     # State = any word indicating a change of state / event in life
     has_state    = (matched_rule_name == "llm_extracted") or _contains_any(
@@ -1610,7 +1613,18 @@ def _infer_llm_reconciliation_candidates(
     impacts = _safe_json_list(raw)
     out: list[dict] = []
     for impact in impacts:
-        out.extend(_llm_impact_to_directives(impact))
+        for directive in _llm_impact_to_directives(impact):
+            if directive.get("key") == "current_shift":
+                value = directive.get("value")
+                if not isinstance(value, str) or value not in {"morning", "afternoon", "night"}:
+                    continue
+                try:
+                    expiry = datetime.strptime(directive.get("until_date"), "%Y-%m-%d").date()
+                except (TypeError, ValueError):
+                    continue
+                if expiry < now.date() or directive.get("until_date") != expiry.isoformat():
+                    continue
+            out.append(directive)
     return out
 
 def _candidate_fingerprint(d: dict) -> tuple:
@@ -1631,6 +1645,14 @@ def _candidate_fingerprint(d: dict) -> tuple:
 def _merge_candidate_lists(primary: list[dict], secondary: list[dict]) -> list[dict]:
     merged: list[dict] = []
     seen: set[tuple] = set()
+    semantic_shift = any(
+        item.get("kind") == "context_state_set" and item.get("key") == "current_shift"
+        for item in primary
+    )
+    if semantic_shift:
+        secondary = [item for item in secondary if not (
+            item.get("kind") == "context_state_set" and item.get("key") == "current_shift"
+        )]
 
     for item in primary + secondary:
         fp = _candidate_fingerprint(item)

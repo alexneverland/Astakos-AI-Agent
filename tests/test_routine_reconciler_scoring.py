@@ -18,6 +18,13 @@ from services.routine_reconciler import (
 )
 from services.routine_reconciler import _normalize
 
+
+@pytest.fixture(autouse=True)
+def offline_reconciliation_model(monkeypatch):
+    """Scoring tests use synthetic extraction, not live cloud responses."""
+    monkeypatch.setattr("services.routine_reconciler._infer_llm_reconciliation_candidates",
+                        lambda *a, **k: [])
+
 def test_llm_extracted_candidate_with_subject_activity_state_scope_scores_high():
     from services.routine_reconciler import score_candidate_directive
 
