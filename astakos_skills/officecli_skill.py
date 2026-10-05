@@ -47,7 +47,7 @@ def _created_file_tags(outputs_dir: str, before: dict[str, float]) -> str:
 def run_officecli(command: str) -> str:
     """
     Executes commands in OfficeCLI to create and edit Word (.docx), Excel (.xlsx), and PowerPoint (.pptx) files.
-    OfficeCLI supports templates, HTML to docx rendering, Excel formulas, etc.
+    OfficeCLI supports document nodes, template merging, and Excel cell values/formulas.
 
     FORBIDDEN: Do not use the old create_file_tool or generate_word_doc for Office files. 
     Use this tool for simple conversions or templates. HOWEVER, IF a complex structure is needed (e.g., custom calendars, specific cells using openpyxl/python-docx), you ARE ALLOWED to use python (run_terminal_command or run_code), bypassing this tool.
@@ -56,9 +56,12 @@ def run_officecli(command: str) -> str:
     So that drive_manager and the Web UIs can find them!
     
     Examples:
-    - officecli add deck.pptx / --type slide --title "Intro"
-    - officecli render template.docx data.json --out C:/astakos_v2/outputs/report.docx
-    - officecli formula calc C:/astakos_v2/outputs/data.xlsx
+    - officecli create report.docx
+    - officecli add report.docx /body --type paragraph --prop "text=Hello"
+    - officecli add deck.pptx / --type slide --prop "title=Intro"
+    - officecli set data.xlsx /Sheet1/A1 --prop "value=42"
+    - officecli help docx paragraph
+    Use create before editing a new file; inspect help for supported properties.
     
     If the command starts with 'officecli ', it will be replaced with the full path of the executable.
     """
