@@ -40,6 +40,10 @@ def _resolve_path(output_path: str, default_ext: str) -> str:
 def generate_excel(output_path: str, data_json: str, sheet_name: str = "Sheet1", title: str = "") -> str:
     """
     Creates an Excel file (.xlsx) from data.
+    Prefer run_officecli for Office output, even simple files. Use this generator
+    as fallback only when OfficeCLI is unavailable, returns an error, or cannot
+    cover the required structure. Preserve all safety/approval gates; never use
+    fallback to bypass a security rejection.
 
     Args:
         output_path: Full file path, e.g., 'outputs/report.xlsx'.
@@ -139,7 +143,10 @@ def generate_excel(output_path: str, data_json: str, sheet_name: str = "Sheet1",
 @tool
 def generate_word_doc(output_path: str, content: str, title: str = "", subtitle: str = "") -> str:
     """
-    [WARNING: DO NOT USE. For .docx documents, use the run_officecli tool.]
+    Prefer run_officecli for Office output, even simple files. Use this generator
+    as fallback only when OfficeCLI is unavailable, returns an error, or cannot
+    cover the required structure. Preserve all safety/approval gates; never use
+    fallback to bypass a security rejection.
     Creates a Word file (.docx) from text.
 
     Args:
