@@ -19,28 +19,28 @@ const fs = require('fs');
 
 const payload = JSON.parse(fs.readFileSync(process.env.PAYLOAD_PATH, 'utf8'));
 const hasJq = process.env.HAS_JQ === '1';
-const hookOutput = payload.hookSpecificOutput;
+const out = payload.hookSpecificOutput;
 
-if (!hookOutput || hookOutput.hookEventName !== 'SessionStart') {
-  throw new Error('payload is missing the standard SessionStart envelope');
+if (!out || typeof out !== 'object') {
+  throw new Error('payload is missing hookSpecificOutput (hosts reject other shapes)');
+}
+if (out.hookEventName !== 'SessionStart') {
+  throw new Error(`expected hookEventName SessionStart, got ${out.hookEventName}`);
+}
+if (typeof out.additionalContext !== 'string' || !out.additionalContext.trim()) {
+  throw new Error('additionalContext must be a non-empty string');
 }
 
-if (typeof hookOutput.additionalContext !== 'string') {
-  throw new Error('payload is missing additionalContext');
-}
-
+const ctx = out.additionalContext;
 if (hasJq) {
-  if (!hookOutput.additionalContext.includes('agent-skills loaded.')) {
-    throw new Error('message is missing startup preface');
+  if (!ctx.includes('agent-skills loaded.')) {
+    throw new Error('additionalContext is missing startup preface');
   }
-
-  if (!hookOutput.additionalContext.includes('# Using Agent Skills')) {
-    throw new Error('message is missing using-agent-skills content');
+  if (!ctx.includes('# Using Agent Skills')) {
+    throw new Error('additionalContext is missing using-agent-skills content');
   }
-} else {
-  if (!hookOutput.additionalContext.includes('jq is required')) {
-    throw new Error('message is missing jq fallback guidance');
-  }
+} else if (!ctx.includes('jq is required')) {
+  throw new Error('additionalContext is missing jq fallback guidance');
 }
 
 console.log('session-start JSON payload OK');

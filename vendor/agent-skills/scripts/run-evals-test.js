@@ -8,7 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
-const { materializeWorkspace, parseGrading } = require('./run-evals');
+const { materializeWorkspace, parseGrading, clearGradingSlot, persistGradingOutcome, extractExecutorModel } = require('./run-evals');
 
 const RUNNER = path.join(__dirname, 'run-evals.js');
 
@@ -70,53 +70,79 @@ function run(root, args = []) {
 test('accepts a complete and consistent grader result', () => {
   const raw = JSON.stringify({
     expectations: [
-      { text: 'first expectation', passed: true, evidence: 'observed in the trace' },
-      { text: 'second expectation', passed: false, evidence: 'not observed in the trace' },
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed in the trace' },
+      { id: 2, text: 'second expectation', passed: false, evidence: 'not observed in the trace' },
     ],
     summary: { passed: 1, failed: 1, total: 2, pass_rate: 0.5 },
   });
 
-  assert.deepEqual(parseGrading(raw, 2), JSON.parse(raw));
+  assert.deepEqual(parseGrading(raw, ['first expectation', 'second expectation']), JSON.parse(raw));
 });
 
 test('rejects grader results that omit expectations', () => {
   const raw = JSON.stringify({
     expectations: [
-      { text: 'first expectation', passed: true, evidence: 'observed in the trace' },
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed in the trace' },
     ],
     summary: { passed: 1, failed: 0, total: 1, pass_rate: 1 },
   });
 
-  assert.equal(parseGrading(raw, 2), null);
+  assert.equal(parseGrading(raw, ['first expectation', 'second expectation']), null);
+});
+
+test('rejects null expectation entries without throwing', () => {
+  const cases = [
+    { results: [null], declared: ['first expectation'] },
+    { results: [{ id: 1, text: 'first expectation', passed: true, evidence: 'observed' }, null], declared: ['first expectation', 'second expectation'] },
+  ];
+  for (const { results, declared } of cases) {
+    const raw = JSON.stringify({
+      expectations: results,
+      summary: {
+        passed: results.length - 1,
+        failed: 1,
+        total: results.length,
+        pass_rate: (results.length - 1) / results.length,
+      },
+    });
+
+    assert.equal(parseGrading(raw, declared), null);
+  }
 });
 
 test('rejects incomplete or inconsistent grader summaries', () => {
-  const expectation = { text: 'expected behavior', passed: false, evidence: 'not observed' };
+  const declared = ['expected behavior'];
+  const expectation = { id: 1, text: 'expected behavior', passed: false, evidence: 'not observed' };
   const cases = [
     {
       expectations: [],
       summary: { passed: 0, failed: 0, total: 0, pass_rate: 0 },
+      declared: [],
     },
     {
-      expectations: [{ text: 'expected behavior', passed: false }],
+      expectations: [{ id: 1, text: 'expected behavior', passed: false }],
       summary: { passed: 0, failed: 1, total: 1, pass_rate: 0 },
+      declared,
     },
     {
       expectations: [expectation],
       summary: { passed: 1, failed: 0, total: 1, pass_rate: 1 },
+      declared,
     },
     {
       expectations: [expectation],
       summary: { passed: 0, total: 1, pass_rate: 0 },
+      declared,
     },
     {
       expectations: [expectation],
       summary: { passed: 0, failed: 1, total: 1 },
+      declared,
     },
   ];
 
-  for (const grading of cases) {
-    assert.equal(parseGrading(JSON.stringify(grading), 1), null);
+  for (const { declared: d, ...grading } of cases) {
+    assert.equal(parseGrading(JSON.stringify(grading), d), null);
   }
 });
 
@@ -271,6 +297,314 @@ test('rejects an invalid rank-1 floor', () => {
 
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stderr, /--min-rank1 must be a number from 0 to 100/);
+});
+
+// ---------- parseGrading expectation-binding tests ----------
+
+test('accepts reordered-but-complete grader results', () => {
+  const expectations = ['first expectation', 'second expectation'];
+  const raw = JSON.stringify({
+    expectations: [
+      { id: 2, text: 'second expectation', passed: false, evidence: 'not observed' },
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed in the trace' },
+    ],
+    summary: { passed: 1, failed: 1, total: 2, pass_rate: 0.5 },
+  });
+  const result = parseGrading(raw, expectations);
+  assert.notEqual(result, null);
+  assert.equal(result.summary.passed, 1);
+  assert.equal(result.summary.failed, 1);
+});
+
+test('rejects duplicate grader results for the same expectation', () => {
+  const expectations = ['first expectation', 'second expectation'];
+  // Valid baseline: each id appears exactly once
+  const validRaw = JSON.stringify({
+    expectations: [
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed' },
+      { id: 2, text: 'second expectation', passed: false, evidence: 'not observed' },
+    ],
+    summary: { passed: 1, failed: 1, total: 2, pass_rate: 0.5 },
+  });
+  assert.notEqual(parseGrading(validRaw, expectations), null);
+
+  // Duplicate: id 1 appears twice, id 2 is missing
+  const dupRaw = JSON.stringify({
+    expectations: [
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed' },
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed again' },
+    ],
+    summary: { passed: 2, failed: 0, total: 2, pass_rate: 1 },
+  });
+  assert.equal(parseGrading(dupRaw, expectations), null);
+});
+
+test('rejects grader results whose ids are not in the declared set', () => {
+  const expectations = ['first expectation', 'second expectation'];
+  // Valid baseline
+  const validRaw = JSON.stringify({
+    expectations: [
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed' },
+      { id: 2, text: 'second expectation', passed: false, evidence: 'not observed' },
+    ],
+    summary: { passed: 1, failed: 1, total: 2, pass_rate: 0.5 },
+  });
+  assert.notEqual(parseGrading(validRaw, expectations), null);
+
+  // id 3 is out of range 1..2
+  const badIdRaw = JSON.stringify({
+    expectations: [
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed' },
+      { id: 3, text: 'unknown expectation', passed: false, evidence: 'not found' },
+    ],
+    summary: { passed: 1, failed: 1, total: 2, pass_rate: 0.5 },
+  });
+  assert.equal(parseGrading(badIdRaw, expectations), null);
+});
+
+test('rejects a result set that omits a declared expectation', () => {
+  const expectations = ['first expectation', 'second expectation', 'third expectation'];
+  // Valid baseline
+  const validRaw = JSON.stringify({
+    expectations: [
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed' },
+      { id: 2, text: 'second expectation', passed: true, evidence: 'observed' },
+      { id: 3, text: 'third expectation', passed: false, evidence: 'not observed' },
+    ],
+    summary: { passed: 2, failed: 1, total: 3, pass_rate: 2 / 3 },
+  });
+  assert.notEqual(parseGrading(validRaw, expectations), null);
+
+  // Only 2 results for 3 expectations (id 3 omitted)
+  const partialRaw = JSON.stringify({
+    expectations: [
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed' },
+      { id: 2, text: 'second expectation', passed: true, evidence: 'observed' },
+    ],
+    summary: { passed: 2, failed: 0, total: 2, pass_rate: 1 },
+  });
+  assert.equal(parseGrading(partialRaw, expectations), null);
+});
+
+test('derives pass_rate from counters rather than trusting the grader value', () => {
+  const expectations = ['first expectation', 'second expectation'];
+  // Correct pass_rate should be accepted
+  const validRaw = JSON.stringify({
+    expectations: [
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed' },
+      { id: 2, text: 'second expectation', passed: false, evidence: 'not observed' },
+    ],
+    summary: { passed: 1, failed: 1, total: 2, pass_rate: 0.5 },
+  });
+  const valid = parseGrading(validRaw, expectations);
+  assert.notEqual(valid, null);
+  assert.equal(valid.summary.pass_rate, 0.5);
+
+  // Wrong pass_rate with correct counters: accepted, but recomputed
+  const wrongRaw = JSON.stringify({
+    expectations: [
+      { id: 1, text: 'first expectation', passed: true, evidence: 'observed' },
+      { id: 2, text: 'second expectation', passed: false, evidence: 'not observed' },
+    ],
+    summary: { passed: 1, failed: 1, total: 2, pass_rate: 0.999 },
+  });
+  const corrected = parseGrading(wrongRaw, expectations);
+  assert.notEqual(corrected, null);
+  assert.equal(corrected.summary.pass_rate, 0.5);
+  // The integer counters stay exact checks
+  assert.equal(corrected.summary.passed, 1);
+  assert.equal(corrected.summary.failed, 1);
+});
+
+test('replaces paraphrased grader text with the declared expectation', () => {
+  const expectations = ['first expectation', 'second expectation'];
+  const raw = JSON.stringify({
+    expectations: [
+      { id: 2, text: 'the agent did the second thing', passed: false, evidence: 'not observed' },
+      { id: 1, text: 'roughly the first one', passed: true, evidence: 'observed' },
+    ],
+    summary: { passed: 1, failed: 1, total: 2, pass_rate: 0.5 },
+  });
+
+  const result = parseGrading(raw, expectations);
+  assert.notEqual(result, null);
+  assert.equal(result.expectations.find((r) => r.id === 1).text, 'first expectation');
+  assert.equal(result.expectations.find((r) => r.id === 2).text, 'second expectation');
+});
+
+// ---------- persistGradingOutcome stale-cleanup tests ----------
+
+test('rejected grading writes raw output', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grading-cleanup-'));
+  try {
+    const base = path.join(dir, 'my-skill.eval-1');
+
+    const result = persistGradingOutcome(base, null, 'unparseable grader output');
+
+    assert.equal(result, false);
+    assert.equal(fs.existsSync(`${base}.grading.raw.txt`), true, 'raw output must be written');
+    assert.equal(fs.readFileSync(`${base}.grading.raw.txt`, 'utf8'), 'unparseable grader output');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rejected grading succeeds even when no prior grading.json exists', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grading-cleanup-'));
+  try {
+    const base = path.join(dir, 'my-skill.eval-1');
+
+    const result = persistGradingOutcome(base, null, 'bad output');
+
+    assert.equal(result, false);
+    assert.equal(fs.existsSync(`${base}.grading.raw.txt`), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('accepted grading writes grading.json', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grading-cleanup-'));
+  try {
+    const base = path.join(dir, 'my-skill.eval-1');
+    const grading = {
+      expectations: [{ id: 1, text: 'x', passed: true, evidence: 'y' }],
+      summary: { passed: 1, failed: 0, total: 1, pass_rate: 1 },
+    };
+
+    const result = persistGradingOutcome(base, grading, 'unused');
+
+    assert.equal(result, true);
+    const written = JSON.parse(fs.readFileSync(`${base}.grading.json`, 'utf8'));
+    assert.deepEqual(written, grading);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------- upfront slot-clearing tests ----------
+
+test('a grader that throws leaves no result file behind', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grading-crash-'));
+  try {
+    const base = path.join(dir, 'my-skill.eval-1');
+    // Stale files from a prior run
+    fs.writeFileSync(`${base}.grading.json`, '{"previous":"run"}\n');
+    fs.writeFileSync(`${base}.grading.raw.txt`, 'previous raw output');
+
+    clearGradingSlot(base);
+
+    // Executor or grader crashes — persistGradingOutcome is never called
+
+    assert.equal(fs.existsSync(`${base}.grading.json`), false, 'stale grading.json must not survive a crash');
+    assert.equal(fs.existsSync(`${base}.grading.raw.txt`), false, 'stale grading.raw.txt must not survive a crash');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('successful grading leaves no stale raw file behind', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grading-success-'));
+  try {
+    const base = path.join(dir, 'my-skill.eval-1');
+    // Stale raw from a prior rejected run
+    fs.writeFileSync(`${base}.grading.raw.txt`, 'previous raw output');
+
+    clearGradingSlot(base);
+
+    // Successful grading
+    const grading = {
+      expectations: [{ id: 1, text: 'x', passed: true, evidence: 'y' }],
+      summary: { passed: 1, failed: 0, total: 1, pass_rate: 1 },
+    };
+    persistGradingOutcome(base, grading, 'unused');
+
+    assert.equal(fs.existsSync(`${base}.grading.json`), true, 'grading.json must be written');
+    assert.equal(fs.existsSync(`${base}.grading.raw.txt`), false, 'stale grading.raw.txt must not survive');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------- extractExecutorModel tests ----------
+
+test('extracts model from the stream-json init event', () => {
+  const trace = [
+    '{"type":"system","subtype":"init","model":"claude-sonnet-4-6-20250514","session_id":"abc"}',
+    '{"type":"assistant","message":{"id":"msg_1","content":[{"type":"text","text":"Hi"}]}}',
+    '{"type":"result","subtype":"success","result":"Hi"}',
+  ].join('\n');
+
+  assert.equal(extractExecutorModel(trace), 'claude-sonnet-4-6-20250514');
+});
+
+test('returns null when the trace has no init event', () => {
+  const trace = [
+    '{"type":"assistant","message":{"id":"msg_1","content":[]}}',
+    '{"type":"result","subtype":"success","result":"done"}',
+  ].join('\n');
+
+  assert.equal(extractExecutorModel(trace), null);
+});
+
+test('returns null when the init event has no model field', () => {
+  const trace = '{"type":"system","subtype":"init","session_id":"abc"}\n';
+
+  assert.equal(extractExecutorModel(trace), null);
+});
+
+test('tolerates non-JSON lines in the trace', () => {
+  const trace = [
+    'not json',
+    '{"type":"system","subtype":"init","model":"claude-opus-4-6","session_id":"abc"}',
+  ].join('\n');
+
+  assert.equal(extractExecutorModel(trace), 'claude-opus-4-6');
+});
+
+// ---------- persistGradingOutcome run identity tests ----------
+
+test('accepted grading includes run metadata when provided', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grading-run-meta-'));
+  try {
+    const base = path.join(dir, 'my-skill.eval-1');
+    const grading = {
+      expectations: [{ id: 1, text: 'x', passed: true, evidence: 'y' }],
+      summary: { passed: 1, failed: 0, total: 1, pass_rate: 1 },
+    };
+    const runMeta = {
+      executor_model: 'claude-sonnet-4-6-20250514',
+      grader_model: 'unknown',
+      timestamp: '2026-09-21T00:00:00.000Z',
+    };
+
+    persistGradingOutcome(base, grading, 'unused', runMeta);
+
+    const written = JSON.parse(fs.readFileSync(`${base}.grading.json`, 'utf8'));
+    assert.deepEqual(written.run, runMeta);
+    assert.deepEqual(written.expectations, grading.expectations);
+    assert.deepEqual(written.summary, grading.summary);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('accepted grading omits run key when no metadata is provided', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grading-no-meta-'));
+  try {
+    const base = path.join(dir, 'my-skill.eval-1');
+    const grading = {
+      expectations: [{ id: 1, text: 'x', passed: true, evidence: 'y' }],
+      summary: { passed: 1, failed: 0, total: 1, pass_rate: 1 },
+    };
+
+    persistGradingOutcome(base, grading, 'unused');
+
+    const written = JSON.parse(fs.readFileSync(`${base}.grading.json`, 'utf8'));
+    assert.equal('run' in written, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('materializes a git baseline and applies a working-tree patch', () => {

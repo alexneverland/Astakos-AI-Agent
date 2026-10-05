@@ -37,7 +37,7 @@
       "expectations": [
         "The ADR states context, decision, alternatives, and consequences distinctly",
         "Trade-offs and rejected options are recorded, not just the winning choice",
-        "The document is written in timeless language describing current state"
+        "The ADR records a status from the skill's lifecycle (Proposed, Accepted, Superseded or Deprecated) and a date"
       ]
     }
   ]

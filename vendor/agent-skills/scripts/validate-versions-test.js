@@ -1,7 +1,6 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { execFileSync } = require("node:child_process");
 const { existsSync, readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
 const test = require("node:test");
@@ -18,28 +17,22 @@ const manifestPaths = [
 ];
 
 function readManifestVersion(manifestPath) {
-  const manifest = JSON.parse(
-    readFileSync(resolve(vendorRoot, manifestPath), "utf8"),
-  );
+  const manifest = JSON.parse(readFileSync(resolve(vendorRoot, manifestPath), "utf8"));
   return manifest.version ?? manifest.plugins?.[0]?.version;
 }
 
 function readExpectedVersion() {
   if (existsSync(provenancePath)) {
-    const provenance = readFileSync(provenancePath, "utf8");
-    const match = provenance.match(/^- Release: `([^`]+)`$/m);
+    const match = readFileSync(provenancePath, "utf8").match(/^- Release: `([^`]+)`$/m);
     assert.ok(match, `${provenancePath} must contain a release entry`);
     return match[1];
   }
-
-  return execFileSync("git", ["describe", "--tags", "--abbrev=0"], {
-    cwd: vendorRoot,
-    encoding: "utf8",
-  }).trim();
+  return readManifestVersion("plugin.json");
 }
 
-test("all plugin manifests use the vendored or standalone release", () => {
+test("all plugin manifests use the vendored release or root plugin.json version", () => {
   const expectedVersion = readExpectedVersion();
+  assert.ok(expectedVersion, "plugin.json must define a version");
 
   for (const manifestPath of manifestPaths) {
     assert.equal(
