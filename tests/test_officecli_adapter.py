@@ -3,13 +3,15 @@
 import ast
 import os
 import shlex
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, NoReturn
 
 import pytest
 
 
-def _adapter(root: Path, run) -> dict:
+def _adapter(root: Path, run: Callable[..., SimpleNamespace]) -> dict[str, Any]:
     """Load the actual adapter with only its subprocess boundary replaced."""
     source = Path(__file__).resolve().parents[1] / "astakos_skills/officecli_skill.py"
     tree = ast.parse(source.read_text(encoding="utf-8"))
@@ -33,7 +35,8 @@ def test_output_tag_and_quoted_arguments(tmp_path: Path, suffix: str) -> None:
     binary.parent.mkdir(parents=True)
     binary.touch()
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
+        """Emulate CLI output creation while validating the process contract."""
         assert argv == [str(binary), "create", f"sample file.{suffix}"]
         assert kwargs["shell"] is False
         assert kwargs["timeout"] == 120
@@ -52,7 +55,8 @@ def test_shell_operators_never_reach_binary(tmp_path: Path, separator: str) -> N
     binary.parent.mkdir(parents=True)
     binary.touch()
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: object, **kwargs: object) -> NoReturn:
+        """Fail immediately if unsafe input reaches the subprocess boundary."""
         pytest.fail("Unsafe command reached subprocess")
 
     result = _adapter(tmp_path, forbidden)["run_officecli"](f"create sample.docx{separator}extra")
@@ -61,7 +65,8 @@ def test_shell_operators_never_reach_binary(tmp_path: Path, separator: str) -> N
 
 def test_missing_binary_is_local_error(tmp_path: Path) -> None:
     """A checkout without the ignored executable fails without external I/O."""
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: object, **kwargs: object) -> NoReturn:
+        """Fail if the adapter attempts to invoke a missing executable."""
         pytest.fail("Missing binary reached subprocess")
 
     assert "msg_not_found" in _adapter(tmp_path, forbidden)["run_officecli"]("create sample.docx")
