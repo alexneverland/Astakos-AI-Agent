@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 from langchain_core.tools import tool
 from config import BASE_DIR
 from core.i18n import t
@@ -18,14 +19,19 @@ def research_last30days(topic: str) -> str:
         return t("skills.research_last30days.msg_missing_script_2", path=script_path)
 
     try:
+        # Keep the pre-upgrade empty-only paid Reddit fallback. Explicit
+        # process configuration may opt into upstream's thin-result backfill.
+        child_env = os.environ.copy()
+        child_env.setdefault("LAST30DAYS_REDDIT_SC_MIN_ITEMS", "0")
         # We run the command and return the stdout in compact md format for easier parsing by the Agent.
         result = subprocess.run(
-            ["python", script_path, "--emit", "md", topic],
+            [sys.executable, script_path, "--emit", "md", topic],
             capture_output=True,
             text=True,
             encoding="utf-8",
             cwd=BASE_DIR,
             timeout=120,
+            env=child_env,
         )
 
         if result.returncode != 0:
