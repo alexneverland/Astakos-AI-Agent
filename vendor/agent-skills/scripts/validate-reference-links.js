@@ -62,9 +62,14 @@ const REFERENCE_LINK_RE = /(?<![A-Za-z0-9._/-])((?:\.\.\/)*references\/[A-Za-z0-
 // GitHub's heading anchor: the rendered text, lowercased, with everything but
 // letters, numbers, `_`, `-` and spaces dropped, then spaces turned to hyphens.
 function slugify(heading) {
-  const text = heading
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // links and images keep their text
-    .replace(/<[^>]+>/g, '');                  // inline HTML renders no text
+  let text = heading.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1'); // links and images keep their text
+  // Removing malformed nested markup can expose another tag. Reach a fixed
+  // point before deriving the plain anchor; this is not an HTML sanitizer.
+  let previous;
+  do {
+    previous = text;
+    text = text.replace(/<[^<>]+>/g, '');
+  } while (text !== previous);
   return text.toLowerCase().replace(/[^\p{L}\p{M}\p{N}_\- ]/gu, '').replace(/ /g, '-');
 }
 

@@ -25,6 +25,11 @@ standard hook-envelope checks. The whitespace-only adaptations in
 The duplicate `hooks/hooks.json` was removed by upstream; no Astakos runtime
 or repository-root workflow settings were changed.
 
+`scripts/validate-reference-links.js` also strips nested inline markup to a
+fixed point before deriving plain heading anchors. A focused regression in
+its test file covers nested markup, ordinary tags, and an absent anchor. This
+local adaptation addresses CodeQL alert #71 without disabling security checks.
+
 ## Local verification (2026-10-05)
 
 - All 26 skills pass schema/lint validation; versions, reference links,

@@ -446,6 +446,27 @@ test('slugs come from the rendered heading text, not its markdown', () => {
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
+test('heading anchors strip nested markup until no tags remain', () => {
+  const root = makeSandbox();
+  writeFile(root, 'skills/hardening/SKILL.md', [
+    'See [nested](references/patterns.md#example).',
+    'See [ordinary](references/patterns.md#safe-heading).',
+    'See [missing](references/patterns.md#script).',
+    '',
+  ].join('\n'));
+  writeFile(root, 'skills/hardening/references/patterns.md', [
+    '## <scrip<script>t>Example</script>',
+    '## <em>Safe</em> heading',
+    '',
+  ].join('\n'));
+
+  const result = run(root);
+
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /L3: references\/patterns\.md#script — no heading/);
+  assert.doesNotMatch(result.stdout, /L[12]:/);
+});
+
 test('a heading-like line inside a fenced block is not an anchor', () => {
   // Bash comments in a fenced example look like H1s.
   const root = makeSandbox();
