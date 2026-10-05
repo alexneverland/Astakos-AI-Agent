@@ -26,6 +26,7 @@ Return a list of objects with fields:
     - routine_completed_today
 - context_key: canonical context flag or null
 - context_value: true | false | string | null
+- context_operation: set | clear (current_shift only; omit for other keys)
 - until_date: YYYY-MM-DD or null
 - reason: short machine-friendly reason, e.g. summer_break, camp, returned_home, live_context
 
@@ -48,6 +49,12 @@ Rules:
   until_date for the stated schedule. Distinguish when the fact was recorded from
   when the shift applies: a date prefix in a stored memory is not automatically
   the shift's start date. Resolve relative dates using the fact's recording context.
+- For an explicit cancellation of the owner's current shift schedule, return
+  current_shift with context_operation="clear" and context_value=null. until_date
+  may be null when simply withdrawing the old schedule. This is not an unknown
+  replacement shift: uncertainty or missing information must omit current_shift,
+  never clear it. Only a definite current cancellation, not a historical,
+  hypothetical or future cancellation, may clear the active schedule.
 - A whole workweek schedule normally lasts through that workweek's Friday;
   an explicitly different end date or a single-day schedule takes precedence.
   Do not turn one day's shift into a whole week. Do not interpret acknowledgements,

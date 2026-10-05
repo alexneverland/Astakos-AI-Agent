@@ -1153,7 +1153,8 @@ def score_candidate_directive(
     has_activity = bool(include_tokens) and any(tok in normalized_fact for tok in include_tokens)
     if (matched_rule_name == "llm_extracted" and kind == "context_state_set"
             and directive_key == "current_shift"
-            and directive.get("value") in {"morning", "afternoon", "night"} and until_date):
+            and ((directive.get("context_operation") == "clear") or
+                 (directive.get("value") in {"morning", "afternoon", "night"} and until_date))):
         # Semantic extraction already resolved the owner and work domain into
         # this canonical key. Requiring literal name/alias matches defeats it.
         has_subject = True
@@ -1616,14 +1617,24 @@ def _infer_llm_reconciliation_candidates(
         for directive in _llm_impact_to_directives(impact):
             if directive.get("key") == "current_shift":
                 value = directive.get("value")
-                if not isinstance(value, str) or value not in {"morning", "afternoon", "night"}:
+                operation = impact.get("context_operation", "set")
+                clearing = (operation == "clear" and "context_value" in impact
+                            and (value is None or value == ""))
+                if operation == "clear" and not clearing:
                     continue
-                try:
-                    expiry = datetime.strptime(directive.get("until_date"), "%Y-%m-%d").date()
-                except (TypeError, ValueError):
+                if operation not in ("set", "clear"):
                     continue
-                if expiry < now.date() or directive.get("until_date") != expiry.isoformat():
+                if not clearing and (not isinstance(value, str) or value not in {"morning", "afternoon", "night"}):
                     continue
+                if not clearing or directive.get("until_date") is not None:
+                    try:
+                        expiry = datetime.strptime(directive.get("until_date"), "%Y-%m-%d").date()
+                    except (TypeError, ValueError):
+                        continue
+                    if expiry < now.date() or directive.get("until_date") != expiry.isoformat():
+                        continue
+                if clearing:
+                    directive["context_operation"] = "clear"
             out.append(directive)
     return out
 

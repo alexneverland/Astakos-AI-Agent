@@ -20,6 +20,13 @@ The model distinguishes weekly schedules, individual days, recording dates,
 acknowledgements and explicit corrections. Do not unconditionally keep the
 longest expiry; that would prevent genuine corrections.
 
+An explicit current cancellation uses context_operation=clear with an explicitly
+present null/empty context_value. Missing values or uncertain observations do not
+clear state. The canonical persistence path stores an empty shift; the resolver
+then returns no weekday shift. A cancellation may omit its end date; any supplied
+date must still be canonical and non-expired. Historical/future cancellations
+are not current clear decisions. No cancellation phrase lists are introduced.
+
 Canonical semantic ownership/work-domain mapping is sufficient for shift scoring;
 it does not require a literal owner name or language-specific alias in the fact.
 Undated legacy fallback behavior and existing routine-condition handling remain
@@ -35,7 +42,7 @@ weekly/daily precedence, uncertainty, model failure, invalid dates/values,
 explicit shortening and implicit-owner night shifts. Legacy rule/scoring tests
 explicitly disable cloud extraction instead of relying on provider failure.
 
-Verification: 109 focused tests pass, Python syntax compilation and diff checks
+Verification: 122 focused tests pass, Python syntax compilation and diff checks
 are clean. No full suite was run.
 
 The deterministic lifecycle is covered; actual model interpretation and subsequent
