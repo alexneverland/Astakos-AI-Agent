@@ -12,8 +12,10 @@ actual Scheduler invocation passed with exit 0, upload and verified channel/serv
 startup. Isolated PostgreSQL/Synapse restoration of the scheduled Drive artifact
 passed, including token/room/sync and copied bot crypto loading. Temporary Docker
 resources were removed; the owner removed plaintext rehearsal data and confirmed
-local identity/fixture cleanup after vault verification. First timed nightly-run
-observation and full Element/replacement-host recovery verification remain open.
+local identity/fixture cleanup after vault verification. The timed 2026-10-04
+03:00 invocation passed after the headless-handle repair: exit 0, durable uploaded
+status and logged encrypted-channel recovery. Full Element/replacement-host
+recovery verification remains open.
 
 ## Objective
 

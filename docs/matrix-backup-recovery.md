@@ -380,8 +380,8 @@ public recipient remain; the vault is the retained recovery-identity location.
 Limitations: this is a same-host isolated restore, not a replacement-host or
 owner Element recovery-key test. Successful sync and crypto loading do not prove
 decryption of every old attachment/message or transparent client recovery after
-a server rollback. The next timed 03:00 run after the headless-handle repair
-remains to be observed.
+a server rollback. The timed 03:00 run after the headless-handle repair is now
+verified as described below; full client/replacement-host recovery remains open.
 
 ### Headless Scheduler diagnostics
 
@@ -396,6 +396,23 @@ for inherited invalid stdin. The actual Scheduler retry with the repair complete
 at 08:49:57 local (about 63 seconds), LastTaskResult=0, with verified encrypted
 Drive delivery, healthy Synapse and Matrix resumed under the original watchdog.
 This is manual Scheduler evidence, not proof of the next timed invocation.
+
+### Timed invocation verified (2026-10-04)
+
+Read-only Scheduler/status/artifact/log inspection confirmed the automatic run:
+
+- Scheduler LastRunTime: 2026-10-04 03:00:01 local; LastTaskResult: 0.
+- Backup status: started 03:00:03, finished 03:00:52 local (UTC+03:00),
+  `status=uploaded`, `stage=complete`, with a recorded Drive file ID.
+- Encrypted artifact: 6,332,292 bytes; recalculated SHA-256 matches the durable
+  status hash. No plaintext package or key was opened.
+- Recovery startup log contains the encrypted Element channel startup; neither
+  maintenance nor paused marker remains. Upload follows successful restoration
+  in the coordinator, so complete status is not a pre-recovery success marker.
+
+This verifies the timed invocation, local artifact integrity and recorded upload/
+runtime recovery. It does not repeat a remote download, restore rehearsal or
+visual terminal check, nor prove replacement-host or Element-key recovery.
 
 ### Verification commands
 
