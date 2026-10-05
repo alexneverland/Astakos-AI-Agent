@@ -75,8 +75,8 @@ recovery after descendant shutdown failure without overlapping old writers.
 
 ## Remaining live verification
 
-1. **Matrix nightly backup:** observe the next timed 03:00 run and recovery in
-   the original visible terminal. PR #210 is merged; encrypted private Drive
+1. **Matrix recovery:** the timed 03:00 invocation is now verified; full Element
+   key recovery and replacement-host recovery remain separate work. PR #210 is merged; encrypted private Drive
    delivery, actual Scheduler invocation and isolated server/bot restore were
    already verified. Full Element key recovery and replacement-host recovery
    remain separately bounded verification, not a complete host-loss guarantee.
@@ -86,7 +86,13 @@ recovery after descendant shutdown failure without overlapping old writers.
    backup subprocesses now use explicit DEVNULL input; stage/failure diagnostics
    preserve the primary failure separately from recovery. Actual Scheduler retry
    at 08:48:53 local completed at 08:49:57 with LastTaskResult=0, verified encrypted
-   upload and recovery under the same visible parent. Next timed run remains open.
+   upload and recovery under the same visible parent. The timed 2026-10-04 run
+   succeeded: Scheduler start 03:00:01 local, backup completion 03:00:52,
+   LastTaskResult=0, status=uploaded/stage=complete. The 6,332,292-byte encrypted
+   artifact matches its recorded SHA-256; the status records a Drive upload ID.
+   Recovery logs show the encrypted Matrix channel restarted, with no remaining
+   pause/maintenance marker. This check did not repeat a Drive download/restore
+   or visually inspect the terminal; it is not full host-loss recovery evidence.
    The separate 00:00 data-only run succeeded on 2026-10-03: 47 files, revision
    dd20296, completion at 00:00:47 local and LastTaskResult=0.
 2. **Behavioral conversation:** naturally observe relevant commentary, semantic
@@ -99,6 +105,9 @@ recovery after descendant shutdown failure without overlapping old writers.
    behavioral Debug section. Gate/decision/error codes explain skips without
    recording chat text, model output or exception messages. Cached polls retain
    the last evaluation; telemetry failure cannot change send/approval behavior.
+   A natural Matrix tick at 2026-10-04 22:31 recorded recent_activity. Natural
+   model evaluation/opener observation remains pending. Followups are separate
+   specific-event continuations and are not changed by initiative diagnostics.
 
 ## Standing boundaries, not pending tasks
 

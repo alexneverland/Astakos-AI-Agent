@@ -63,18 +63,21 @@ full-suite run.
 
 ## Existing natural/live verification (preserved)
 
-- [ ] Observe the next timed 03:00 Matrix backup after the headless-handle fix.
-  The 2026-10-03 timed run failed. Reproduction identified invalid inherited stdin
-  (WinError 6) in pythonw subprocess boundaries after console handoff. Explicit
-  DEVNULL input preserves fail-closed checks. A real Scheduler retry at 08:48:53
-  completed at 08:49:57 with LastTaskResult=0, encrypted verified upload and
-  the original watchdog/console restored. Safe stage diagnostics are retained.
+- [x] Verify the timed 03:00 Matrix backup after the headless-handle fix.
+  The 2026-10-04 invocation started at 03:00:01 local; backup status spans
+  03:00:03 to 03:00:52, with LastTaskResult=0 and stage=complete/status=uploaded.
+  The encrypted 6,332,292-byte artifact matches the recorded SHA-256. A Drive
+  upload ID is recorded; Matrix startup is present in the recovery log and no
+  maintenance/pause marker remains. No new restore rehearsal or Drive download
+  was performed during this read-only verification.
 - [ ] Separately scope Element recovery-key and replacement-host verification.
   Current evidence does not prove complete client/host-loss recovery.
 - [ ] Observe normal behavioral commentary, topic opt-out/re-enable and one
   appropriate spontaneous opener during ordinary use, including non-repetition.
 - [ ] Observe initiative diagnostics on a natural scheduler tick: last check,
   retained model evaluation and skip/error reason in Behavioral Patterns Debug.
+  A natural Matrix tick on 2026-10-04 at 22:31 recorded recent_activity.
+  Retained model evaluation still awaits natural observation; offline tests pass.
   Older evaluations have no recorded reason; do not infer one retrospectively.
 - [ ] Reconcile new behavioral exceptions from that observation. Known held
   delivery/recovery limitations are already documented in the plan and spec.
