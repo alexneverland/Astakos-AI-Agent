@@ -500,7 +500,7 @@ def dev_agent_node(state):
     prompt_content = build_prompt(history, system_base, channel=state.get("channel"))
 
     static_tools = [
-        write_code, run_code, read_local_file, write_custom_tool, register_tool,
+        write_code, run_code, read_local_file, write_custom_tool, register_tool, create_file_tool,
         delete_from_memory, search_memory, save_to_memory,
         execute_local_pipeline, control_spotify, control_vacuum,
         get_navigation_info, recipe_expert, log_meal,
