@@ -2163,8 +2163,12 @@ def google_tasks_tool(
 @tool
 def create_file_tool(file_type: str, filename: str, data: str) -> str:
     """
-    [WARNING: For .docx, .xlsx, .pptx files, the use of this tool is FORBIDDEN. Use ONLY run_officecli]
     Creates local PDF, TXT (and legacy DOCX/XLSX) files.
+    Use PDF/TXT modes directly. Prefer run_officecli for Office output, even
+    simple files; DOCX/XLSX modes are fallback only when OfficeCLI is unavailable,
+    returns an error, or cannot cover the required structure. This tool does not
+    generate PowerPoint. Preserve the requested format and all safety/approval
+    gates; never use fallback to bypass a security rejection.
     file_type: 'docx', 'pdf', 'xlsx', 'txt'
     filename: The name of the file (e.g., 'report.txt')
     data: The content. 

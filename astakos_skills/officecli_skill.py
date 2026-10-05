@@ -49,8 +49,12 @@ def run_officecli(command: str) -> str:
     Executes commands in OfficeCLI to create and edit Word (.docx), Excel (.xlsx), and PowerPoint (.pptx) files.
     OfficeCLI supports document nodes, template merging, and Excel cell values/formulas.
 
-    FORBIDDEN: Do not use the old create_file_tool or generate_word_doc for Office files. 
-    Use this tool for simple conversions or templates. HOWEVER, IF a complex structure is needed (e.g., custom calendars, specific cells using openpyxl/python-docx), you ARE ALLOWED to use python (run_terminal_command or run_code), bypassing this tool.
+    First choice for Word, Excel and PowerPoint output, even simple Office files.
+    Native generators may be used directly for PDF, TXT and CSV.
+    For Office output, native DOCX/XLSX generators or custom Python are fallback
+    options only when OfficeCLI is unavailable, returns an error, or cannot cover
+    the required structure. Preserve the requested format and all safety/approval
+    gates; never use fallback to bypass a security rejection.
     ALWAYS create or save files inside the folder:
     C:/astakos_v2/outputs/
     So that drive_manager and the Web UIs can find them!
