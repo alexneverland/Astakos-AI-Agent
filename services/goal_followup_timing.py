@@ -70,6 +70,56 @@ def select_goals_for_followup(
     return selected
 
 
+def recent_memories_show_goal_activity(
+    goal: dict[str, Any], results: dict[str, Any], *, now: datetime,
+) -> bool:
+    """Semantically verify retrieved evidence; unavailable decisions raise for deferral."""
+    from core.i18n import load_prompt
+    from core.untrusted_content import format_untrusted_persisted_content
+    from services.gemini import safe_gemini_call
+
+    if results.get("_error"):
+        raise ValueError("Goal memory search unavailable")
+    ids = (results.get("ids") or [[]])[0]
+    documents = (results.get("documents") or [[]])[0]
+    metadatas = (results.get("metadatas") or [[]])[0]
+    if len(ids) != len(documents) or len(ids) != len(metadatas):
+        raise ValueError("Incomplete goal memory evidence")
+    if not ids:
+        return False
+    memories = []
+    for record_id, document, metadata in zip(ids[:3], documents[:3], metadatas[:3]):
+        if not isinstance(record_id, str) or not isinstance(document, str) or not document.strip():
+            raise ValueError("Invalid goal memory evidence")
+        metadata = metadata or {}
+        recorded_at = _recorded_time(metadata.get("timestamp"))
+        memories.append({
+            "id": record_id,
+            "content": format_untrusted_persisted_content(document[:2000], metadata),
+            "recorded_at": recorded_at.strftime("%Y-%m-%d %H:%M") if recorded_at else None,
+            "date": metadata.get("date"),
+        })
+    data = {
+        "checked_at": now.strftime("%Y-%m-%d %H:%M"),
+        "recent_window_start": (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M"),
+        "goal": format_untrusted_persisted_content(
+            format_goal_followup_context(goal), goal.get("metadata"),
+        ),
+        "recent_memories": memories,
+    }
+    prompt = load_prompt("goal_followup_memory_activity.md").replace(
+        "{{data}}", json.dumps(data, ensure_ascii=False),
+    )
+    decision = json.loads(safe_gemini_call(prompt, retries=1).text)
+    related = decision.get("related_memory_ids") if isinstance(decision, dict) else None
+    supplied_ids = {memory["id"] for memory in memories}
+    if not isinstance(related, list) or any(
+        not isinstance(record_id, str) or record_id not in supplied_ids for record_id in related
+    ):
+        raise ValueError("Unavailable or invalid goal activity decision")
+    return bool(related)
+
+
 def format_goal_followup_context(goal: dict[str, Any]) -> str:
     """Describe only known goal events and dates for the message writer."""
     meta = goal.get("metadata") or {}

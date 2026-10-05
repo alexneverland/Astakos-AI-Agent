@@ -5372,6 +5372,7 @@ def job_goal_followup():
         from memory.vector_store import vector_store, vector_lock
         from services.goal_followup_timing import (
             format_goal_followup_context,
+            recent_memories_show_goal_activity,
             select_goals_for_followup,
         )
         now = datetime.now()
@@ -5384,14 +5385,19 @@ def job_goal_followup():
                 results = vector_store._collection.query(
                     query_embeddings=[emb],
                     n_results=3,
-                    where={"timestamp": {"$gte": cutoff_ts}},
+                    where={"$and": [
+                        {"timestamp": {"$gte": cutoff_ts}},
+                        {"timestamp": {"$lte": now.timestamp()}},
+                        {"category": {"$ne": "goal"}},
+                    ]},
+                    include=["documents", "metadatas"],
                 )
             ids = results.get("ids") or []
-            found = bool(ids and ids[0])
+            found = recent_memories_show_goal_activity(goal, results, now=now)
             print(
                 f"[GoalFollowup]: '{goal['project']}' → "
                 f"{'active' if found else 'stale'} "
-                f"(recent memories: {len(ids[0]) if ids else 0})"
+                f"(candidates: {len(ids[0]) if ids else 0}; semantic activity: {found})"
             )
             return found
 
