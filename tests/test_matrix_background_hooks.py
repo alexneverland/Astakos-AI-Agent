@@ -158,6 +158,22 @@ def test_matrix_capability_followup_is_queued_with_persisted_turn_id(tmp_path) -
     assert not any(fn.__name__ == "run_matrix_capability_followup" for fn, _ in external.tasks)
 
 
+@pytest.mark.parametrize("outcome", ["resolved", "already_resolved", "partial", "declined", "deferred"])
+def test_context_acknowledgements_do_not_offer_spurious_bug(monkeypatch, outcome):
+    """Successful typed acknowledgements are not capability-failure evidence."""
+    from core.i18n import t
+    from services import matrix_background as background
+
+    classifications = []
+    monkeypatch.setattr(background, "load_messages_after_rowid", lambda **_: [])
+    monkeypatch.setattr(background, "update_capabilities_from_exchange",
+                        lambda *args, **kwargs: classifications.append(args))
+    background.run_matrix_capability_followup(
+        "Όχι φίλε στην δουλειά είμαι", t("routine_context." + outcome),
+        "Routine_Context", 42, "unused.db")
+    assert bool(classifications) == (outcome == "deferred")
+
+
 @pytest.mark.parametrize("kind", ["missing_capability", "existing_behavior_bug"])
 def test_matrix_capability_followup_sends_once_and_persists_proposal(
     tmp_path, monkeypatch, kind

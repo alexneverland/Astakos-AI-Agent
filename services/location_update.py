@@ -55,19 +55,16 @@ def location_is_home(latitude: float, longitude: float) -> bool | None:
 
 
 def sync_live_location_out_of_home_state(latitude: float, longitude: float) -> None:
-    """Update the routine home-context flag from a trusted live GPS point."""
-    from memory.routine_db import get_context_state, set_context_state
+    """Refresh owner whereabouts evidence from every trusted live GPS point."""
+    from memory.routine_db import set_context_state
 
     is_home = location_is_home(latitude, longitude)
     if is_home is None:
         return
     desired_value = "false" if is_home else "true"
-    state = get_context_state("user_out_of_home") or {}
-    current_value = str(state.get("value") or "").strip().lower()
-    expires_at = str(state.get("expires_at") or "").strip()
     today = datetime.now().strftime("%Y-%m-%d")
-    if current_value == desired_value and (not expires_at or expires_at >= today):
-        return
+    # Same-value observations are still new evidence. The canonical upsert
+    # refreshes updated_at without inferring work or family co-presence.
     set_context_state("user_out_of_home", desired_value, expires_at=today)
 
 

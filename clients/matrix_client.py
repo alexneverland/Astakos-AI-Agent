@@ -487,28 +487,60 @@ class MatrixTextTransport:
             }
         )
 
-    def _trusted_location(self, room: Any, event: Any) -> tuple[float, float, bool] | None:
+    @staticmethod
+    def _log_location_decision(outcome: str, reason: str, run_id: str) -> None:
+        """Record bounded transport decisions, never coordinates or identities."""
+        try:
+            from memory.event_log import log_event
+            log_event("location", "matrix_location", outcome=outcome, reason=reason,
+                      run_id=run_id, entry_point="matrix_location_event", channel="matrix",
+                      debug_type="location_decision", debug_source="matrix_transport",
+                      debug_effect=outcome)
+        except Exception:
+            # Diagnostic storage must never change the transport decision.
+            pass
+
+    def _trusted_location(self, room: Any, event: Any, *, run_id: str = "") -> tuple[float, float, bool] | None:
         """Return validated coordinates from one trusted decrypted location event."""
-        if str(getattr(room, "room_id", "")) != self._allowed_room_id:
-            return None
-        if getattr(room, "encrypted", False) is not True:
-            return None
-        if not isinstance(event, self._location_event_types):
-            return None
-        if getattr(event, "decrypted", False) is not True:
-            return None
-        sender = str(getattr(event, "sender", ""))
-        if sender != self._allowed_user_id or sender == self._service_user_id:
-            return None
         source = getattr(event, "source", None)
         if not isinstance(source, dict):
             return None
-        content = source.get("content")
-        if not isinstance(content, dict):
-            return None
         event_type = str(source.get("type") or "")
+        content = source.get("content")
         live_update = event_type in {"m.beacon", "org.matrix.msc3672.beacon"}
-        if event_type == "m.room.message" and content.get("msgtype") == "m.location":
+        sharing = event_type in {"m.beacon_info", "org.matrix.msc3672.beacon_info"}
+        static_point = (event_type == "m.room.message" and isinstance(content, dict)
+                        and content.get("msgtype") == "m.location")
+        if not (live_update or sharing or static_point):
+            return None  # Ordinary text/unknown events are not location failures.
+
+        def reject(reason: str) -> None:
+            """Log a fixed reason, without copying untrusted event content."""
+            self._log_location_decision("rejected", reason, run_id)
+
+        if str(getattr(room, "room_id", "")) != self._allowed_room_id:
+            reject("wrong_room")
+            return None
+        if getattr(room, "encrypted", False) is not True:
+            reject("room_not_encrypted")
+            return None
+        if not isinstance(event, self._location_event_types):
+            reject("unsupported_event_class")
+            return None
+        if getattr(event, "decrypted", False) is not True:
+            reject("not_decrypted")
+            return None
+        sender = str(getattr(event, "sender", ""))
+        if sender != self._allowed_user_id or sender == self._service_user_id:
+            reject("wrong_sender")
+            return None
+        if not isinstance(content, dict):
+            reject("invalid_content")
+            return None
+        if sharing:
+            self._log_location_decision("sharing", "awaiting_point", run_id)
+            return None
+        if static_point:
             geo_uri = content.get("geo_uri")
         elif live_update:
             location = content.get("m.location") or content.get("org.matrix.msc3488.location")
@@ -518,7 +550,11 @@ class MatrixTextTransport:
         from services.location_update import parse_geo_uri
 
         coordinates = parse_geo_uri(str(geo_uri or ""))
-        if coordinates is None or not str(getattr(event, "event_id", "")).strip():
+        if coordinates is None:
+            reject("invalid_coordinates")
+            return None
+        if not str(getattr(event, "event_id", "")).strip():
+            reject("missing_event_id")
             return None
         return coordinates[0], coordinates[1], live_update
 
@@ -526,7 +562,9 @@ class MatrixTextTransport:
         """Process one trusted location event once, with optional acknowledgement."""
         if self._location_handler is None:
             return
-        location = self._trusted_location(room, event)
+        from uuid import uuid4
+        run_id = uuid4().hex
+        location = self._trusted_location(room, event, run_id=run_id)
         if location is None:
             return
         event_id = str(event.event_id).strip()
@@ -537,8 +575,15 @@ class MatrixTextTransport:
             db_path=self._state_db_path,
         )
         if reservation["action"] == "already_reserved":
+            self._log_location_decision("duplicate", "already_reserved", run_id)
             return
-        reply = await self._location_handler(*location)
+        self._log_location_decision("received", "validated_point", run_id)
+        try:
+            reply = await self._location_handler(*location)
+        except Exception:
+            self._log_location_decision("failed", "handler_failed", run_id)
+            raise
+        self._log_location_decision("processed", "processed", run_id)
         reply_text = str(reply or "").strip()
         if not reply_text:
             mark_matrix_event_processed(event_id, db_path=self._state_db_path)

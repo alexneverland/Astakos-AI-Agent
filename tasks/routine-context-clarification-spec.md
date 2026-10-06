@@ -290,3 +290,43 @@ worker fixture verifies fresh stored evidence resolving a question 15 seconds
 before its slot, followed by one ordinary reminder across two checks, including
 confirmed delivery with history failure. Repeated polls cannot rearm the wakeup;
 declined or expired questions do not dispatch. No live data/runtime was touched.
+
+## Concurrent GPS and conversational answers
+
+The live 2026-10-06 Matrix observation exposed an acknowledgement race: fresh
+GPS resolved the question while owner-answer classification was still running.
+An answer that lost its commit must inspect the same request identity. If that
+request is already resolved, acknowledge the newer information, not a write of
+the older answer. Never retry the old payload or rearm routine dispatch.
+Declined, expired or still-pending requests keep their non-success outcome.
+Context acknowledgements do not imply tool approval; approval gates are unchanged.
+Successful system-generated Routine_Context replies are excluded from Matrix
+capability classification, while deferred failures and ordinary bug reports
+remain eligible. This exclusion compares exact localized system output, not
+user phrases or keywords.
+
+Verification: the real temporary GPS writer, poll and answer ledger reproduce
+the race (failed before the fix); 86 focused reply/extractor/poll/channel/Matrix
+background tests pass with one existing dependency warning. Natural post-fix
+observation remains pending. No full suite, live provider or device call was run.
+
+## Same-value live GPS evidence and transport diagnostics
+
+Each validated live point refreshes `user_out_of_home.updated_at` through the
+canonical context upsert, even when its boolean value is unchanged. Previously
+the same-value shortcut left the stored observation stale despite repeated live
+points. Static pins and unknown home geometry do not refresh this flag; owner
+work and family co-presence are not inferred. Existing expiry policy is unchanged.
+
+Matrix location callbacks record fixed acceptance/rejection reasons in the
+existing private event log, correlated by a random run ID. No coordinate, sender,
+room identifier or exception payload is recorded. A beacon-info sharing event
+is `awaiting_point`, not a coordinate update; `processed` means the registered
+location handler completed successfully. Telemetry failure does not alter trust
+checks or processing. Malformed, undecrypted and wrong-sender points remain
+rejected. Historical points were not retained, so the cause of the earlier
+missing fresh point cannot be established retrospectively.
+
+Verification: 101 focused location/reply/evidence tests pass on temporary data,
+including same-value freshness and actual private JSON decision logs. Natural
+Element share observation remains pending; no runtime restart or live send.

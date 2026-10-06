@@ -86,6 +86,16 @@ def run_matrix_capability_followup(
     conversation_db_path: str,
 ) -> None:
     """Deliver one classified proposal only while its Matrix turn is current."""
+    from core.i18n import t
+
+    # Exact system acknowledgements are operational outcomes, not user phrases
+    # or evidence of a missing capability. Genuine deferred failures still enter
+    # the classifier, as do ordinary user-reported bugs in all other turns.
+    if agent_name == "Routine_Context" and ai_text in {
+        t("routine_context." + outcome)
+        for outcome in ("resolved", "already_resolved", "partial", "declined")
+    }:
+        return
     if is_capability_proposal_text(ai_text) or is_bug_proposal_text(ai_text) or is_bug_diagnosis_text(ai_text):
         return
     newer = load_messages_after_rowid(
