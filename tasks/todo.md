@@ -21,6 +21,9 @@ this active checklist; evidence remains in Git history, specs/runbooks and the
 - [x] Address PR #225 P2 findings: recognize concurrent resolution on refusal;
   move location file telemetry off the event loop and halve successful-point
   writes. 82 focused tests and four terminal-state safety cases pass offline.
+- [x] Address the second PR #225 review: persist GPS completion before telemetry
+  cancellation and consult resolved ledger state before a partial reply.
+  74 focused tests pass, including acknowledgement recovery without reprocessing.
 
 Contract: [context-evidence-spec.md](context-evidence-spec.md).
 Map: [routine-context-refresh-map.md](routine-context-refresh-map.md).

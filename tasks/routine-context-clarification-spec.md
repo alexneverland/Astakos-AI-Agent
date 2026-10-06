@@ -341,3 +341,14 @@ received/processed pair. The existing daily JSON sink is unchanged; its full-fil
 rewrite cost remains, so this is not a claim of append-only or constant-cost
 logging. Offline regressions check the actual logger thread and private JSON.
 82 focused tests plus four refused/related terminal-state safety cases passed.
+
+Second PR #225 review correction: immediately after a successful location
+handler, persist `replied` (silent point) or the recoverable `reply_pending`
+acknowledgement before awaiting diagnostic I/O. Cancellation during telemetry
+cannot leave completed work in `processing`; the existing pending-reply worker
+recovers a static pin acknowledgement without rerunning its handler. Partial
+answer commits inspect the exact request ledger before rendering `partial`;
+concurrent resolution instead receives `already_resolved`, without another
+state write or dispatch. Four regressions cover silent/static cancellation and
+partial/resolved outcomes; three failed before the fix. 74 focused offline tests
+pass. No runtime restart, real GPS write, external send or full-suite run.

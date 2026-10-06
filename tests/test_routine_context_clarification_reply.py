@@ -343,3 +343,33 @@ def test_nonresolution_during_answer_is_not_acknowledged_as_resolved(delivered, 
     assert result.outcome == ("deferred" if relation == "related" else "uncertain")
     assert result.consumed == (relation == "related")
     assert routine_db.get_context_state("partner_with_user") is None
+
+
+@pytest.mark.parametrize("resolved_by_poll", [True, False])
+def test_partial_answer_uses_current_terminal_ledger(delivered, monkeypatch, resolved_by_poll):
+    """A partial canonical commit followed by resolution gets a complete acknowledgement."""
+    store = ClarificationStore(delivered.path.parent / "multi-flag.json")
+    request = QuestionRequest("multi", "presence", ("r1",),
+        ("partner_with_user", "user_out_of_home"), NOW + timedelta(minutes=12),
+        "Are you home together?", "matrix")
+    assert store.reserve(request, now=NOW)
+    assert store.begin_send("multi", now=NOW)
+    assert store.mark_sent("multi", external_id="$multi", now=NOW)
+    assert store.mark_recorded("multi")
+    original_commit = store.commit_answer
+
+    def commit_then_resolve(*args, **kwargs):
+        applied = original_commit(*args, **kwargs)
+        assert applied == frozenset({"partner_with_user"})
+        if resolved_by_poll:
+            routine_db.set_context_state("user_out_of_home", "false")
+            assert store.close("multi", outcome="resolved", now=NOW + timedelta(seconds=2))
+        return applied
+
+    monkeypatch.setattr(store, "commit_answer", commit_then_resolve)
+    answer = process_question_answer(store=store, user_text="yes", channel="matrix",
+        now=NOW + timedelta(seconds=1), trusted_owner=True)
+    assert answer.consumed
+    assert answer.outcome == ("already_resolved" if resolved_by_poll else "partial")
+    assert routine_db.get_context_state("partner_with_user")["value"] == "false"
+    assert store.snapshot()["requests"][0]["status"] == ("resolved" if resolved_by_poll else "sent")

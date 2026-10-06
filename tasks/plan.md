@@ -27,6 +27,11 @@ offload Matrix location telemetry to worker threads, with one terminal write per
 accepted point. 82 focused tests plus four refusal/nonresolution safety cases
 pass offline; live observation remains pending.
 
+The second PR #225 review is addressed: location completion/reply is durable
+before awaited telemetry; partial acknowledgements recheck the exact ledger
+resolution. Cancellation/recovery and partial-versus-resolved regressions failed
+before the fix; 74 focused tests pass. Natural observation remains pending.
+
 Map: [routine-context-refresh-map.md](routine-context-refresh-map.md).
 Owner-approved contract: [context-evidence-spec.md](context-evidence-spec.md).
 Status: read-only foundation implemented on 2026-10-06; the following evidence

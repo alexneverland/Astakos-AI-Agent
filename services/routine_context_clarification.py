@@ -358,7 +358,8 @@ def process_question_answer(
                 return QuestionAnswer(True, "declined")
         if result.relation == "related" and result.applied_flags:
             completed = set(pending["flags"]) <= result.applied_flags
-            return QuestionAnswer(True, "resolved" if completed else "partial")
+            if completed:
+                return QuestionAnswer(True, "resolved")
         if result.relation in {"related", "refused"}:
             # GPS or another authoritative worker may have resolved this exact
             # question while inference ran. Acknowledge the ledger outcome,
@@ -367,6 +368,8 @@ def process_question_answer(
                               if row["id"] == pending["id"]), None)
             if completed is not None and completed["status"] == "resolved":
                 return QuestionAnswer(True, "already_resolved")
+            if result.relation == "related" and result.applied_flags:
+                return QuestionAnswer(True, "partial")
             return (QuestionAnswer(True, "deferred") if result.relation == "related"
                     else QuestionAnswer(False, "uncertain"))
         return QuestionAnswer(False, result.relation)

@@ -583,13 +583,14 @@ class MatrixTextTransport:
         except Exception:
             await asyncio.to_thread(self._log_location_decision, "failed", "handler_failed", run_id)
             raise
-        # One terminal log per accepted point, rather than two full-file writes.
-        await asyncio.to_thread(self._log_location_decision, "processed", "processed", run_id)
         reply_text = str(reply or "").strip()
         if not reply_text:
             mark_matrix_event_processed(event_id, db_path=self._state_db_path)
+            await asyncio.to_thread(self._log_location_decision, "processed", "processed", run_id)
             return
         store_matrix_event_reply(event_id, reply_text, db_path=self._state_db_path)
+        # Preserve recoverable completion before diagnostics can be cancelled.
+        await asyncio.to_thread(self._log_location_decision, "processed", "processed", run_id)
         await self._deliver_pending(
             {
                 "event_id": event_id,

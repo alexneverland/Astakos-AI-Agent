@@ -377,6 +377,65 @@ async def test_transport_accepts_trusted_static_location_once(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reply", [None, "Location recorded"])
+async def test_location_completion_survives_cancellation_during_telemetry(tmp_path, monkeypatch, reply):
+    """Cancellation of diagnostics cannot lose a completed handler or its reply."""
+    import asyncio
+    import threading
+    from clients.matrix_client import MatrixTextTransport
+    from memory.matrix_event_state import get_matrix_event
+
+    entered = threading.Event()
+    release = threading.Event()
+    handled = []
+
+    def log(outcome, reason, run_id):
+        if outcome == "processed":
+            entered.set()
+            assert release.wait(5), "Test must release the diagnostic worker"
+
+    async def handler(*args):
+        handled.append(args)
+        return reply
+
+    class Client:
+        sent = []
+
+        async def room_send(self, **kwargs):
+            self.sent.append(kwargs)
+            return object()
+
+    client = Client()
+    db_path = str(tmp_path / "state.db")
+    transport = MatrixTextTransport(client=client, allowed_user_id="@owner:example.test",
+        allowed_room_id="!private-room:example.test", service_user_id="@astakos:example.test",
+        turn_handler=lambda *_: None, state_db_path=db_path,
+        text_event_type=type("Text", (), {}), location_event_types=(FakeLocationEvent,),
+        location_handler=handler, send_error_types=())
+    monkeypatch.setattr(transport, "_log_location_decision", log)
+    task = asyncio.create_task(transport.handle_location_event(FakeRoom(), FakeLocationEvent()))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        state = get_matrix_event("$location-1", db_path=db_path)
+        assert state["status"] == ("reply_pending" if reply else "replied")
+        if reply:
+            assert state["reply_text"] == reply
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    await transport.resend_pending_replies()
+    await transport.handle_location_event(FakeRoom(), FakeLocationEvent())
+    assert len(handled) == 1
+    assert len(client.sent) == (1 if reply else 0)
+    assert get_matrix_event("$location-1", db_path=db_path)["status"] == "replied"
+
+
+@pytest.mark.asyncio
 async def test_live_location_update_is_processed_without_chat_reply(tmp_path) -> None:
     from clients.matrix_client import MatrixTextTransport
 
