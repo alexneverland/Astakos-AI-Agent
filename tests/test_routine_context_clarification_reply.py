@@ -274,3 +274,102 @@ def test_dispatch_request_never_replays_expired_slot(delivered):
                             now=NOW + timedelta(seconds=1), trusted_owner=True)
     assert not delivered.claim_dispatch(now=NOW + timedelta(minutes=12))
     assert not delivered.snapshot()["requests"][0]["dispatch_pending"]
+
+
+@pytest.mark.parametrize("relation", ["related", "refused"])
+def test_live_gps_resolves_question_during_owner_answer(delivered, monkeypatch, relation):
+    """A real GPS/poll resolution must not become a failed answer or overwrite."""
+    from services.location_update import record_location_update
+    from services import location_update
+    from services.routine_context_evidence import evaluate_context_evidence, load_gps_point
+    from services.routine_context_clarification_poll import PollSnapshot, run_clarification_poll
+
+    store = ClarificationStore(delivered.path.parent / "gps-question.json")
+    request = QuestionRequest("gps", "home", ("100",), ("user_out_of_home",),
+                              NOW + timedelta(minutes=12),
+                              "Βρίσκεστε στο σπίτι αυτή τη στιγμή;", "matrix")
+    assert store.reserve(request, now=NOW)
+    assert store.begin_send("gps", now=NOW)
+    assert store.mark_sent("gps", external_id="$gps", now=NOW)
+    assert store.mark_recorded("gps")
+    gps_path = delivered.path.parent / "location.json"
+    clock = NOW + timedelta(seconds=3)
+    monkeypatch.setattr(location_update, "location_is_home", lambda *_: False)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("No second send or stale context write")
+
+    def classify(_):
+        record_location_update(1, 2, live_update=True, storage_file=gps_path,
+                               now_ts=(NOW + timedelta(seconds=2)).timestamp())
+        evidence = evaluate_context_evidence({}, load_gps_point(gps_path), now=clock,
+                                             location_resolver=lambda *_: False)
+        outcome = run_clarification_poll(
+            store=store, clock=lambda: clock, selected_channel=lambda: "matrix",
+            snapshot_loader=lambda _: PollSnapshot((), {}, evidence, "1"),
+            unavailable=lambda: False, classify=forbidden, budget=forbidden,
+            sender=forbidden, record=forbidden)
+        assert outcome == "resolved"
+        return SimpleNamespace(text='{"relation":"' + relation + '","flags":{"user_out_of_home":true}}')
+
+    monkeypatch.setattr(context_extractor, "safe_gemini_call", classify)
+    monkeypatch.setattr(context_extractor, "_persist_context_payload", forbidden)
+    result = process_question_answer(
+        store=store, user_text="Όχι φίλε στην δουλειά είμαι", channel="matrix",
+        now=NOW + timedelta(seconds=1), current_time=lambda: clock, trusted_owner=True)
+    assert result.consumed and result.outcome == "already_resolved"
+    assert routine_db.get_context_state("user_out_of_home")["value"] == "true"
+    assert store.snapshot()["requests"][0]["status"] == "resolved"
+    assert "έγκρι" not in result.reply.casefold()
+
+
+@pytest.mark.parametrize("outcome", ["declined", "expired"])
+@pytest.mark.parametrize("relation", ["related", "refused"])
+def test_nonresolution_during_answer_is_not_acknowledged_as_resolved(delivered, monkeypatch, outcome, relation):
+    """Only the exact resolved request can receive the already-resolved reply."""
+    clock = [NOW + timedelta(seconds=2)]
+
+    def classify(_):
+        if outcome == "declined":
+            delivered.close("q1", outcome="declined", now=clock[0])
+        else:
+            clock[0] = NOW + timedelta(minutes=13)
+            delivered.expire(now=clock[0])
+        return SimpleNamespace(text='{"relation":"' + relation + '","flags":{"partner_with_user":false}}')
+
+    monkeypatch.setattr(context_extractor, "safe_gemini_call", classify)
+    result = process_question_answer(store=delivered, user_text="no", channel="matrix",
+        now=NOW + timedelta(seconds=1), current_time=lambda: clock[0], trusted_owner=True)
+    assert result.outcome == ("deferred" if relation == "related" else "uncertain")
+    assert result.consumed == (relation == "related")
+    assert routine_db.get_context_state("partner_with_user") is None
+
+
+@pytest.mark.parametrize("resolved_by_poll", [True, False])
+def test_partial_answer_uses_current_terminal_ledger(delivered, monkeypatch, resolved_by_poll):
+    """A partial canonical commit followed by resolution gets a complete acknowledgement."""
+    store = ClarificationStore(delivered.path.parent / "multi-flag.json")
+    request = QuestionRequest("multi", "presence", ("r1",),
+        ("partner_with_user", "user_out_of_home"), NOW + timedelta(minutes=12),
+        "Are you home together?", "matrix")
+    assert store.reserve(request, now=NOW)
+    assert store.begin_send("multi", now=NOW)
+    assert store.mark_sent("multi", external_id="$multi", now=NOW)
+    assert store.mark_recorded("multi")
+    original_commit = store.commit_answer
+
+    def commit_then_resolve(*args, **kwargs):
+        applied = original_commit(*args, **kwargs)
+        assert applied == frozenset({"partner_with_user"})
+        if resolved_by_poll:
+            routine_db.set_context_state("user_out_of_home", "false")
+            assert store.close("multi", outcome="resolved", now=NOW + timedelta(seconds=2))
+        return applied
+
+    monkeypatch.setattr(store, "commit_answer", commit_then_resolve)
+    answer = process_question_answer(store=store, user_text="yes", channel="matrix",
+        now=NOW + timedelta(seconds=1), trusted_owner=True)
+    assert answer.consumed
+    assert answer.outcome == ("already_resolved" if resolved_by_poll else "partial")
+    assert routine_db.get_context_state("partner_with_user")["value"] == "false"
+    assert store.snapshot()["requests"][0]["status"] == ("resolved" if resolved_by_poll else "sent")

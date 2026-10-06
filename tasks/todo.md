@@ -8,6 +8,23 @@ this active checklist; evidence remains in Git history, specs/runbooks and the
 
 ## Current feature: context-evidence (foundation offline verified)
 
+- [x] Fix live Matrix GPS/answer race: acknowledge an already-resolved question
+  without reapplying the old answer or offering a spurious capability bug.
+  Verified with 86 focused offline tests; approval gates unchanged.
+- [ ] Observe the corrected acknowledgement naturally when fresh GPS resolves
+  a question during an owner reply. Do not manufacture live routine sends.
+- [x] Refresh same-value owner whereabouts on trusted live GPS updates and log
+  Matrix location acceptance/rejection reasons without coordinates or identities.
+  Verified offline with 101 focused location/reply/evidence tests.
+- [ ] Observe a renewed Element live share and inspect its private decision log;
+  a sharing event alone is not a received coordinate update.
+- [x] Address PR #225 P2 findings: recognize concurrent resolution on refusal;
+  move location file telemetry off the event loop and halve successful-point
+  writes. 82 focused tests and four terminal-state safety cases pass offline.
+- [x] Address the second PR #225 review: persist GPS completion before telemetry
+  cancellation and consult resolved ledger state before a partial reply.
+  74 focused tests pass, including acknowledgement recovery without reprocessing.
+
 Contract: [context-evidence-spec.md](context-evidence-spec.md).
 Map: [routine-context-refresh-map.md](routine-context-refresh-map.md).
 Scope: read-only foundation; automatic questions/routine adoption are not active.

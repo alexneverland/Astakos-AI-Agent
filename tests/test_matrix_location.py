@@ -68,7 +68,7 @@ def test_record_location_update_resets_short_stop_anchor_and_silences_live_updat
     assert stored["anchor_lat"] == 40.65
 
 
-def test_live_matrix_location_updates_home_context_without_repeating_same_state(
+def test_live_matrix_location_refreshes_same_home_context(
     tmp_path, monkeypatch
 ) -> None:
     import config
@@ -96,8 +96,112 @@ def test_live_matrix_location_updates_home_context_without_repeating_same_state(
     assert updates == [
         ("user_out_of_home", "false"),
         ("user_out_of_home", "true"),
+        ("user_out_of_home", "true"),
         ("user_out_of_home", "false"),
     ]
+
+
+def test_same_live_point_refreshes_stale_flag_without_inventing_family(tmp_path, monkeypatch):
+    """An unchanged location is new evidence; family and work remain independent."""
+    import datetime
+    from memory import routine_db
+    from services import location_update
+    from services.routine_context_evidence import evaluate_stored_evidence
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "routines.db"))
+    routine_db.setup_db()
+    clock = [datetime.datetime(2026, 10, 6, 10, 34)]
+    original_datetime = datetime.datetime
+
+    class FrozenDateTime(original_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock[0] if tz is None else clock[0].replace(tzinfo=tz)
+
+    monkeypatch.setattr(datetime, "datetime", FrozenDateTime)
+    monkeypatch.setattr(location_update, "datetime", FrozenDateTime)
+    routine_db.set_context_state("user_out_of_home", "true", expires_at="2026-10-06")
+    monkeypatch.setattr(location_update, "location_is_home", lambda *_: False)
+    clock[0] = original_datetime(2026, 10, 6, 17, 45)
+    location_update.record_location_update(1, 2, live_update=True,
+        storage_file=tmp_path / "location.json", now_ts=clock[0].timestamp())
+    state = routine_db.get_context_state("user_out_of_home")
+    assert state["updated_at"] == "2026-10-06T17:45:00"
+    evidence = evaluate_stored_evidence(state, now=clock[0].replace(tzinfo=ZoneInfo("Europe/Athens")))
+    assert evidence.status == "known" and evidence.effective_value is True
+    assert routine_db.get_context_state("kid1_with_user") is None
+    assert routine_db.get_context_state("user_at_work") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case,expected", [
+    ("valid", "processed"), ("sender", "wrong_sender"),
+    ("decrypted", "not_decrypted"), ("room", "wrong_room"),
+    ("geometry", "invalid_coordinates"), ("share", "awaiting_point"),
+    ("failure", "handler_failed"),
+])
+async def test_matrix_location_diagnostics_are_private_and_explain_decisions(tmp_path, monkeypatch, case, expected):
+    """Actual JSON telemetry distinguishes sharing, rejection and processing."""
+    import json
+    from clients.matrix_client import MatrixTextTransport
+    from memory import event_log
+
+    monkeypatch.setattr(event_log, "LOGS_DIR", str(tmp_path / "events"))
+    import threading
+    loop_thread = threading.get_ident()
+    logger_threads = []
+    real_log_event = event_log.log_event
+
+    def checked_log_event(*args, **kwargs):
+        logger_threads.append(threading.get_ident())
+        return real_log_event(*args, **kwargs)
+
+    monkeypatch.setattr(event_log, "log_event", checked_log_event)
+    handled = []
+
+    async def handler(*args):
+        if case == "failure":
+            raise RuntimeError("private geo:40.64,22.94")
+        handled.append(args)
+
+    class Client:
+        async def room_send(self, **kwargs):
+            raise AssertionError("No live reply")
+
+    transport = MatrixTextTransport(client=Client(), allowed_user_id="@owner:example.test",
+        allowed_room_id="!private-room:example.test", service_user_id="@astakos:example.test",
+        turn_handler=lambda *_: None, state_db_path=str(tmp_path / "state.db"),
+        text_event_type=type("Text", (), {}), location_event_types=(FakeLocationEvent,),
+        location_handler=handler, send_error_types=())
+    event = FakeLocationEvent(source={"type": "m.beacon",
+        "content": {"m.location": {"uri": "geo:40.64,22.94"}}})
+    room = FakeRoom()
+    if case == "sender":
+        event.sender = "@stranger:example.test"
+    elif case == "decrypted":
+        event.decrypted = False
+    elif case == "room":
+        room.room_id = "!other:example.test"
+    elif case == "geometry":
+        event.source["content"]["m.location"]["uri"] = "geo:91,22.94"
+    elif case == "share":
+        event.source = {"type": "m.beacon_info", "content": {"live": True}}
+    if case == "failure":
+        with pytest.raises(RuntimeError):
+            await transport.handle_location_event(room, event)
+    else:
+        await transport.handle_location_event(room, event)
+    files = list((tmp_path / "events").glob("*.json"))
+    assert len(files) == 1
+    raw = files[0].read_text(encoding="utf-8")
+    rows = json.loads(raw)
+    assert rows[-1]["reason"] == expected
+    assert all(row["entry_point"] == "matrix_location_event" and row["run_id"] for row in rows)
+    assert "40.64" not in raw and "22.94" not in raw and "geo:" not in raw
+    assert "@owner" not in raw and "@stranger" not in raw
+    assert bool(handled) == (case == "valid")
+    assert logger_threads and all(thread != loop_thread for thread in logger_threads)
 
 
 def test_matrix_location_fires_home_reminder_once_and_ignores_time_reminder(
@@ -270,6 +374,65 @@ async def test_transport_accepts_trusted_static_location_once(tmp_path) -> None:
     assert handled == [(40.6401, 22.9444, False)]
     assert len(client.sent) == 1
     assert get_matrix_event("$location-1", db_path=str(tmp_path / "state.db"))["status"] == "replied"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply", [None, "Location recorded"])
+async def test_location_completion_survives_cancellation_during_telemetry(tmp_path, monkeypatch, reply):
+    """Cancellation of diagnostics cannot lose a completed handler or its reply."""
+    import asyncio
+    import threading
+    from clients.matrix_client import MatrixTextTransport
+    from memory.matrix_event_state import get_matrix_event
+
+    entered = threading.Event()
+    release = threading.Event()
+    handled = []
+
+    def log(outcome, reason, run_id):
+        if outcome == "processed":
+            entered.set()
+            assert release.wait(5), "Test must release the diagnostic worker"
+
+    async def handler(*args):
+        handled.append(args)
+        return reply
+
+    class Client:
+        sent = []
+
+        async def room_send(self, **kwargs):
+            self.sent.append(kwargs)
+            return object()
+
+    client = Client()
+    db_path = str(tmp_path / "state.db")
+    transport = MatrixTextTransport(client=client, allowed_user_id="@owner:example.test",
+        allowed_room_id="!private-room:example.test", service_user_id="@astakos:example.test",
+        turn_handler=lambda *_: None, state_db_path=db_path,
+        text_event_type=type("Text", (), {}), location_event_types=(FakeLocationEvent,),
+        location_handler=handler, send_error_types=())
+    monkeypatch.setattr(transport, "_log_location_decision", log)
+    task = asyncio.create_task(transport.handle_location_event(FakeRoom(), FakeLocationEvent()))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        state = get_matrix_event("$location-1", db_path=db_path)
+        assert state["status"] == ("reply_pending" if reply else "replied")
+        if reply:
+            assert state["reply_text"] == reply
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    await transport.resend_pending_replies()
+    await transport.handle_location_event(FakeRoom(), FakeLocationEvent())
+    assert len(handled) == 1
+    assert len(client.sent) == (1 if reply else 0)
+    assert get_matrix_event("$location-1", db_path=db_path)["status"] == "replied"
 
 
 @pytest.mark.asyncio

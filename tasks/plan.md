@@ -11,6 +11,27 @@ The [archived plan](archive/2026-10-02-plan.md) is not an active queue.
 
 ## Current feature: time-aware routine context evidence
 
+Live GPS/answer acknowledgement race is corrected and offline verified (86
+focused tests). The exact question may resolve during inference: acknowledge
+the existing resolution without rewriting state or rearming dispatch. Natural
+post-fix observation remains pending; see routine-context-clarification-spec.md.
+
+Trusted live GPS now refreshes the canonical owner flag timestamp even when
+home/away is unchanged. Matrix location decisions use bounded private telemetry
+to distinguish sharing without a point, rejected points and completed handlers.
+101 focused location/reply/evidence tests pass; no coordinates or identities are
+logged. A renewed Element share still needs natural live observation.
+
+PR #225 review corrections cover refused answers racing with GPS resolution and
+offload Matrix location telemetry to worker threads, with one terminal write per
+accepted point. 82 focused tests plus four refusal/nonresolution safety cases
+pass offline; live observation remains pending.
+
+The second PR #225 review is addressed: location completion/reply is durable
+before awaited telemetry; partial acknowledgements recheck the exact ledger
+resolution. Cancellation/recovery and partial-versus-resolved regressions failed
+before the fix; 74 focused tests pass. Natural observation remains pending.
+
 Map: [routine-context-refresh-map.md](routine-context-refresh-map.md).
 Owner-approved contract: [context-evidence-spec.md](context-evidence-spec.md).
 Status: read-only foundation implemented on 2026-10-06; the following evidence

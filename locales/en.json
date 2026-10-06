@@ -1,7 +1,8 @@
 {
   "routine_context": {
-    "deferred": "I couldn't apply that answer to the pending context question. No action was approved.",
-    "resolved": "Got it — I've updated the current context. This is not an action approval.",
+    "deferred": "I couldn't record your clarification just now. I won't replace newer information with this answer.",
+    "resolved": "Got it — I've noted your clarification about the current situation.",
+    "already_resolved": "Got it — that question had already been clarified by newer information I received.",
     "partial": "I've noted what you clarified; the remaining context is still unknown.",
     "declined": "Okay, I'll leave that unanswered and won't assume the missing context."
   },

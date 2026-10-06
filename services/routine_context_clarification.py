@@ -310,7 +310,9 @@ class QuestionAnswer:
         """Render a localized acknowledgement, never an action-success claim."""
         from core.i18n import t
 
-        key = self.outcome if self.outcome in {"resolved", "partial", "declined", "deferred"} else "deferred"
+        key = self.outcome if self.outcome in {
+            "resolved", "already_resolved", "partial", "declined", "deferred",
+        } else "deferred"
         return t("routine_context." + key)
 
 
@@ -354,12 +356,22 @@ def process_question_answer(
         if result.relation == "refused":
             if still_authoritative() and store.close(pending["id"], outcome="declined", now=clock()):
                 return QuestionAnswer(True, "declined")
-            return QuestionAnswer(False, "uncertain")
         if result.relation == "related" and result.applied_flags:
             completed = set(pending["flags"]) <= result.applied_flags
-            return QuestionAnswer(True, "resolved" if completed else "partial")
-        if result.relation == "related":
-            return QuestionAnswer(True, "deferred")
+            if completed:
+                return QuestionAnswer(True, "resolved")
+        if result.relation in {"related", "refused"}:
+            # GPS or another authoritative worker may have resolved this exact
+            # question while inference ran. Acknowledge the ledger outcome,
+            # not an application of this older answer; never retry its writes.
+            completed = next((row for row in store.snapshot()["requests"]
+                              if row["id"] == pending["id"]), None)
+            if completed is not None and completed["status"] == "resolved":
+                return QuestionAnswer(True, "already_resolved")
+            if result.relation == "related" and result.applied_flags:
+                return QuestionAnswer(True, "partial")
+            return (QuestionAnswer(True, "deferred") if result.relation == "related"
+                    else QuestionAnswer(False, "uncertain"))
         return QuestionAnswer(False, result.relation)
     except (OSError, ValueError, RuntimeError, TimeoutError):
         return QuestionAnswer(False, "uncertain")
