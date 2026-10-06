@@ -1283,6 +1283,15 @@ function render(d) {
       </tr>`).join('')}</table></div>`;
   }
 
+  const clarification = rout.context_clarification || {};
+  const cp = clarification.pending;
+  html += `<div class="card"><h2>Context clarification</h2>
+    <div>${clarification.error ? 'Read error — held safely' : cp ? esc(cp.status) + ' · ' + esc(cp.channel) + ' · deadline ' + esc(cp.slot_at) : 'No pending question'}</div>
+    <div class="off">Delivered today: ${esc(clarification.delivered_today ?? 0)} / 2</div>
+    <div class="off">Last check: ${clarification.last_check ? esc(clarification.last_check.at) + ' · ' + esc(clarification.last_check.outcome) : 'Not recorded today'}</div>
+    <div class="table-wrap"><table><tr><th>Flag</th><th>Effective</th><th>Source / reason</th><th>Age</th></tr>
+    ${Object.entries(clarification.evidence || {}).map(([flag, item]) => `<tr><td>${esc(flag)}</td><td>${item.value === null ? 'unknown' : esc(item.value)}</td><td>${esc(item.source)} / ${esc(item.reason)}</td><td>${item.age_seconds == null ? '-' : Math.round(item.age_seconds / 60) + 'm'}</td></tr>`).join('')}</table></div>
+    <div class="off">Conditions passing alone do not prove delivery; see each routine’s last outcome and the timeline.</div></div>`;
   if ((rout.active||[]).length > 0) {
     html += `<div class="card" style="grid-column:1/-1"><h2>Active Routines (${rout.active.length})</h2>
       <div class="table-wrap"><table class="routines-table"><tr><th class="cell-tight">ID</th><th class="cell-tight">Schedule</th><th>Event</th><th>Rules</th><th class="cell-tight">Status</th><th class="cell-tight" style="text-align:right">Actions</th></tr>

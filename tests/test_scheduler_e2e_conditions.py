@@ -13,7 +13,8 @@ def _make_routines_db(path, rows):
         CREATE TABLE routines ( priority INTEGER DEFAULT 0, conflict_group TEXT, condition_type TEXT, condition_payload TEXT, condition_mode TEXT, source_memory_ref TEXT,
             id INTEGER PRIMARY KEY, event_name TEXT, confidence REAL,
             time_str TEXT, day_of_week TEXT, state TEXT, last_triggered TEXT,
-            muted_until TEXT DEFAULT NULL
+            muted_until TEXT DEFAULT NULL, paused_indefinitely INTEGER DEFAULT 0,
+            event_type TEXT DEFAULT 'daily', mention_count INTEGER DEFAULT 1
         )
     """)
     for r in rows:
@@ -40,6 +41,8 @@ def _run_job(
     routine_conditions=None,
     context_state=None,
     craft_return=("κανονικό μήνυμα", False),
+    context_evidence=None,
+    craft_callback=None,
 ):
     import clients.telegram_bot as bot
     import config as cfg
@@ -77,13 +80,20 @@ def _run_job(
             stack.enter_context(patch.object(bot, "is_duplicate_routine", return_value=False))
             stack.enter_context(patch.object(bot, "can_send_proactive", return_value=True))
             stack.enter_context(patch.object(bot, "should_skip_proactive_for_recent_activity", return_value=False))
-            stack.enter_context(patch.object(bot, "_craft_proactive_msg", return_value=craft_return))
+            def craft(*args, **kwargs):
+                if craft_callback:
+                    craft_callback()
+                return craft_return
+            stack.enter_context(patch.object(bot, "_craft_proactive_msg", side_effect=craft))
             stack.enter_context(patch.object(bot, "send_telegram_msg", side_effect=lambda m: sent.append(m)))
+            stack.enter_context(patch.object(bot, "_send_and_record_assistant", side_effect=lambda m, **_: sent.append(m) or "$test"))
             stack.enter_context(patch.object(bot, "log_event", side_effect=lambda cat, action, **kw: logged.append((cat, action, kw))))
             stack.enter_context(patch.object(bot, "bus", MagicMock()))
             stack.enter_context(patch.object(bot, "pending_routine_confirmations", {}))
+            stack.enter_context(patch.object(bot, "_recent_routine_skip_events", {}))
             stack.enter_context(patch.object(cfg, "BASE_DIR", tmp))
             stack.enter_context(patch.object(cfg, "ROUTINES_DB", db_path))
+            stack.enter_context(patch("memory.routine_db.DB_PATH", db_path))
             stack.enter_context(patch("clients.telegram_bot.datetime", FakeDT))
             stack.enter_context(patch("memory.routine_db.get_routine_notify_info", return_value={"cooldown_hours": 4}))
             stack.enter_context(patch("memory.routine_db.mark_routine_notified"))
@@ -94,12 +104,77 @@ def _run_job(
             stack.enter_context(patch("memory.routine_db.get_routine_condition", side_effect=lambda rid: routine_conditions.get(rid, {})))
             stack.enter_context(patch("memory.routine_db.get_routine_conditions", side_effect=_condition_list_for))
             stack.enter_context(patch("services.routine_context.build_runtime_routine_context", return_value=context_state))
+            from services.routine_context_evidence import ContextEvidence, VOLATILE_FLAGS
+            evidence = context_evidence if context_evidence is not None else {
+                key: ContextEvidence(effective_value=context_state.get(key),
+                                     status="known" if context_state.get(key) is not None else "unknown")
+                for key in VOLATILE_FLAGS}
+            stack.enter_context(patch("services.routine_context.build_routine_context_evidence", return_value=evidence))
+            stack.enter_context(patch("services.routine_context_clarification_scheduler.resolve_dependencies", return_value=()))
+            stack.enter_context(patch("services.routine_context_clarification_scheduler.schedule_context_clarification"))
             stack.enter_context(patch("core.brain.safe_llm_invoke", return_value=MagicMock(content=craft_return)))
             stack.enter_context(patch("random.random", return_value=0.99))
             
             bot.job_check_routines()
             
     return sent, logged
+
+
+def test_null_suppression_waits_instead_of_sending_routine():
+    """An unknown partner is not permission to send a partner-dependent reminder."""
+    cond = {"condition_type": "context_flag", "condition_payload":
+            {"flag": "partner_with_user", "equals": True}, "condition_mode": "suppress_when_true"}
+    row = _due_row(1)
+    row["time_str"] = "12:10"
+    sent, logs = _run_job([row], {1: cond}, {"partner_with_user": None})
+    assert sent == []
+    assert any(action == "routine_context_unknown" for _, action, _ in logs)
+
+
+def test_stale_park_value_is_not_authoritative_for_dispatch():
+    """A stale stored outside value needs clarification, not a sentimental skip."""
+    from services.routine_context_evidence import ContextEvidence
+    cond = {"condition_type": "context_flag", "condition_payload":
+            {"flag": "user_out_of_home", "equals": True}, "condition_mode": "suppress_when_true"}
+    row = _due_row(1)
+    row["time_str"] = "12:10"
+    sent, logs = _run_job([row], {1: cond}, {"user_out_of_home": True},
+                         context_evidence={"user_out_of_home": ContextEvidence(reason="stale")})
+    assert sent == [] and any(action == "routine_context_unknown" for _, action, _ in logs)
+
+
+def test_fresh_return_permits_normal_dispatch():
+    """A refreshed home observation returns through normal dispatch once."""
+    cond = {"condition_type": "context_flag", "condition_payload":
+            {"flag": "user_out_of_home", "equals": True}, "condition_mode": "suppress_when_true"}
+    row = _due_row(1)
+    row["time_str"] = "12:10"
+    sent, _ = _run_job([row], {1: cond}, {"user_out_of_home": False})
+    assert len(sent) == 1
+
+
+def test_changed_context_during_generation_does_not_send():
+    context = {"current_shift": "morning"}
+    sent, logs = _run_job([_due_row(1)], context_state=context,
+                         craft_callback=lambda: context.update(current_shift="afternoon"))
+    assert sent == []
+    assert not any(action == "routine_triggered" for _, action, _ in logs)
+
+
+def test_batch_of_distinct_routines_sends_one_message_and_records_both():
+    sent, logs = _run_job([_due_row(1, "School"), _due_row(2, "Breakfast")])
+    assert len(sent) == 1
+    assert {kw["routine_id"] for _, action, kw in logs if action == "routine_triggered"} == {1, 2}
+
+
+def test_unknown_higher_priority_holds_same_group_fallback():
+    cond = {"condition_type": "context_flag", "condition_payload":
+            {"flag": "partner_with_user", "equals": True}, "condition_mode": "suppress_when_true"}
+    rows = [_due_row(1, "School first", 20), _due_row(2, "School fallback", 10)]
+    for row in rows:
+        row["time_str"] = "12:10"
+    sent, _ = _run_job(rows, {1: cond}, {"partner_with_user": None})
+    assert sent == []
 
 
 def test_require_true_allows_when_context_true():

@@ -37,11 +37,14 @@ _STUB_MODULE_NAMES = [
     "memory.context_builder", "memory.routine_db",
     "memory.pending_assets",
     "core.brain", "core.graph", "core.agents",
+    "core.capability_draft",
     "core.exceptions", "core.event_bus",
     "core.routine_state", "core.prompts", "core.utils", "core.i18n", "core.nl_config",
     "services.gemini", "services.embeddings", "services.context_extractor",
     "services.messenger_intent",
     "services.routine_context", "services.routine_conditions",
+    "services.routine_context_clarification",
+    "services.routine_context_clarification_scheduler",
     "tools", "tools.telegram", "tools.system",
     "telegram", "telegram.ext",
 ]
@@ -131,6 +134,7 @@ def _stub_modules():
     pa.process_pending_assets_from_message = MagicMock()
     pa.get_pending_asset = MagicMock(return_value=None)
     pa.get_latest_pending_asset = MagicMock(return_value=None)
+    pa.get_latest_pending_asset_any = MagicMock(return_value=None)
     pa.mark_pending_asset_confirmed = MagicMock()
     pa.mark_pending_asset_rejected = MagicMock()
     pa.mark_pending_asset_cancelled = MagicMock()
@@ -197,12 +201,14 @@ def _stub_modules():
     # ── core.* ────────────────────────────────────────────────
     for mod in [
         "core.brain", "core.graph", "core.agents",
+        "core.capability_draft",
         "core.exceptions", "core.event_bus",
         "core.routine_state", "core.prompts", "core.utils",
     ]:
         sys.modules[mod] = types.ModuleType(mod)
 
     utils = sys.modules["core.utils"]
+    utils.clean_message = MagicMock(side_effect=lambda text: str(text))
     utils.is_simple_chat_fast_path_candidate = MagicMock(return_value=False)
     utils.is_medium_web_chat_path_candidate = MagicMock(return_value=False)
     utils.is_ultra_light_ack = MagicMock(return_value=False)
@@ -221,6 +227,7 @@ def _stub_modules():
     brain.safe_llm_invoke = MagicMock(return_value=MagicMock(content="ok"))
 
     sys.modules["core.graph"].graph = MagicMock()
+    sys.modules["core.capability_draft"].has_pending_bug_followup = lambda _state: False
 
     agents = sys.modules["core.agents"]
     agents.clean_message   = MagicMock(side_effect=lambda x: x)
@@ -245,10 +252,19 @@ def _stub_modules():
         "services.gemini", "services.embeddings",
         "services.routine_context", "services.routine_conditions",
         "services.context_extractor", "services.messenger_intent",
+        "services.routine_context_clarification",
+        "services.routine_context_clarification_scheduler",
     ]:
         sys.modules[mod] = types.ModuleType(mod)
 
     sys.modules["services.context_extractor"].extract_and_update_context_flags = MagicMock()
+    sys.modules["services.routine_context_clarification_scheduler"].serialized_routine_dispatch = lambda fn: fn
+    sys.modules["services.routine_context_clarification_scheduler"].drain_context_answer_dispatch = lambda: False
+    # This suite owns completion, not clarification; exercise the absent-ledger
+    # adapter boundary without importing real memory under its package stubs.
+    sys.modules["services.routine_context_clarification"].try_context_question_reply = (
+        lambda *args, **kwargs: types.SimpleNamespace(consumed=False)
+    )
     sys.modules["services.messenger_intent"].classify_messenger_intent = MagicMock(return_value=None)
     sys.modules["services.messenger_intent"].is_draft_offer_acceptance = MagicMock(return_value=False)
     sys.modules["services.messenger_intent"].MESSENGER_ROUTINE_DRAFT_OFFER_MARKER = (

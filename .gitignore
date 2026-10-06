@@ -110,3 +110,5 @@ astakos_routines.json
 .matrix-backup-maintenance.lock
 .matrix-backup-request-*
 .daily-backup-*
+astakos_routine_context_questions.json
+astakos_routine_context_questions.json.lock

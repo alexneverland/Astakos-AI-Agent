@@ -890,6 +890,11 @@ def fast_queue_worker(stop_event: threading.Event | None = None) -> None:
     print("\033[90m[System]: Telegram Fast Queue Worker Started!\033[0m")
     while not stop_event.is_set():
         try:
+            from services.routine_context_clarification_scheduler import drain_context_answer_dispatch
+            try:
+                drain_context_answer_dispatch()
+            except Exception as exc:
+                print(f"[RoutineContext]: dispatch wakeup deferred ({type(exc).__name__})")
             task_func, args = fast_queue.get(timeout=2)
             try:
                 print(f"\033[90m[FastQueue]: {task_func.__name__}\033[0m")
@@ -1751,7 +1756,7 @@ def _send_and_record_assistant(
 ):
     """Send assistant text through the selected external channel and record it."""
     from memory.conversation_history import append_message
-    from services.external_assistant_delivery import deliver_external_assistant_text
+    from services.external_assistant_delivery import deliver_external_assistant_text, AssistantHistoryError
 
     def _record_delivery(channel, text, handling_agent, external_id):
         metadata = {
@@ -1771,6 +1776,7 @@ def _send_and_record_assistant(
             content=text,
             channel=channel,
             agent=handling_agent,
+            message_id=f"assistant-delivery-{channel}-{external_id}",
             metadata=metadata,
         )
 
@@ -1780,6 +1786,13 @@ def _send_and_record_assistant(
             agent=agent,
             record_message=_record_delivery,
         )
+    except AssistantHistoryError as exc:
+        print(f"[ExternalSend]: confirmed delivery for agent={agent}; history repair queued")
+        try:
+            enqueue_fast_task(exc.repair)
+        except Exception:
+            print("[ExternalSend]: history repair could not be queued")
+        return exc.receipt.external_id
     except Exception as exc:
         print(f"[ExternalSend]: outbound send failed for agent={agent}: {exc}")
         return None
@@ -2091,6 +2104,20 @@ def handle_message(
         voice_input=voice_input,
         voice_mode=voice_mode,
     )
+    from services.routine_context_clarification import try_context_question_reply
+
+    context_answer = try_context_question_reply(
+        clean_user_text, "telegram",
+        trusted_owner=bool(config.TELEGRAM_CHAT_ID)
+        and str(chat_id) == str(config.TELEGRAM_CHAT_ID),
+    )
+    if context_answer.consumed:
+        reply = context_answer.reply
+        _append_to_analytics_log("user", clean_user_text)
+        _send_and_record_assistant(reply, chat_id, agent="Routine_Context")
+        enqueue_fast_task(log_exchange, clean_user_text, reply, "Routine_Context", "telegram")
+        last_interaction_time = time.time()
+        return
     # ── ROUTINE COMPLETION DECISION ────────────────────────────────
     # Pending routines get first priority; a pass-through still checks today's pool.
     from memory.event_log import log_event
@@ -4153,10 +4180,12 @@ def _craft_proactive_msg(
     count: int = 1,
     *,
     allow_messenger_draft_offer: bool = True,
+    routine_context: dict | None = None,
 ) -> tuple[str, bool]:
     """Create one proactive message and its fail-closed structured draft-offer state."""
-    from langchain_core.messages import HumanMessage
+    from langchain_core.messages import HumanMessage, SystemMessage
     from core.brain import llm
+    from core.untrusted_content import format_untrusted_tool_result
 
     if count > 1:
         context = t("clients.telegram_bot.bot_msg_has_routines_mins", user_name=config.USER_NAME, count=count, event_name=event_name)
@@ -4171,6 +4200,10 @@ def _craft_proactive_msg(
     memory_block = f"\n\n{memory_context}\n" if memory_context else ""
 
     state_snapshot = _build_proactive_state_snapshot(event_name)
+    if routine_context is not None:
+        from services.routine_context_evidence import VOLATILE_FLAGS
+        state_snapshot = {**state_snapshot, **{
+            flag: {"value": routine_context.get(flag)} for flag in VOLATILE_FLAGS}}
 
     if state_snapshot:
         try:
@@ -4183,7 +4216,9 @@ def _craft_proactive_msg(
     if forced_skip:
         return forced_skip, False
 
-    env_context = _get_env_context()
+    # The routine projection already reconciles fresh GPS; the legacy four-hour
+    # environment path must not reintroduce stale location as current authority.
+    env_context = _get_env_context() if routine_context is None else ""
     env_block = f"\n{env_context}\n" if env_context else ""
 
     prompt = core.i18n.load_prompt("telegram_bot_craft_proactive.md").format(
@@ -4196,7 +4231,13 @@ def _craft_proactive_msg(
     )
 
     try:
-        response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
+        messages = [HumanMessage(content=prompt)]
+        if routine_context is not None:
+            current_prompt = core.i18n.load_prompt("routine_context_current.md")
+            messages = [SystemMessage(content=current_prompt),
+                        HumanMessage(content=format_untrusted_tool_result(
+                            "current routine context", json.dumps(routine_context, default=str))), *messages]
+        response = safe_llm_invoke(llm, messages)
         content = response.content
         if isinstance(content, list):
             content = "".join(
@@ -4479,10 +4520,24 @@ def startup_check_missed_routines():
         )
         from services.routine_context import build_runtime_routine_context
         from services.routine_conditions import evaluate_routine_conditions
+        from memory.routine_context_clarification import ATHENS, ClarificationStore
+        from services.routine_context_clarification import RoutineCandidate
+        from services.routine_context_clarification_scheduler import question_blocks_dispatch
+        from pathlib import Path
 
         rt_context = build_runtime_routine_context(now=now)
+        clarification_store = ClarificationStore(Path(BASE_DIR) / "astakos_routine_context_questions.json")
+        aware_now = now.replace(tzinfo=ATHENS) if now.tzinfo is None else now
 
         for r_id, event_name, confidence, time_str in missed:
+            h, m = map(int, time_str.split(":"))
+            slot = aware_now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if question_blocks_dispatch(clarification_store, aware_now,
+                    RoutineCandidate(str(r_id), event_name, slot, ())):
+                log_event("routines", "routine_context_expired", routine_id=r_id,
+                          debug_type="scheduler_decision", debug_source="context_clarification",
+                          debug_effect="no_late_replay")
+                continue
             # ── Seasonal/temporary inactivity check (paused_until / active window) ──
             # Must run BEFORE any missed/trigger logic — a routine in
             # pause or out of active window is not "lost", it just does not apply right now.
@@ -4596,6 +4651,10 @@ def startup_check_missed_routines():
         print(f"\033[91m[MissedRoutines]: {e}\033[0m")
 
 
+from services.routine_context_clarification_scheduler import serialized_routine_dispatch
+
+
+@serialized_routine_dispatch
 def job_check_routines():
     """
     Checks for upcoming routines (30' in advance) and performs timeout decay
@@ -4750,6 +4809,8 @@ def job_check_routines():
     # 1. Upcoming routine notifications
     try:
         if os.path.exists(DB_PATH):
+            from services.routine_context_clarification_scheduler import schedule_context_clarification
+            schedule_context_clarification(enqueue_slow_task)
             conn   = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             try:
@@ -4782,11 +4843,21 @@ def job_check_routines():
                     get_routine_schedule_meta, is_routine_temporarily_inactive_meta,
                     get_routine_conditions,
                 )
-                from services.routine_context import build_runtime_routine_context
+                from services.routine_context import build_runtime_routine_context, build_routine_context_evidence, project_routine_context
+                from memory.routine_context_clarification import ATHENS, ClarificationStore
+                from services.routine_context_clarification import RoutineCandidate
+                from services.routine_context_clarification_scheduler import (
+                    routine_context_block, question_blocks_dispatch, dispatch_context_current,
+                )
+                from pathlib import Path
                 from services.routine_conditions import evaluate_routine_conditions
                 due_routines = []
+                due_context_candidates = []
                 triggered_conflict_groups = set()
-                rt_context = build_runtime_routine_context(now=now)
+                aware_now = now.replace(tzinfo=ATHENS) if now.tzinfo is None else now
+                context_evidence = build_routine_context_evidence(aware_now)
+                rt_context = project_routine_context(build_runtime_routine_context(now=now), context_evidence)
+                clarification_store = ClarificationStore(Path(BASE_DIR) / "astakos_routine_context_questions.json")
 
                 def _get_conflict_group(name: str) -> str:
                     parts = name.lower().split()
@@ -4834,6 +4905,24 @@ def job_check_routines():
                         continue
                     # ── Phase 3C: Conditions Evaluator ───────────────────────
                     cond_list = get_routine_conditions(r_id)
+                    slot = routine_dt.replace(tzinfo=ATHENS) if routine_dt.tzinfo is None else routine_dt
+                    if time_diff_mins >= 0 and slot < aware_now:
+                        slot += timedelta(days=1)
+                    candidate = RoutineCandidate(str(r_id), event_name, slot, tuple(cond_list))
+                    if question_blocks_dispatch(clarification_store, aware_now, candidate):
+                        triggered_conflict_groups.add(conflict_group)
+                        continue
+                    if (not get_routine_muted_until(r_id)
+                            and not is_duplicate_routine(r_id, get_routine_notify_info(r_id)["cooldown_hours"])
+                            and routine_context_block(
+                                candidate,
+                                rt_context, context_evidence, clarification_store, aware_now)):
+                        if _should_log_routine_skip(r_id, "routine_context_unknown", "context_unknown"):
+                            log_event("routines", "routine_context_unknown", routine_id=r_id,
+                                reason="context_unknown", debug_type="scheduler_decision",
+                                debug_source="context_clarification", debug_effect="waiting_context")
+                        triggered_conflict_groups.add(conflict_group)
+                        continue
                     if cond_list:
                         cond_result = evaluate_routine_conditions(cond_list, rt_context, now=now)
                         if not cond_result.get("allowed", True):
@@ -4909,6 +4998,7 @@ def job_check_routines():
                             log_event("routines", "routine_cooldown_skip", routine_id=r_id, event=event_name, cooldown_hours=cd_hours, debug_type="scheduler_decision", debug_source="scheduler", debug_effect="cooldown_skip")
                         continue
                     due_routines.append((r_id, event_name, confidence))
+                    due_context_candidates.append(candidate)
                     triggered_conflict_groups.add(conflict_group)
 
 
@@ -4933,7 +5023,13 @@ def job_check_routines():
                         0.9,
                         count=len(due_routines),
                         allow_messenger_draft_offer=False,
+                        routine_context=rt_context,
                     )
+                    dispatch_now = datetime.now()
+                    if not dispatch_context_current(tuple(due_context_candidates), rt_context,
+                            clarification_store, dispatch_now.replace(tzinfo=ATHENS)
+                            if dispatch_now.tzinfo is None else dispatch_now):
+                        return
 
                     if msg.strip().startswith("[CONTEXT_NOTE]"):
                         msg = msg.replace("[CONTEXT_NOTE]", "[CONTEXT_SKIP]", 1)
@@ -4976,6 +5072,8 @@ def job_check_routines():
                                 context_skip_ctx = _build_proactive_memory_context(names)
                             except Exception:
                                 context_skip_ctx = ""
+                        if not is_context_skip and not _send_and_record_assistant(msg, agent="Routine_Agent"):
+                            return
                         for r_id, event_name, confidence in due_routines:
                             cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                             if is_context_skip:
@@ -4995,14 +5093,13 @@ def job_check_routines():
                                 )
                                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel=_current_external_runtime_channel())
                             else:
-                                _send_and_record_assistant(msg, agent="Routine_Agent")
                                 sent_at = datetime.now()
                                 mark_routine_notified(r_id)
                                 log_event("routines", "routine_triggered", 
                                     routine_id=r_id,
                                     event=event_name, 
                                     confidence=confidence,
-                                    batch=len(due_routines, debug_type="scheduler_decision", debug_source="scheduler", debug_effect="triggered"), 
+                                    batch=len(due_routines),
                                     preview=msg[:160],
                                     debug_type="proactive_decision",
                                     debug_source="scheduler",
@@ -5024,7 +5121,13 @@ def job_check_routines():
                         event_name,
                         confidence,
                         allow_messenger_draft_offer=can_offer_messenger_draft,
+                        routine_context=rt_context,
                     )
+                    dispatch_now = datetime.now()
+                    if not dispatch_context_current(tuple(due_context_candidates), rt_context,
+                            clarification_store, dispatch_now.replace(tzinfo=ATHENS)
+                            if dispatch_now.tzinfo is None else dispatch_now):
+                        return
                     draft_offer = draft_offer and can_offer_messenger_draft
 
                     if msg.strip().startswith("[SILENT_SKIP]"):
@@ -5059,10 +5162,9 @@ def job_check_routines():
                                 context_skip_preview = "context_skip_without_explanation"
                             msg = context_skip_preview
 
-                        cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
-                        conn.commit()
-
                         if is_context_skip:
+                            cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                            conn.commit()
                             if (
                                 is_context_note
                                 and _should_send_sentimental_context_note(
@@ -5100,7 +5202,10 @@ def job_check_routines():
                             # DO NOT mark as pending, just keep it active.
                             bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel=_current_external_runtime_channel())
                         else:
-                            _send_and_record_assistant(msg, agent="Routine_Agent")
+                            if not _send_and_record_assistant(msg, agent="Routine_Agent"):
+                                return
+                            cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                            conn.commit()
                             mark_routine_notified(r_id)
                             log_event(
                                 "routines", 

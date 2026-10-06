@@ -14,6 +14,15 @@ from services.external_delivery import (
 MessageRecorder = Callable[[ExternalChannel, str, str | None, str], None]
 
 
+class AssistantHistoryError(RuntimeError):
+    """Delivery succeeded; retry only recording, never the external send."""
+
+    def __init__(self, receipt: DeliveryReceipt, repair: Callable[[], None]) -> None:
+        super().__init__("Confirmed assistant delivery needs history repair")
+        self.receipt = receipt
+        self.repair = repair
+
+
 def _record_confirmed_assistant_message(
     channel: ExternalChannel,
     text: str,
@@ -45,5 +54,11 @@ def deliver_external_assistant_text(
 ) -> DeliveryReceipt:
     """Deliver once, then record only the confirmed selected-channel send."""
     receipt = router.send_text(text, silent=silent)
-    record_message(receipt.channel, text, agent, receipt.external_id)
+    def repair() -> None:
+        """Record the immutable confirmed delivery without contacting transport."""
+        record_message(receipt.channel, text, agent, receipt.external_id)
+    try:
+        repair()
+    except Exception as exc:
+        raise AssistantHistoryError(receipt, repair) from exc
     return receipt

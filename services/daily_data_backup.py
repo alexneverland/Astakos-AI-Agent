@@ -27,6 +27,7 @@ STATE_FILES = frozenset({
     "astakos_working_memory.json", "astakos_sessions.json", "astakos_capabilities.json",
     "astakos_pending_approval.json", "astakos_photos_index.json", "astakos_docs_index.json",
     "behavioral_initiative_state.json", "behavioral_conversation_preferences.json",
+    "astakos_routine_context_questions.json",
     "project_access.json", "room_map.json", "messenger_draft.json", "linkedin_draft.json",
     "scheduler_state.json", "persona.md", "last_location.json",
     "astakos_skills/food_history.json", "astakos_skills/recipe_library.json",

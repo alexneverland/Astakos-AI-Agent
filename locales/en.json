@@ -1,4 +1,10 @@
 {
+  "routine_context": {
+    "deferred": "I couldn't apply that answer to the pending context question. No action was approved.",
+    "resolved": "Got it — I've updated the current context. This is not an action approval.",
+    "partial": "I've noted what you clarified; the remaining context is still unknown.",
+    "declined": "Okay, I'll leave that unanswered and won't assume the missing context."
+  },
   "weather": {
     "code_0": "☀️ Clear",
     "code_1": "🌤 Mostly clear",

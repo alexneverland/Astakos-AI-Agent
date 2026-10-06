@@ -696,6 +696,125 @@ async def test_verified_encrypted_reply_to_approval_executes_without_graph(tmp_p
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ["👍", "ναι", "Όχι,\nείμαι ακόμη έξω"])
+async def test_reply_to_registered_context_question_is_not_tool_approval(
+    tmp_path, monkeypatch, answer,
+) -> None:
+    """Only an exact, delivered question target changes Reply arbitration."""
+    from datetime import datetime, timedelta
+    from memory.routine_context_clarification import ATHENS, ClarificationStore, QuestionRequest
+    import config
+    from services.routine_context_clarification import current_matrix_reply_target
+
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    now = datetime.now(ATHENS)
+    store = ClarificationStore(tmp_path / "astakos_routine_context_questions.json")
+    request = QuestionRequest("q1", "presence", ("r1",), ("partner_with_user",),
+                              now + timedelta(minutes=12), "Είναι μαζί σου;", "matrix")
+    assert store.reserve(request, now=now)
+    assert store.begin_send("q1", now=now)
+    assert store.mark_sent("q1", external_id="$context-question", now=now)
+    assert store.mark_recorded("q1")
+    handled = []
+
+    async def turn_handler(text, event_id):
+        handled.append((text, current_matrix_reply_target()))
+        return "Το σημείωσα."
+
+    async def approval_handler(**kwargs):
+        raise AssertionError("A context answer must not execute an approval")
+
+    client = FakeMatrixClient()
+    transport = _transport(tmp_path, client, turn_handler, approval_reaction_handler=approval_handler)
+    body = "> <@astakos:example.test> Είναι μαζί σου;\n\n" + answer
+    event = FakeTextEvent(body=body, source={"type": "m.room.message", "content": {
+        "msgtype": "m.text", "body": body,
+        "m.relates_to": {"m.in_reply_to": {"event_id": "$context-question"}},
+    }})
+    await transport.handle_event(FakeRoom(), event)
+    assert handled == [(answer, "$context-question")]
+    assert current_matrix_reply_target() is None
+
+
+@pytest.mark.asyncio
+async def test_context_reply_scope_resets_after_turn_failure(tmp_path, monkeypatch):
+    """A failed task must not lend its Reply target to the next Matrix turn."""
+    from services import routine_context_clarification as clarification
+
+    monkeypatch.setattr(clarification, "is_current_context_question_target", lambda _: True)
+
+    async def fail(text, event_id):
+        assert clarification.current_matrix_reply_target() == "$context-question"
+        raise RuntimeError("turn failed")
+
+    transport = _transport(tmp_path, FakeMatrixClient(), fail)
+    event = FakeTextEvent(body="ναι", source={"type": "m.room.message", "content": {
+        "msgtype": "m.text", "body": "ναι",
+        "m.relates_to": {"m.in_reply_to": {"event_id": "$context-question"}},
+    }})
+    with pytest.raises(RuntimeError, match="turn failed"):
+        await transport.handle_event(FakeRoom(), event)
+    assert clarification.current_matrix_reply_target() is None
+
+
+@pytest.mark.asyncio
+async def test_context_reply_reaches_final_canonical_flags_without_approval(tmp_path, monkeypatch):
+    """Encrypted Reply -> shared semantic writer -> resolved ledger/history, offline."""
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace
+    import config
+    from memory import routine_db
+    from memory.conversation_history import load_messages
+    from memory.routine_context_clarification import ATHENS, ClarificationStore, QuestionRequest
+    from services import context_extractor, routine_context_clarification as clarification
+    from services.matrix_turn import MatrixTurnService
+
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "routines.db"))
+    routine_db.setup_db()
+    monkeypatch.setattr(clarification, "context_confirmation_conflict", lambda: False)
+    monkeypatch.setattr(context_extractor, "load_recent_trusted_user_messages", lambda **_: [])
+
+    def model(prompt):
+        assert "👍" in prompt
+        return SimpleNamespace(text='{"relation":"related","flags":{"partner_with_user":true}}')
+
+    monkeypatch.setattr(context_extractor, "safe_gemini_call", model)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("A context answer cannot execute tools or a second interpretation")
+
+    monkeypatch.setattr(context_extractor, "infer_routine_reconciliation_directives", forbidden)
+    store = ClarificationStore(tmp_path / "astakos_routine_context_questions.json")
+    now = datetime.now(ATHENS)
+    request = QuestionRequest("q1", "presence", ("r1",), ("partner_with_user",),
+                              now + timedelta(minutes=12), "Είναι μαζί σου;", "matrix")
+    assert store.reserve(request, now=now)
+    assert store.begin_send("q1", now=now)
+    assert store.mark_sent("q1", external_id="$context-question", now=now)
+    assert store.mark_recorded("q1")
+    history_path = str(tmp_path / "history.db")
+    turn = MatrixTurnService(graph=SimpleNamespace(stream=forbidden), conversation_db_path=history_path,
+                             routine_confirmation_handler=forbidden)
+
+    async def approval_handler(**kwargs):
+        forbidden()
+
+    client = FakeMatrixClient()
+    transport = _transport(tmp_path, client, turn, approval_reaction_handler=approval_handler)
+    body = "> <@astakos:example.test> Είναι μαζί σου;\n\n👍"
+    event = FakeTextEvent(body=body, source={"type": "m.room.message", "content": {
+        "msgtype": "m.text", "body": body,
+        "m.relates_to": {"m.in_reply_to": {"event_id": "$context-question"}},
+    }})
+    await transport.handle_event(FakeRoom(), event)
+    assert routine_db.get_context_state("partner_with_user")["value"] == "true"
+    assert store.snapshot()["requests"][0]["status"] == "resolved"
+    assert len(client.sent) == 1
+    assert [message["role"] for message in load_messages(db_path=history_path)] == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
 async def test_unverified_encrypted_reply_cannot_approve(tmp_path) -> None:
     client = FakeMatrixClient()
     handled: list[dict[str, Any]] = []

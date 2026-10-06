@@ -121,7 +121,7 @@ def test_completed_matrix_exchange_queues_all_existing_background_pipelines(
         ),
         (
             "extract_and_update_context_flags",
-            ("τι κάνουμε σήμερα;", "Έχουμε δύο δουλειές."),
+            ("τι κάνουμε σήμερα;", "Έχουμε δύο δουλειές.", "matrix"),
         ),
     ]
 

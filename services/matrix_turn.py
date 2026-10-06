@@ -206,6 +206,29 @@ class MatrixTurnService:
 
         routine_completion_context = None
         routine_draft_offer = None
+        from services.routine_context_clarification import try_context_question_reply
+
+        context_answer = try_context_question_reply(
+            clean_user_text, "matrix", trusted_owner=True, external_derived=external_derived,
+        )
+        if context_answer.consumed:
+            reply = context_answer.reply
+            saved_user = append_message(
+                role="user", content=clean_user_text, channel="matrix",
+                message_id=normalized_event_id, db_path=self._conversation_db_path,
+                metadata={"transport": "matrix", "matrix_event_id": normalized_event_id},
+            )
+            self._run_hook(self._on_user_persisted, saved_user)
+            append_message(
+                role="assistant", content=reply, channel="matrix", agent="Routine_Context",
+                message_id="context-answer-" + normalized_event_id,
+                db_path=self._conversation_db_path,
+            )
+            self._run_hook(
+                self._on_exchange_completed, clean_user_text, reply, "Routine_Context", "matrix",
+                correlation_rowid=saved_user.get("rowid"), context_flags_processed=True,
+            )
+            return reply
         if self._routine_confirmation_handler is not None:
             try:
                 routine_result = self._routine_confirmation_handler(clean_user_text)

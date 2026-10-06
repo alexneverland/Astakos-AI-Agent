@@ -160,6 +160,7 @@ class MatrixBackgroundHooks:
         channel: str,
         external_content_sources: Iterable[str] | None = None,
         correlation_rowid: int | None = None,
+        context_flags_processed: bool = False,
     ) -> None:
         """Queue the same memory, follow-up, and context pipelines as other channels."""
         if channel != "matrix":
@@ -198,11 +199,13 @@ class MatrixBackgroundHooks:
                 agent_name,
                 channel,
             )
-            self._enqueue_slow_task(
-                extract_and_update_context_flags,
-                user_text,
-                ai_text,
-            )
+            if not context_flags_processed:
+                self._enqueue_slow_task(
+                    extract_and_update_context_flags,
+                    user_text,
+                    ai_text,
+                    "matrix",
+                )
             if correlation_rowid is not None:
                 self._enqueue_slow_task(
                     run_matrix_capability_followup,
@@ -220,11 +223,13 @@ class MatrixBackgroundHooks:
                 agent_name,
                 channel,
             )
-            self._enqueue_slow_task(
-                extract_and_update_context_flags,
-                user_text,
-                "",
-            )
+            if not context_flags_processed:
+                self._enqueue_slow_task(
+                    extract_and_update_context_flags,
+                    user_text,
+                    "",
+                    "matrix",
+                )
 
 
 def build_matrix_turn_service(

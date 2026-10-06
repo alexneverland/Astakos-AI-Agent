@@ -798,9 +798,9 @@ def get_routines_for_day(day: str) -> list:
     return routines
 
 
-def get_eligible_preemptive_routines_for_day(day: str) -> list:
+def get_eligible_preemptive_routines_for_day(day: str, *, now: datetime | None = None) -> list:
     """Return schedulable day routines that are incomplete and not indefinitely paused."""
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_str = (now or datetime.now()).strftime("%Y-%m-%d")
     conn = get_connection()
     cursor = conn.cursor()
     c_day = normalize_day(day)
