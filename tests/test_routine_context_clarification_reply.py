@@ -276,7 +276,8 @@ def test_dispatch_request_never_replays_expired_slot(delivered):
     assert not delivered.snapshot()["requests"][0]["dispatch_pending"]
 
 
-def test_live_gps_resolves_question_during_owner_answer(delivered, monkeypatch):
+@pytest.mark.parametrize("relation", ["related", "refused"])
+def test_live_gps_resolves_question_during_owner_answer(delivered, monkeypatch, relation):
     """A real GPS/poll resolution must not become a failed answer or overwrite."""
     from services.location_update import record_location_update
     from services import location_update
@@ -309,7 +310,7 @@ def test_live_gps_resolves_question_during_owner_answer(delivered, monkeypatch):
             unavailable=lambda: False, classify=forbidden, budget=forbidden,
             sender=forbidden, record=forbidden)
         assert outcome == "resolved"
-        return SimpleNamespace(text='{"relation":"related","flags":{"user_out_of_home":true}}')
+        return SimpleNamespace(text='{"relation":"' + relation + '","flags":{"user_out_of_home":true}}')
 
     monkeypatch.setattr(context_extractor, "safe_gemini_call", classify)
     monkeypatch.setattr(context_extractor, "_persist_context_payload", forbidden)
@@ -323,7 +324,8 @@ def test_live_gps_resolves_question_during_owner_answer(delivered, monkeypatch):
 
 
 @pytest.mark.parametrize("outcome", ["declined", "expired"])
-def test_nonresolution_during_answer_is_not_acknowledged_as_resolved(delivered, monkeypatch, outcome):
+@pytest.mark.parametrize("relation", ["related", "refused"])
+def test_nonresolution_during_answer_is_not_acknowledged_as_resolved(delivered, monkeypatch, outcome, relation):
     """Only the exact resolved request can receive the already-resolved reply."""
     clock = [NOW + timedelta(seconds=2)]
 
@@ -333,10 +335,11 @@ def test_nonresolution_during_answer_is_not_acknowledged_as_resolved(delivered, 
         else:
             clock[0] = NOW + timedelta(minutes=13)
             delivered.expire(now=clock[0])
-        return SimpleNamespace(text='{"relation":"related","flags":{"partner_with_user":false}}')
+        return SimpleNamespace(text='{"relation":"' + relation + '","flags":{"partner_with_user":false}}')
 
     monkeypatch.setattr(context_extractor, "safe_gemini_call", classify)
     result = process_question_answer(store=delivered, user_text="no", channel="matrix",
         now=NOW + timedelta(seconds=1), current_time=lambda: clock[0], trusted_owner=True)
-    assert result.outcome == "deferred"
+    assert result.outcome == ("deferred" if relation == "related" else "uncertain")
+    assert result.consumed == (relation == "related")
     assert routine_db.get_context_state("partner_with_user") is None

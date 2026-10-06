@@ -22,6 +22,11 @@ to distinguish sharing without a point, rejected points and completed handlers.
 101 focused location/reply/evidence tests pass; no coordinates or identities are
 logged. A renewed Element share still needs natural live observation.
 
+PR #225 review corrections cover refused answers racing with GPS resolution and
+offload Matrix location telemetry to worker threads, with one terminal write per
+accepted point. 82 focused tests plus four refusal/nonresolution safety cases
+pass offline; live observation remains pending.
+
 Map: [routine-context-refresh-map.md](routine-context-refresh-map.md).
 Owner-approved contract: [context-evidence-spec.md](context-evidence-spec.md).
 Status: read-only foundation implemented on 2026-10-06; the following evidence

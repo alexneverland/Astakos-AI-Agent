@@ -564,7 +564,8 @@ class MatrixTextTransport:
             return
         from uuid import uuid4
         run_id = uuid4().hex
-        location = self._trusted_location(room, event, run_id=run_id)
+        # Validation is read-only; its private file telemetry must not block sync.
+        location = await asyncio.to_thread(self._trusted_location, room, event, run_id=run_id)
         if location is None:
             return
         event_id = str(event.event_id).strip()
@@ -575,15 +576,15 @@ class MatrixTextTransport:
             db_path=self._state_db_path,
         )
         if reservation["action"] == "already_reserved":
-            self._log_location_decision("duplicate", "already_reserved", run_id)
+            await asyncio.to_thread(self._log_location_decision, "duplicate", "already_reserved", run_id)
             return
-        self._log_location_decision("received", "validated_point", run_id)
         try:
             reply = await self._location_handler(*location)
         except Exception:
-            self._log_location_decision("failed", "handler_failed", run_id)
+            await asyncio.to_thread(self._log_location_decision, "failed", "handler_failed", run_id)
             raise
-        self._log_location_decision("processed", "processed", run_id)
+        # One terminal log per accepted point, rather than two full-file writes.
+        await asyncio.to_thread(self._log_location_decision, "processed", "processed", run_id)
         reply_text = str(reply or "").strip()
         if not reply_text:
             mark_matrix_event_processed(event_id, db_path=self._state_db_path)

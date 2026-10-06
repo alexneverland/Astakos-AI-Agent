@@ -18,6 +18,9 @@ this active checklist; evidence remains in Git history, specs/runbooks and the
   Verified offline with 101 focused location/reply/evidence tests.
 - [ ] Observe a renewed Element live share and inspect its private decision log;
   a sharing event alone is not a received coordinate update.
+- [x] Address PR #225 P2 findings: recognize concurrent resolution on refusal;
+  move location file telemetry off the event loop and halve successful-point
+  writes. 82 focused tests and four terminal-state safety cases pass offline.
 
 Contract: [context-evidence-spec.md](context-evidence-spec.md).
 Map: [routine-context-refresh-map.md](routine-context-refresh-map.md).

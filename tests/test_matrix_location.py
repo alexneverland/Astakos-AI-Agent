@@ -148,6 +148,16 @@ async def test_matrix_location_diagnostics_are_private_and_explain_decisions(tmp
     from memory import event_log
 
     monkeypatch.setattr(event_log, "LOGS_DIR", str(tmp_path / "events"))
+    import threading
+    loop_thread = threading.get_ident()
+    logger_threads = []
+    real_log_event = event_log.log_event
+
+    def checked_log_event(*args, **kwargs):
+        logger_threads.append(threading.get_ident())
+        return real_log_event(*args, **kwargs)
+
+    monkeypatch.setattr(event_log, "log_event", checked_log_event)
     handled = []
 
     async def handler(*args):
@@ -191,6 +201,7 @@ async def test_matrix_location_diagnostics_are_private_and_explain_decisions(tmp
     assert "40.64" not in raw and "22.94" not in raw and "geo:" not in raw
     assert "@owner" not in raw and "@stranger" not in raw
     assert bool(handled) == (case == "valid")
+    assert logger_threads and all(thread != loop_thread for thread in logger_threads)
 
 
 def test_matrix_location_fires_home_reminder_once_and_ignores_time_reminder(

@@ -330,3 +330,14 @@ missing fresh point cannot be established retrospectively.
 Verification: 101 focused location/reply/evidence tests pass on temporary data,
 including same-value freshness and actual private JSON decision logs. Natural
 Element share observation remains pending; no runtime restart or live send.
+
+PR #225 review correction: refused as well as related answers inspect the exact
+request's terminal resolution after losing authority during inference. Declined
+and expired requests do not become successful acknowledgements. Location
+validation diagnostics and terminal logs run via awaited `asyncio.to_thread`,
+keeping synchronous file locks/fsync off Matrix's event loop without spawning
+untracked background tasks. Accepted points emit one terminal log, not a
+received/processed pair. The existing daily JSON sink is unchanged; its full-file
+rewrite cost remains, so this is not a claim of append-only or constant-cost
+logging. Offline regressions check the actual logger thread and private JSON.
+82 focused tests plus four refused/related terminal-state safety cases passed.
