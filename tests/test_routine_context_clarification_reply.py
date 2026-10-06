@@ -188,3 +188,89 @@ def test_production_adapter_resolves_real_temporary_ledger(delivered, monkeypatc
     assert result.consumed and result.outcome == "resolved"
     assert delivered.snapshot()["requests"][0]["status"] == "resolved"
     assert routine_db.get_context_state("partner_with_user")["value"] == "false"
+
+
+@pytest.mark.parametrize("change", ["context", "history", "gps"])
+def test_production_reply_rejects_newer_evidence_during_inference(delivered, monkeypatch, change):
+    """The old answer cannot overwrite a new canonical flag or GPS/history version."""
+    import config
+    from memory import conversation_history as history
+    from services import routine_context_clarification as clarification
+    from services import routine_context
+    monkeypatch.setattr(config, "BASE_DIR", str(delivered.path.parent))
+    monkeypatch.setattr(clarification, "context_confirmation_conflict", lambda: False)
+    marker = [0]
+    monkeypatch.setattr(history, "get_max_rowid", lambda: marker[0])
+    evidence = [{}]
+    monkeypatch.setattr(routine_context, "build_routine_context_evidence", lambda _: evidence[0])
+    def classify(_):
+        if change == "context":
+            routine_db.set_context_state("partner_with_user", "true")
+        elif change == "history":
+            marker[0] += 1
+        else:
+            from services.routine_context_evidence import ContextEvidence
+            evidence[0] = {"user_out_of_home": ContextEvidence(
+                effective_value=False, source="gps", recorded_at=NOW)}
+        return SimpleNamespace(text='{"relation":"related","flags":{"partner_with_user":false}}')
+    monkeypatch.setattr(context_extractor, "safe_gemini_call", classify)
+    result = clarification.try_context_question_reply("no", "web", trusted_owner=True)
+    assert result.consumed and result.outcome == "deferred"
+    assert delivered.snapshot()["pending"]["status"] == "sent"
+    state = routine_db.get_context_state("partner_with_user")
+    assert state is None if change != "context" else state["value"] == "true"
+
+
+def test_resolution_durably_requests_one_timely_dispatch(delivered):
+    """A final answer is a durable wakeup, not a wait for the next minute tick."""
+    result = process_question_answer(store=delivered, user_text="no", channel="web",
+                                    now=NOW + timedelta(seconds=1), trusted_owner=True)
+    assert result.outcome == "resolved"
+    reloaded = ClarificationStore(delivered.path)
+    assert reloaded.claim_dispatch(now=NOW + timedelta(seconds=2))
+    assert not reloaded.claim_dispatch(now=NOW + timedelta(seconds=3))
+
+
+def test_dispatch_request_waits_for_selected_external_runtime(delivered, monkeypatch):
+    """Web never dispatches locally; a busy external dispatcher keeps the wakeup."""
+    import config
+    import threading
+    from clients import telegram_bot as bot
+    from core import messaging_channel
+    from services import routine_context_clarification_scheduler as worker
+    process_question_answer(store=delivered, user_text="no", channel="web",
+                            now=NOW + timedelta(seconds=1), trusted_owner=True)
+    monkeypatch.setattr(config, "BASE_DIR", str(delivered.path.parent))
+    monkeypatch.setattr(bot, "shutdown_event", threading.Event())
+    monkeypatch.setattr(messaging_channel, "resolve_external_channel", lambda: "matrix")
+    monkeypatch.setattr(bot, "_external_background_runtime_channel", None)
+    calls = []
+    monkeypatch.setattr(bot, "job_check_routines", lambda: calls.append("dispatch"))
+    assert not worker.drain_context_answer_dispatch()
+    assert delivered.snapshot()["requests"][0]["dispatch_pending"]
+    monkeypatch.setattr(bot, "_external_background_runtime_channel", "matrix")
+    entered, release = threading.Event(), threading.Event()
+    def hold():
+        with worker._dispatch_lock:
+            entered.set()
+            assert release.wait(5)
+    thread = threading.Thread(target=hold)
+    thread.start()
+    assert entered.wait(5)
+    try:
+        assert not worker.drain_context_answer_dispatch()
+        assert delivered.snapshot()["requests"][0]["dispatch_pending"]
+    finally:
+        release.set()
+        thread.join(5)
+    assert worker.drain_context_answer_dispatch()
+    assert not worker.drain_context_answer_dispatch()
+    assert calls == ["dispatch"]
+
+
+def test_dispatch_request_never_replays_expired_slot(delivered):
+    """A delayed worker consumes a wakeup without sending after its deadline."""
+    process_question_answer(store=delivered, user_text="no", channel="web",
+                            now=NOW + timedelta(seconds=1), trusted_owner=True)
+    assert not delivered.claim_dispatch(now=NOW + timedelta(minutes=12))
+    assert not delivered.snapshot()["requests"][0]["dispatch_pending"]

@@ -44,6 +44,7 @@ _STUB_MODULE_NAMES = [
     "services.messenger_intent",
     "services.routine_context", "services.routine_conditions",
     "services.routine_context_clarification",
+    "services.routine_context_clarification_scheduler",
     "tools", "tools.telegram", "tools.system",
     "telegram", "telegram.ext",
 ]
@@ -252,10 +253,13 @@ def _stub_modules():
         "services.routine_context", "services.routine_conditions",
         "services.context_extractor", "services.messenger_intent",
         "services.routine_context_clarification",
+        "services.routine_context_clarification_scheduler",
     ]:
         sys.modules[mod] = types.ModuleType(mod)
 
     sys.modules["services.context_extractor"].extract_and_update_context_flags = MagicMock()
+    sys.modules["services.routine_context_clarification_scheduler"].serialized_routine_dispatch = lambda fn: fn
+    sys.modules["services.routine_context_clarification_scheduler"].drain_context_answer_dispatch = lambda: False
     # This suite owns completion, not clarification; exercise the absent-ledger
     # adapter boundary without importing real memory under its package stubs.
     sys.modules["services.routine_context_clarification"].try_context_question_reply = (

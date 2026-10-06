@@ -110,20 +110,23 @@ def test_worker_retry_preserves_identity_and_holds_uncertain_telegram(environmen
         assert len(calls) == 1 and not load_messages(db_path=history_path)
 
 
-def test_web_answer_persists_then_normal_scheduler_sends_once(environment, monkeypatch):
+@pytest.mark.parametrize("history_failure", [False, True])
+def test_web_answer_persists_then_normal_scheduler_sends_once(environment, monkeypatch, history_failure):
     """The real ledger/writer/scheduler lifecycle resumes only a timely slot."""
     from clients import telegram_bot as bot
     from services import context_extractor as extractor
     from services.routine_context_clarification import process_question_answer
     from services.routine_context_evidence import evaluate_stored_evidence
-    worker, db, rid, state, calls, _, _, root = environment
+    worker, db, rid, state, calls, _, history_path, root = environment
     # Canonical set_context_state timestamps use the local wall clock internally.
     # Use that clock for this persisted end-to-end path; separate tests freeze
     # deadline/expiry boundaries without substituting the database writer.
     state["now"] = datetime.now(ATHENS)
     db.update_routine_db(rid, new_time=(state["now"] + timedelta(minutes=12)).strftime("%H:%M"))
     worker.run_context_clarification_job()
-    state["now"] = datetime.now(ATHENS)
+    # Simulate the reply arriving with less than one periodic interval left.
+    state["now"] = state["now"].replace(second=45, microsecond=0) + timedelta(minutes=11)
+    before_answer = state["now"]
     monkeypatch.setattr(extractor, "datetime", db.datetime)
     monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: '{"relation":"related","flags":{"user_out_of_home":false}}')
     monkeypatch.setattr(extractor, "_recent_user_context_hint", lambda _: "")
@@ -132,18 +135,55 @@ def test_web_answer_persists_then_normal_scheduler_sends_once(environment, monke
     assert answer.consumed and answer.outcome == "resolved"
     stored = db.get_context_state("user_out_of_home")
     assert stored["value"] == "false"
-    state["now"] = datetime.now(ATHENS)
+    state["now"] = before_answer
     state["evidence"] = {"user_out_of_home": evaluate_stored_evidence(stored, now=state["now"])}
     monkeypatch.setattr(bot, "datetime", db.datetime)
     monkeypatch.setattr(bot, "is_quiet_hours", lambda: False)
     monkeypatch.setattr(bot, "is_proactive_muted", lambda: False)
     monkeypatch.setattr(bot, "_active_routine_pause_until", lambda: None)
     monkeypatch.setattr(bot, "pending_routine_confirmations", {})
+    monkeypatch.setattr(bot, "_external_background_runtime_channel", "matrix")
     monkeypatch.setattr(worker, "schedule_context_clarification", lambda _: None)
     monkeypatch.setattr(bot, "_craft_proactive_msg", lambda *a, **k: ("Timely reminder", False))
     notifications = []
-    monkeypatch.setattr(bot, "_send_and_record_assistant", lambda text, **k: notifications.append(text) or "$routine")
-    bot.job_check_routines()
+    if history_failure:
+        from memory import conversation_history as history
+        from services.external_delivery import DeliveryReceipt, external_delivery_router as router
+        repairs = []
+        monkeypatch.setattr(bot, "enqueue_fast_task", lambda *args: repairs.append(args))
+        monkeypatch.setattr(router, "send_text", lambda text, **k: (
+            notifications.append(text) or DeliveryReceipt("matrix", "$routine")))
+        monkeypatch.setattr(history, "append_message", lambda **k: (_ for _ in ()).throw(OSError("history unavailable")))
+    else:
+        monkeypatch.setattr(bot, "_send_and_record_assistant", lambda text, **k: notifications.append(text) or "$routine")
+    assert worker.drain_context_answer_dispatch()
+    assert not worker.drain_context_answer_dispatch()
     bot.job_check_routines()
     assert notifications == ["Timely reminder"] and len(calls) == 1
     assert str(rid) in {str(key) for key in db.load_pending_confirmations()}
+    if history_failure:
+        assert len(repairs) == 1
+
+
+@pytest.mark.parametrize("change", ["complete", "skip", "pause", "reschedule"])
+def test_dispatch_rejects_routine_changed_during_generation(environment, monkeypatch, change):
+    """The canonical eligibility reader excludes a now-obsolete reminder."""
+    from clients import telegram_bot as bot
+    from services.routine_context_clarification import RoutineCandidate
+    worker, db, rid, state, _, _, _, root = environment
+    monkeypatch.setattr(bot, "is_quiet_hours", lambda: False)
+    monkeypatch.setattr(bot, "is_proactive_muted", lambda: False)
+    monkeypatch.setattr(bot, "_active_routine_pause_until", lambda: None)
+    state["evidence"] = {"user_out_of_home": ContextEvidence(effective_value=False, status="known")}
+    snapshot = worker.load_poll_snapshot(NOW, ClarificationStore(root / "state.json"))
+    candidate = snapshot.candidates[0]
+    if change == "complete":
+        db.mark_routine_triggered_today(rid)
+    elif change == "skip":
+        db.record_routine_skip_today(rid)
+    elif change == "pause":
+        db.pause_routine_indefinitely(rid)
+    else:
+        db.update_routine_db(rid, new_time="11:00")
+    assert not worker.dispatch_context_current((candidate,), snapshot.runtime_context,
+                                               ClarificationStore(root / "state.json"), NOW)

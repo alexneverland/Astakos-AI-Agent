@@ -132,6 +132,12 @@ are in [plan.md](plan.md). Preserve all unrelated pending verification below.
   No full-suite rerun, live provider verification or commit/PR claimed.
 - [ ] Owner-controlled natural observation after implementation review: one useful
   question, an answer from another channel, and one still-timely reminder.
+- [x] PR #224: address all four Codex findings: reject stale answer versions;
+  recheck canonical completion/skip/slot eligibility; durably request an existing
+  external-worker dispatch after a complete answer; preserve successful delivery
+  when history fails and retry only recording. 123 focused tests and 23 isolated
+  legacy Telegram tests pass. Busy-worker/deadline and best-effort history-repair
+  limits are documented in the spec. No merge or live verification is claimed.
 
 ## Current repair: shift temporal provenance
 

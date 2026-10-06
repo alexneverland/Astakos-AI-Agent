@@ -251,4 +251,32 @@ or live provider/device behavior is claimed.
 
 Pre-PR checkpoint: 107 focused evidence/worker/scheduler/Debug/startup tests
 passed in 14.10 seconds with one existing dependency deprecation warning.
-No behavior changes were made after the final implementation verification.
+That checkpoint predates the PR #224 review corrections below.
+
+## PR #224 review corrections
+
+- Answer inference captures a shared-history/canonical-state/GPS evidence
+  version and rechecks it immediately before persistence. A newer version
+  defers the old answer without overwriting state or closing its question.
+- Generated reminders re-read the canonical eligible-routine query, including
+  active/completed/skipped state, pause, name and slot, before delivery.
+- Complete answers persist a dispatch wakeup in the existing question ledger.
+  The selected external runtime consumes it on its existing fast worker and
+  invokes the ordinary routine checker under the same in-process dispatch lock
+  as periodic ticks. Web does not run a second scheduler. Idle polling is two
+  seconds; busy workers/model latency can still miss a deadline. Expired wakeups
+  never authorize late replay. A crash after claiming a wakeup falls back to
+  normal periodic checks; this is not an exactly-once dispatch outbox.
+- A confirmed transport receipt remains successful when history recording
+  fails, allowing routine notification/completion state to be recorded. Only
+  history repair is queued, with a stable Matrix history ID preventing duplicate
+  rows. The existing in-memory repair queue is best-effort, not durable across
+  shutdown or repeated storage failures; it never re-sends the message.
+
+Review verification: 123 focused tests passed (one existing dependency warning)
+and the isolated legacy Telegram completion suite passed 23 tests. Temporary
+storage, frozen timing and mocked transport verify a Web answer 15 seconds before
+the slot, one canonical dispatch, and no duplicate after a confirmed send plus
+history failure. Mutation of the answer freshness comparison failed all three
+new stale-evidence regressions; the comparison was restored. Natural scheduler,
+provider and device observation remains pending; no full suite was run.

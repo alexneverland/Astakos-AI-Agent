@@ -107,8 +107,12 @@ class ClarificationStore:
                         "channel", "created_at", "status", "external_id", "sent_at",
                         "closed_at", "history_recorded"}
             if (not isinstance(row, dict) or not required <= set(row)
-                    or set(row) - required - {"correlation"}):
+                    or set(row) - required - {"correlation", "dispatch_pending"}):
                 raise ValueError("Invalid clarification request")
+            if "dispatch_pending" in row and (
+                    type(row["dispatch_pending"]) is not bool
+                    or (row["dispatch_pending"] and row["status"] != "resolved")):
+                raise ValueError("Invalid clarification dispatch request")
             if row.get("correlation") is not None and not _bounded_text(row["correlation"], 80):
                 raise ValueError("Invalid clarification correlation")
             if (not _bounded_text(row["id"], 80) or row["id"] in seen
@@ -344,6 +348,24 @@ class ClarificationStore:
                 return None
             applied = persist()
             if set(row["flags"]) <= applied:
-                row.update(status="resolved", closed_at=current.isoformat())
+                row.update(status="resolved", closed_at=current.isoformat(), dispatch_pending=True)
                 self._save(state)
             return applied
+
+    def claim_dispatch(self, *, now: datetime) -> bool:
+        """Claim one timely canonical recheck after a committed complete answer.
+
+        Old ledgers have no request. Expired requests are consumed without late
+        replay. This is a wakeup, not authority to send or complete any routine.
+        """
+        current = _aware(now)
+        with self._lock():
+            state = self._load()
+            pending = [row for row in state["requests"] if row.get("dispatch_pending")]
+            if not pending:
+                return False
+            timely = any(current < _stored_time(row["slot_at"]) for row in pending)
+            for row in pending:
+                row["dispatch_pending"] = False
+            self._save(state)
+            return timely

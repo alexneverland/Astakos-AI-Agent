@@ -7,6 +7,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import threading
+from functools import wraps
 from typing import Any
 
 from memory.routine_context_clarification import ClarificationStore
@@ -17,6 +18,47 @@ from services.routine_context_evidence import ContextEvidence, VOLATILE_FLAGS
 
 _queue_lock = threading.Lock()
 _queued = False
+_dispatch_lock = threading.RLock()
+
+
+def serialized_routine_dispatch(callback: Callable[..., Any]) -> Callable[..., Any]:
+    """Serialize periodic and answer-driven dispatch on the existing runtime."""
+    @wraps(callback)
+    def dispatch(*args: Any, **kwargs: Any) -> Any:
+        """Skip a competing tick; the owner of the lock performs normal dispatch."""
+        if not _dispatch_lock.acquire(blocking=False):
+            return None
+        try:
+            return callback(*args, **kwargs)
+        finally:
+            _dispatch_lock.release()
+    return dispatch
+
+
+def drain_context_answer_dispatch() -> bool:
+    """Consume Web or local answer wakeups from the existing external fast worker.
+
+    Its existing two-second queue wait bounds idle wakeup latency without a new
+    scheduler/thread. Only the active external process may call normal dispatch;
+    its normal gates and deadline revalidation remain authoritative.
+    """
+    from clients import telegram_bot as bot
+    from config import BASE_DIR
+    from core.messaging_channel import resolve_external_channel
+    from memory.routine_context_clarification import ATHENS
+    if (bot._external_background_runtime_channel != resolve_external_channel()
+            or bot.shutdown_event.is_set()):
+        return False
+    path = Path(BASE_DIR) / "astakos_routine_context_questions.json"
+    if not path.is_file() or not _dispatch_lock.acquire(blocking=False):
+        return False
+    try:
+        if not ClarificationStore(path).claim_dispatch(now=datetime.now(ATHENS)):
+            return False
+        bot.job_check_routines()
+        return True
+    finally:
+        _dispatch_lock.release()
 
 
 def dependency_key(routine: RoutineCandidate, context: Mapping[str, Any]) -> str:
@@ -104,6 +146,12 @@ def dispatch_context_current(
         return False
     for routine in routines:
         rid = int(routine.id)
+        eligible = {str(row["id"]): row for row in db.get_eligible_preemptive_routines_for_day(
+            routine.slot_at.strftime("%A"), now=now)}
+        row = eligible.get(routine.id)
+        if (row is None or row["time"] != routine.slot_at.strftime("%H:%M")
+                or row["event"] != routine.name):
+            return False
         if (not 0 <= (routine.slot_at - now).total_seconds() <= 900
                 or question_blocks_dispatch(store, now, routine)
                 or db.is_routine_temporarily_inactive_meta(db.get_routine_schedule_meta(rid), now=now)[0]

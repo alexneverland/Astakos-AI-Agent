@@ -13,7 +13,8 @@ def _make_routines_db(path, rows):
         CREATE TABLE routines ( priority INTEGER DEFAULT 0, conflict_group TEXT, condition_type TEXT, condition_payload TEXT, condition_mode TEXT, source_memory_ref TEXT,
             id INTEGER PRIMARY KEY, event_name TEXT, confidence REAL,
             time_str TEXT, day_of_week TEXT, state TEXT, last_triggered TEXT,
-            muted_until TEXT DEFAULT NULL
+            muted_until TEXT DEFAULT NULL, paused_indefinitely INTEGER DEFAULT 0,
+            event_type TEXT DEFAULT 'daily', mention_count INTEGER DEFAULT 1
         )
     """)
     for r in rows:
@@ -92,6 +93,7 @@ def _run_job(
             stack.enter_context(patch.object(bot, "_recent_routine_skip_events", {}))
             stack.enter_context(patch.object(cfg, "BASE_DIR", tmp))
             stack.enter_context(patch.object(cfg, "ROUTINES_DB", db_path))
+            stack.enter_context(patch("memory.routine_db.DB_PATH", db_path))
             stack.enter_context(patch("clients.telegram_bot.datetime", FakeDT))
             stack.enter_context(patch("memory.routine_db.get_routine_notify_info", return_value={"cooldown_hours": 4}))
             stack.enter_context(patch("memory.routine_db.mark_routine_notified"))

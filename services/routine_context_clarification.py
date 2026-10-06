@@ -392,13 +392,34 @@ def try_context_question_reply(
     try:
         if channel == "matrix" and reply_to_id is None:
             reply_to_id = current_matrix_reply_target()
+        version = _answer_version()
         return process_question_answer(
             store=ClarificationStore(path), user_text=user_text, channel=channel,
             now=datetime.now(ATHENS), current_time=lambda: datetime.now(ATHENS),
             trusted_owner=trusted_owner, external_derived=external_derived,
             competing_confirmation=context_confirmation_conflict(), reply_to_id=reply_to_id,
-            still_authoritative=lambda: not context_confirmation_conflict(),
+            still_authoritative=lambda: (
+                not context_confirmation_conflict() and _answer_version() == version),
         )
     except Exception as exc:
         print(f"[RoutineContext]: answer deferred ({type(exc).__name__})")
         return QuestionAnswer(False, "uncertain")
+
+
+def _answer_version() -> str:
+    """Version canonical stored state, GPS evidence and shared history before inference.
+
+    Do not include continually changing age counters. Re-read this packet inside
+    the ledger commit gate, immediately before the canonical writer executes.
+    """
+    from memory.conversation_history import get_max_rowid
+    from memory.routine_db import get_context_state
+    from memory.routine_context_clarification import ATHENS
+    from services.routine_context import build_routine_context_evidence
+    evidence = build_routine_context_evidence(datetime.now(ATHENS))
+    packet = [get_max_rowid(),
+              {flag: get_context_state(flag) for flag in VOLATILE_FLAGS},
+              {flag: (item.effective_value, item.source, item.recorded_at,
+                      item.valid_until, item.status, item.reason)
+               for flag, item in evidence.items()}]
+    return sha256(json.dumps(packet, sort_keys=True, default=str).encode()).hexdigest()

@@ -63,3 +63,31 @@ def test_assistant_delivery_does_not_record_a_failed_send() -> None:
         )
 
     assert recorded == []
+
+
+def test_bot_retains_confirmed_receipt_when_history_fails(monkeypatch, tmp_path):
+    """History failure must not make a successful Matrix send look retryable."""
+    from clients import telegram_bot as bot
+    from services.external_delivery import external_delivery_router
+    from memory import conversation_history
+    matrix = FakeTransport()
+    monkeypatch.setattr(external_delivery_router, "_channel_selector", lambda: "matrix")
+    monkeypatch.setattr(external_delivery_router, "_transports", {"matrix": matrix})
+    tasks = []
+    monkeypatch.setattr(bot, "enqueue_fast_task", lambda *args: tasks.append(args))
+    original_append = conversation_history.append_message
+    history_path = str(tmp_path / "history.db")
+    failed_once = [True]
+    def failed(**kwargs):
+        if failed_once[0]:
+            failed_once[0] = False
+            raise OSError("history temporarily unavailable")
+        return original_append(db_path=history_path, **kwargs)
+    monkeypatch.setattr(conversation_history, "append_message", failed)
+    assert bot._send_and_record_assistant("Reminder", agent="Routine_Agent") == "event-42"
+    assert matrix.texts == [("Reminder", False)]
+    assert len(tasks) == 1
+    tasks[0][0]()
+    tasks[0][0]()  # An uncertain history commit is idempotent by delivery ID.
+    assert len(conversation_history.load_messages(db_path=history_path)) == 1
+    assert matrix.texts == [("Reminder", False)]

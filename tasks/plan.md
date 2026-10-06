@@ -2,6 +2,9 @@
 
 Last reconciled with the owner: 2026-10-06 (context clarification completed;
 existing verification entries preserved).
+PR #224 review corrections are implemented and verified offline; natural
+observation and the owner's merge decision remain pending. See the clarification
+spec for deadline, wakeup and history-repair limitations.
 Only active work is listed here; [todo.md](todo.md) records its status.
 Completed evidence remains in Git history and existing specs/runbooks.
 The [archived plan](archive/2026-10-02-plan.md) is not an active queue.

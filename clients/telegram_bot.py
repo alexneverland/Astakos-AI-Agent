@@ -890,6 +890,11 @@ def fast_queue_worker(stop_event: threading.Event | None = None) -> None:
     print("\033[90m[System]: Telegram Fast Queue Worker Started!\033[0m")
     while not stop_event.is_set():
         try:
+            from services.routine_context_clarification_scheduler import drain_context_answer_dispatch
+            try:
+                drain_context_answer_dispatch()
+            except Exception as exc:
+                print(f"[RoutineContext]: dispatch wakeup deferred ({type(exc).__name__})")
             task_func, args = fast_queue.get(timeout=2)
             try:
                 print(f"\033[90m[FastQueue]: {task_func.__name__}\033[0m")
@@ -1751,7 +1756,7 @@ def _send_and_record_assistant(
 ):
     """Send assistant text through the selected external channel and record it."""
     from memory.conversation_history import append_message
-    from services.external_assistant_delivery import deliver_external_assistant_text
+    from services.external_assistant_delivery import deliver_external_assistant_text, AssistantHistoryError
 
     def _record_delivery(channel, text, handling_agent, external_id):
         metadata = {
@@ -1771,6 +1776,7 @@ def _send_and_record_assistant(
             content=text,
             channel=channel,
             agent=handling_agent,
+            message_id=f"assistant-delivery-{channel}-{external_id}",
             metadata=metadata,
         )
 
@@ -1780,6 +1786,13 @@ def _send_and_record_assistant(
             agent=agent,
             record_message=_record_delivery,
         )
+    except AssistantHistoryError as exc:
+        print(f"[ExternalSend]: confirmed delivery for agent={agent}; history repair queued")
+        try:
+            enqueue_fast_task(exc.repair)
+        except Exception:
+            print("[ExternalSend]: history repair could not be queued")
+        return exc.receipt.external_id
     except Exception as exc:
         print(f"[ExternalSend]: outbound send failed for agent={agent}: {exc}")
         return None
@@ -4638,6 +4651,10 @@ def startup_check_missed_routines():
         print(f"\033[91m[MissedRoutines]: {e}\033[0m")
 
 
+from services.routine_context_clarification_scheduler import serialized_routine_dispatch
+
+
+@serialized_routine_dispatch
 def job_check_routines():
     """
     Checks for upcoming routines (30' in advance) and performs timeout decay
