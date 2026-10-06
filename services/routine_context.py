@@ -1,8 +1,41 @@
 import json
 import math
 from datetime import datetime, timedelta
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from config import GPS_STORAGE_FILE, HOME_COORDS, HOME_RADIUS_M
+from services.routine_context_evidence import ContextEvidence
+
+
+def project_routine_context(
+    context: Mapping[str, Any], evidence: Mapping[str, ContextEvidence],
+) -> dict[str, Any]:
+    """Override only approved volatile dimensions; unknown never means false."""
+    from services.routine_context_evidence import VOLATILE_FLAGS
+    return {**context, **{flag: evidence.get(flag, ContextEvidence()).effective_value
+                         for flag in VOLATILE_FLAGS}}
+
+
+def build_routine_context_evidence(
+    now: datetime, *,
+    state_reader: Callable[[str], Mapping[str, Any] | None] | None = None,
+    gps_loader: Callable[[], Any] | None = None,
+    location_resolver: Callable[[float, float], bool | None] | None = None,
+) -> dict[str, ContextEvidence]:
+    """Expose channel-neutral, read-only evidence without altering routine dispatch."""
+    from services.routine_context_evidence import build_evidence_snapshot, load_gps_point
+    if state_reader is None:
+        from memory.routine_db import get_context_state
+        state_reader = get_context_state
+    if location_resolver is None:
+        from services.location_update import location_is_home
+        location_resolver = location_is_home
+    return build_evidence_snapshot(
+        now=now, state_reader=state_reader,
+        gps_loader=gps_loader if gps_loader is not None else lambda: load_gps_point(GPS_STORAGE_FILE),
+        location_resolver=location_resolver,
+    )
 
 
 def _recent_gps_status(now: datetime | None = None) -> str | None:
