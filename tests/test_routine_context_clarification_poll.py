@@ -86,17 +86,33 @@ def test_new_evidence_resolves_question_without_another_send(tmp_path):
     assert run_clarification_poll(**args) == "resolved"
     assert store.snapshot()["pending"] is None
     assert len(sends) == len(budgets) == 1
+    reloaded = ClarificationStore(store.path)
+    assert reloaded.claim_dispatch(now=NOW + timedelta(minutes=2))
+    assert run_clarification_poll(**args) == "not_due"
+    assert not reloaded.claim_dispatch(now=NOW + timedelta(minutes=2))
 
 
 def test_slot_expiry_never_replays_question(tmp_path):
     store, sends, _, budgets, args = harness(tmp_path)
     assert run_clarification_poll(**args) == "delivered"
     args.update(clock=lambda: NOW + timedelta(minutes=12),
+                snapshot_loader=lambda _: snapshot(value=False),
                 classify=lambda _: pytest.fail("expired candidate must not classify"))
     assert run_clarification_poll(**args) == "not_due"
     assert store.snapshot()["pending"] is None
     assert store.snapshot()["requests"][0]["status"] == "expired"
     assert len(sends) == len(budgets) == 1
+    assert not store.claim_dispatch(now=NOW + timedelta(minutes=12))
+
+
+def test_declined_question_does_not_request_dispatch(tmp_path):
+    """Declining a question is not permission to resume its reminder."""
+    store, sends, _, _, args = harness(tmp_path)
+    assert run_clarification_poll(**args) == "delivered"
+    assert store.close(store.snapshot()["pending"]["id"], outcome="declined",
+                       now=NOW + timedelta(minutes=1))
+    assert not store.claim_dispatch(now=NOW + timedelta(minutes=1))
+    assert len(sends) == 1
 
 
 def test_receipt_history_repair_after_expiry_uses_real_shared_store(tmp_path):

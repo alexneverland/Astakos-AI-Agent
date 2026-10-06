@@ -297,6 +297,13 @@ class ClarificationStore:
             self._save(state)
             return True
 
+    @staticmethod
+    def _close_request(row: dict[str, Any], *, outcome: str, now: datetime) -> None:
+        """Finalize a question and request normal dispatch only on resolution."""
+        row.update(status=outcome, closed_at=now.isoformat())
+        if outcome == "resolved":
+            row["dispatch_pending"] = True
+
     def close(self, identifier: str, *, outcome: str, now: datetime) -> bool:
         """Resolve or decline only a confirmed delivered question."""
         if outcome not in {"resolved", "declined"}:
@@ -308,7 +315,7 @@ class ClarificationStore:
             if (row is None or row["status"] != "sent"
                     or current >= _stored_time(row["slot_at"])):
                 return False
-            row.update(status=outcome, closed_at=current.isoformat())
+            self._close_request(row, outcome=outcome, now=current)
             self._save(state)
             return True
 
@@ -348,7 +355,7 @@ class ClarificationStore:
                 return None
             applied = persist()
             if set(row["flags"]) <= applied:
-                row.update(status="resolved", closed_at=current.isoformat(), dispatch_pending=True)
+                self._close_request(row, outcome="resolved", now=current)
                 self._save(state)
             return applied
 

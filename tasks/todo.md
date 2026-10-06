@@ -138,6 +138,9 @@ are in [plan.md](plan.md). Preserve all unrelated pending verification below.
   when history fails and retry only recording. 123 focused tests and 23 isolated
   legacy Telegram tests pass. Busy-worker/deadline and best-effort history-repair
   limits are documented in the spec. No merge or live verification is claimed.
+- [x] Latest PR #224 P2: evidence-only resolution now uses the same atomic
+  ledger close/wakeup transition as complete answers. 78 focused tests pass;
+  timely dispatch, repeated polls, expiry and decline are covered offline.
 
 ## Current repair: shift temporal provenance
 

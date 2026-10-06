@@ -111,7 +111,8 @@ def test_worker_retry_preserves_identity_and_holds_uncertain_telegram(environmen
 
 
 @pytest.mark.parametrize("history_failure", [False, True])
-def test_web_answer_persists_then_normal_scheduler_sends_once(environment, monkeypatch, history_failure):
+@pytest.mark.parametrize("resolution", ["answer", "evidence"])
+def test_web_answer_persists_then_normal_scheduler_sends_once(environment, monkeypatch, history_failure, resolution):
     """The real ledger/writer/scheduler lifecycle resumes only a timely slot."""
     from clients import telegram_bot as bot
     from services import context_extractor as extractor
@@ -130,13 +131,22 @@ def test_web_answer_persists_then_normal_scheduler_sends_once(environment, monke
     monkeypatch.setattr(extractor, "datetime", db.datetime)
     monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: '{"relation":"related","flags":{"user_out_of_home":false}}')
     monkeypatch.setattr(extractor, "_recent_user_context_hint", lambda _: "")
-    answer = process_question_answer(store=ClarificationStore(root / "astakos_routine_context_questions.json"),
-        user_text="Ναι, γύρισα σπίτι", channel="web", now=state["now"], trusted_owner=True)
-    assert answer.consumed and answer.outcome == "resolved"
+    if resolution == "answer":
+        answer = process_question_answer(store=ClarificationStore(root / "astakos_routine_context_questions.json"),
+            user_text="Ναι, γύρισα σπίτι", channel="web", now=state["now"], trusted_owner=True)
+        assert answer.consumed and answer.outcome == "resolved"
+    else:
+        # New canonical evidence arrives after the periodic tick held the question.
+        db.set_context_state("user_out_of_home", "false")
     stored = db.get_context_state("user_out_of_home")
     assert stored["value"] == "false"
     state["now"] = before_answer
     state["evidence"] = {"user_out_of_home": evaluate_stored_evidence(stored, now=state["now"])}
+    if resolution == "evidence":
+        worker.run_context_clarification_job()
+        ledger = ClarificationStore(root / "astakos_routine_context_questions.json")
+        assert ledger.snapshot()["pending"] is None
+        assert ledger.snapshot()["requests"][0]["status"] == "resolved"
     monkeypatch.setattr(bot, "datetime", db.datetime)
     monkeypatch.setattr(bot, "is_quiet_hours", lambda: False)
     monkeypatch.setattr(bot, "is_proactive_muted", lambda: False)

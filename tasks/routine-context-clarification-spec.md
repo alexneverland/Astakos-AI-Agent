@@ -260,7 +260,9 @@ That checkpoint predates the PR #224 review corrections below.
   defers the old answer without overwriting state or closing its question.
 - Generated reminders re-read the canonical eligible-routine query, including
   active/completed/skipped state, pause, name and slot, before delivery.
-- Complete answers persist a dispatch wakeup in the existing question ledger.
+- Complete answers and fresh evidence-only resolutions use one ledger
+  finalization transition that persists a dispatch wakeup atomically with closing
+  the question. Declines and expiry do not request dispatch.
   The selected external runtime consumes it on its existing fast worker and
   invokes the ordinary routine checker under the same in-process dispatch lock
   as periodic ticks. Web does not run a second scheduler. Idle polling is two
@@ -280,3 +282,11 @@ the slot, one canonical dispatch, and no duplicate after a confirmed send plus
 history failure. Mutation of the answer freshness comparison failed all three
 new stale-evidence regressions; the comparison was restored. Natural scheduler,
 provider and device observation remains pending; no full suite was run.
+
+Evidence-only review correction: three regressions failed before the fix.
+After sharing the finalization transition, 78 focused ledger/poll/reply/worker/
+scheduler tests passed with two existing dependency warnings. The production
+worker fixture verifies fresh stored evidence resolving a question 15 seconds
+before its slot, followed by one ordinary reminder across two checks, including
+confirmed delivery with history failure. Repeated polls cannot rearm the wakeup;
+declined or expired questions do not dispatch. No live data/runtime was touched.
