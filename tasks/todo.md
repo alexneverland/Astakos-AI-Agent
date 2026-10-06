@@ -1,9 +1,137 @@
 # Astakos: Current Tasks
 
-Last reconciled with the owner: 2026-10-04.
+Last reconciled with the owner: 2026-10-06 (context-evidence added;
+existing verification entries preserved).
 [plan.md](plan.md) defines scope and policy. Completed entries were removed from
 this active checklist; evidence remains in Git history, specs/runbooks and the
 [archive](archive/2026-10-02-todo.md). Archived unchecked items are not this backlog.
+
+## Current feature: context-evidence (foundation offline verified)
+
+Contract: [context-evidence-spec.md](context-evidence-spec.md).
+Map: [routine-context-refresh-map.md](routine-context-refresh-map.md).
+Scope: read-only foundation; automatic questions/routine adoption are not active.
+
+- [x] CE1: Evaluate stored whereabouts/co-presence observations.
+  - Acceptance: recent true/false preserved; two-hour/date expiry becomes unknown;
+    invalid, future or unreadable observations do not invent current state.
+  - Acceptance: timezone-aware instants, local naive legacy timestamps and DST
+    handled consistently; inputs unmodified and no persistence writes.
+  - Verify: failing-then-passing focused tests/test_routine_context_evidence.py.
+  - Files: services/routine_context_evidence.py, tests/test_routine_context_evidence.py.
+  - Dependencies: none. Scope: small (two files).
+- [x] CE2: Reconcile fresh owner GPS with stored evidence.
+  - Acceptance: fifteen-minute validated GPS establishes only owner home/away;
+    invalid geometry/point/time or stale point cannot establish current location.
+  - Acceptance: known conflicting sources resolve unknown/conflict; contradictory
+    household-home claim exposed without guessed partner/child presence or writes.
+  - Verify: failing-then-passing GPS/conflict/boundary tests using temporary fixtures.
+  - Files: same service/test pair; reuse services/location_update.py geometry.
+  - Dependencies: CE1. Scope: small (two files).
+- [x] Checkpoint after CE2: focused evidence tests pass, no provider/outbound calls,
+  no real database/GPS writes and no changes to current routine dispatch.
+- [x] CE3: Expose and verify the canonical channel-neutral snapshot.
+  - Acceptance: entry point in services/routine_context.py uses memory abstractions
+    and injected evaluation time; all five flags have structured value/source/age
+    validity/reason evidence without fabricating source provenance.
+  - Acceptance: legacy routine context, shift/extended absence and existing callers
+    remain unchanged; fixtures prove wiring and read-only behavior.
+  - Verify: focused two-file command below, syntax checks and git diff --check.
+  - Files: services/routine_context.py, service/test pair, feature documentation.
+  - Dependencies: CE2 checkpoint. Scope: medium; no unrelated cleanup.
+- [x] Final context-evidence checkpoint: record actual test evidence and deferred
+  limitations. 74 focused tests pass, one dependency deprecation warning; syntax
+  checks and git diff --check pass. No full-suite run, runtime adoption or live
+  provider/device verification. The earlier mixed run was stopped at a legacy
+  unmocked model boundary; final resolver tests are isolated and network-blocked.
+- [x] Owner review of the foundation before dependent clarification implementation.
+  Owner requested the next module on 2026-10-06.
+
+Verification commands (executed after implementation with isolated temp paths):
+
+```powershell
+.\venv\Scripts\python.exe -m pytest tests/test_routine_context_evidence.py tests/test_routine_context.py -q --basetemp=C:/Users/PC/AppData/Local/Temp/astakos-context-evidence
+.\venv\Scripts\python.exe -m py_compile services/routine_context_evidence.py services/routine_context.py tests/test_routine_context_evidence.py
+git diff --check
+```
+
+- [x] Specify routine-context-clarification; owner approved on 2026-10-06.
+  Contract: [routine-context-clarification-spec.md](routine-context-clarification-spec.md).
+  Scheduler and reply adapters are now wired in code; natural verification is pending.
+- [ ] Later: scope schedule-context inference after natural clarification verification.
+
+## Routine-context-clarification: implementation complete, natural observation pending
+
+Detailed acceptance, dependencies, file scope and verification for every CQ task
+are in [plan.md](plan.md). Preserve all unrelated pending verification below.
+
+- [x] Owner approval of the ordered implementation plan before code changes.
+- [x] CQ1: Atomic dedicated ledger, one pending, two/day, expiry/refusal/restart
+  and corruption/concurrency safety; failing-then-passing temporary-storage tests.
+- [x] CQ2: Consequential eligible dependency selection, minimal semantic question,
+  stale-generation recheck and cache; no keyword interpretation patches.
+  Pure influence/proposal/cache tests pass. Known evidence value/time changes
+  invalidate cached decisions; model IDs are limited to the five supplied
+  candidates. Injected poll rechecks history/evidence/eligibility/channel/gates
+  after classification. Canonical schedule/pause/mute/cooldown filtering and
+  validated semantic dependency caching are wired in the existing slow worker.
+- [x] Checkpoint CQ1-CQ2: real temporary lifecycle/selection integration,
+  provider/transport boundaries mocked and accidental network blocked.
+- [x] CQ3: Reserved canonical delivery/history with idempotent Matrix recovery
+  and held uncertain Telegram sends; verify persisted crash/failure outcomes.
+  Production-worker transport adapters have real temporary history/ledger tests.
+  Budget charging is serialized with the durable sending transition, with a
+  post-budget deadline check. Persisted generation correlation permits only
+  still-current Matrix retries; uncertain Telegram delivery stays held.
+- [x] First implementation checkpoint: 101 focused evidence/clarification tests
+  pass with one dependency warning; Python syntax and git diff --check pass.
+  Historical checkpoint; no scheduler dispatch was enabled.
+- [x] CQ4: Canonical trusted semantic answers and final persisted evidence;
+  partial/unrelated/refused/late scenarios and unchanged ordinary extraction.
+  Optional extractor contract and temporary persisted answer tests implemented;
+  Durable correlation, concurrent full-answer serialization and ledger closure
+  implemented. Injected poll resolves confirmed questions when all requested
+  evidence is known and recorded after delivery; channel adapters are wired.
+- [x] Next inactive slice checkpoint: 55 targeted answer/extractor/delivery/state
+  tests pass. Receipt/history repair survives expiry or channel change; receipt
+  timestamps use injected current time. Historical inactive-slice checkpoint.
+- [x] Checkpoint CQ3-CQ4: injected question/answer flow, no execution or changes
+  to approval/routine completion records.
+- [x] CQ5: Web/Telegram arbitration before completion/draft interpretation;
+  ordinary replies unchanged, exact-target approvals authoritative.
+  Early consumed-answer path and competing-authority safety are tested.
+- [x] CQ6: Matrix wiring with shared answer contract; trusted owner only,
+  cross-channel correlation and single history/extraction path.
+  Plain-text adapter/history/background guard wired and tested. Exact Reply to
+  a confirmed context question now reaches semantic extraction, with protocol
+  fallback stripping and task-local correlation. Approval targets retain their
+  existing verified-device gate; unrelated and ambiguous answers pass through.
+- [x] Element Reply checkpoint: 72 targeted transport/approval/answer/channel
+  tests pass (two dependency warnings), including final temporary flag/ledger/
+  history outcome and correlation cleanup after failure. No live dispatcher.
+- [x] Answer/channel slice: 123 targeted extractor/arbitration/Matrix/lifecycle
+  tests pass with one existing dependency warning. No question dispatcher,
+  production ledger, live transport or full-suite run was activated.
+- [x] Checkpoint CQ5-CQ6: all three channel entry points pass related/unrelated
+  replies and short-answer dual-consumption safety tests.
+- [x] CQ7: Existing routine dispatch consumes scoped evidence end-to-end and
+  resumes only timely eligible routines; quiet/mute/activity/budget gates hold.
+  Existing routine ticks enqueue one coalesced worker. Conditions, later guards
+  and message prompts share the five-flag projection. Recheck before dispatch;
+  pending questions hold competing confirmations and questioned past slots
+  are excluded from startup replay. Distinct due routines send one batch.
+  No process was started/restarted and no real question was sent for testing.
+- [x] CQ8: Authenticated bounded Debug, ignore ledger/lock, data-only backup
+  selection verified in temporary fixtures; no actual backup/runtime changes.
+- [x] Final focused checks and diff inspection: 325 related tests passed;
+  final worker/scheduler/Debug/startup slice passed 33 tests. Legacy completion
+  fixtures passed separately (Telegram 23, Web/Matrix 28) to avoid whole-module
+  stub contamination. Deadline mutation was caught and restored. All 32 changed
+  Python files compiled; both inline JS scripts passed syntax validation;
+  git diff --check passed (only Git CRLF-normalization notices).
+  No full-suite rerun, live provider verification or commit/PR claimed.
+- [ ] Owner-controlled natural observation after implementation review: one useful
+  question, an answer from another channel, and one still-timely reminder.
 
 ## Current repair: shift temporal provenance
 

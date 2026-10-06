@@ -321,17 +321,24 @@ class MatrixTextTransport:
         if text is None:
             return
 
-        if self._approval_reaction_handler is not None:
+        from services.routine_context_clarification import (
+            is_current_context_question_target, matrix_reply_scope,
+        )
+
+        content = event.source["content"]
+        relation = content.get("m.relates_to")
+        reply = relation.get("m.in_reply_to") if isinstance(relation, dict) else None
+        reply_id = reply.get("event_id") if isinstance(reply, dict) else None
+        reply_id = reply_id if isinstance(reply_id, str) and reply_id else None
+        context_reply = bool(reply_id and is_current_context_question_target(reply_id))
+
+        if self._approval_reaction_handler is not None and not context_reply:
             from services.matrix_approval import (
                 APPROVE_REACTION_KEYS,
                 REJECT_REACTION_KEYS,
                 normalize_approval_reaction_key,
             )
 
-            content = event.source["content"]
-            relation = content.get("m.relates_to")
-            reply = relation.get("m.in_reply_to") if isinstance(relation, dict) else None
-            reply_id = reply.get("event_id") if isinstance(reply, dict) else None
             decision = normalize_approval_reaction_key(text.rsplit("\n\n", 1)[-1].strip())
             if reply_id and decision in APPROVE_REACTION_KEYS | REJECT_REACTION_KEYS:
                 if self._trusted_approval_device(event):
@@ -363,9 +370,20 @@ class MatrixTextTransport:
                         break
             return
 
-        reply_text, reply_mode, attachment_paths = self._normalize_reply(
-            await self._run_while_typing(self._turn_handler(text, event_id))
-        )
+        if context_reply:
+            # Matrix's plaintext Reply fallback quotes the target before the
+            # owner's actual body. Strip only the protocol quote block, while
+            # preserving every paragraph/line of the answer itself.
+            lines = text.splitlines(keepends=True)
+            quoted = 0
+            while quoted < len(lines) and lines[quoted].startswith("> "):
+                quoted += 1
+            if quoted and quoted < len(lines) and not lines[quoted].strip():
+                text = "".join(lines[quoted + 1:]).strip()
+        with matrix_reply_scope(reply_id):
+            reply_text, reply_mode, attachment_paths = self._normalize_reply(
+                await self._run_while_typing(self._turn_handler(text, event_id))
+            )
         store_matrix_event_reply(
             event_id,
             reply_text,

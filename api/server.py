@@ -1025,6 +1025,27 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
     voice_delivery_context = _build_voice_delivery_context(is_voice_mode)
 
+    from services.routine_context_clarification import try_context_question_reply
+
+    context_answer = await asyncio.to_thread(
+        try_context_question_reply, user_input, "web", trusted_owner=True,
+        external_derived=bool(photo_path),
+    )
+    if context_answer.consumed:
+        reply = context_answer.reply
+        user_saved = append_to_chat_history(
+            "user", user_input, return_saved=True, mirror_target=mirror_target,
+        )
+        assistant_saved = append_to_chat_history(
+            "assistant", reply, agent="Routine_Context", return_saved=True,
+            mirror_target=mirror_target,
+        )
+        enqueue_fast_task(log_exchange, user_input, reply, "Routine_Context", "web")
+        return JSONResponse({
+            "agent": "Routine_Context", "response": reply,
+            "user_rowid": user_saved["rowid"], "assistant_rowid": assistant_saved["rowid"],
+        })
+
     # 2. --- XML CONTEXT ISOLATION ---
     # Web/Telegram are trusted local user channels.
     # We do NOT wrap in isolated_data — otherwise the user's commands
@@ -2632,12 +2653,21 @@ async def debug_runtime(_=Depends(require_token)):
     cooldown_info     = []
 
     try:
-        from services.routine_context import build_runtime_routine_context
+        from services.routine_context import build_runtime_routine_context, build_routine_context_evidence, project_routine_context
         from services.routine_conditions import evaluate_routine_conditions
         from memory.routine_db import get_routine_conditions
-        ctx = build_runtime_routine_context(datetime.now())
+        from memory.routine_context_clarification import ATHENS
+        from services.routine_context_clarification_debug import clarification_diagnostics, latest_clarification_check
+        from pathlib import Path
+        evidence_now = datetime.now(ATHENS)
+        current_evidence = build_routine_context_evidence(evidence_now)
+        ctx = project_routine_context(build_runtime_routine_context(datetime.now()), current_evidence)
+        clarification_debug = clarification_diagnostics(
+            Path(base) / "astakos_routine_context_questions.json", evidence_now, current_evidence)
+        clarification_debug["last_check"] = None
     except ImportError:
         ctx = {}
+        clarification_debug = {"error": True, "pending": None, "evidence": {}}
         evaluate_routine_conditions = lambda c_list, cx: {"allowed": True, "results": []}
         get_routine_conditions = lambda rid: []
 
@@ -2665,6 +2695,7 @@ async def debug_runtime(_=Depends(require_token)):
         from memory.event_log import get_events
         today_str = datetime.now().strftime("%Y-%m-%d")
         today_events = get_events(today_str, job="routines")
+        clarification_debug["last_check"] = latest_clarification_check(today_events)
 
         # Active routines
         cursor.execute("""
@@ -3023,6 +3054,7 @@ async def debug_runtime(_=Depends(require_token)):
             "routine_pause_remaining_days": routine_pause_remaining_days,
         },
         "routines": {
+            "context_clarification": clarification_debug,
             "state_counts":    state_counts,
             "active":          active_routines,
             "non_active":      cooldown_info,

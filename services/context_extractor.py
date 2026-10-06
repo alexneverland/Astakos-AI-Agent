@@ -1,7 +1,11 @@
 import config
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
 from services.gemini import safe_gemini_call
 from core.utils import clean_message, extract_json_from_text
-from core.untrusted_content import external_content_source_names
+from core.untrusted_content import external_content_source_names, format_untrusted_tool_result
 from memory.conversation_history import load_recent_trusted_user_messages
 from memory.routine_db import set_context_state
 from datetime import datetime
@@ -145,17 +149,32 @@ def _recent_user_context_hint(channel: str, limit: int = 4) -> str:
     return "\n".join(f"- {message[:500]}" for message in messages)
 
 
-def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel: str = "telegram"):
+@dataclass(frozen=True)
+class ContextExtractionResult:
+    """Confirmed canonical writes, not an inferred acknowledgement of success."""
+
+    relation: str = "uncertain"
+    applied_flags: frozenset[str] = frozenset()
+
+
+def extract_and_update_context_flags(
+    user_text: str, ai_text: str = "", channel: str = "telegram", *,
+    clarification_context: dict | None = None,
+    clarification_still_current: Callable[[], bool] | None = None,
+    clarification_commit: Callable[[Callable[[], frozenset[str]]], frozenset[str] | None] | None = None,
+) -> ContextExtractionResult | None:
     """
     Calls the LLM to extract context flags based on the user's message,
     and directly updates astakos_routines.db context states.
     """
-    if not user_text or len(user_text.strip()) < 3:
-        return
+    clarification = clarification_context is not None
+    empty_result = ContextExtractionResult() if clarification else None
+    if not user_text or (not clarification and len(user_text.strip()) < 3):
+        return empty_result
 
     if "[VISUAL ANALYSIS]" in user_text.upper():
         print("[ContextExtractor] Skipped visual-analysis payload without explicit live-state text")
-        return
+        return empty_result
 
     try:
         prompt = _CONTEXT_EXTRACTION_PROMPT.format(
@@ -167,13 +186,47 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
             recent_user_context=_recent_user_context_hint(channel),
             ai_text=ai_text,
         )
+        if clarification:
+            from services.routine_context_evidence import VOLATILE_FLAGS
+
+            context = clarification_context
+            if (not isinstance(context, dict) or set(context) != {"question", "flags"}
+                    or not isinstance(context["question"], str)
+                    or not 1 <= len(context["question"].strip()) <= 500
+                    or not isinstance(context["flags"], list)
+                    or not 1 <= len(context["flags"]) <= 5
+                    or any(not isinstance(flag, str) or flag not in VOLATILE_FLAGS
+                           for flag in context["flags"])
+                    or len(set(context["flags"])) != len(context["flags"])):
+                return empty_result
+            instructions = (Path(__file__).resolve().parents[1] / "prompts" /
+                            "routine_context_answer.md").read_text(encoding="utf-8")
+            prompt += "\n" + instructions + "\n" + format_untrusted_tool_result(
+                "routine clarification reference",
+                json.dumps(context, ensure_ascii=False),
+            )
         response = safe_gemini_call(prompt)
         text = response.text if hasattr(response, "text") else str(response)
         cleaned = clean_message(text).strip()
 
         payload = extract_json_from_text(cleaned)
         if payload is None:
-            return # No valid JSON found
+            return empty_result
+        if clarification:
+            if (not isinstance(payload, dict) or set(payload) != {"relation", "flags"}
+                    or not isinstance(payload["relation"], str)
+                    or payload["relation"] not in {"related", "unrelated", "uncertain", "refused"}
+                    or not isinstance(payload["flags"], dict)):
+                return empty_result
+            relation = payload["relation"]
+            if relation != "related":
+                return ContextExtractionResult(relation)
+            payload = payload["flags"]
+            if (not payload or not set(payload) <= set(context["flags"])
+                    or any(type(value) is not bool for value in payload.values())
+                    or (clarification_still_current is not None
+                        and not clarification_still_current())):
+                return empty_result
         
         # Validate and apply only known flags
         valid_keys = {
@@ -254,36 +307,23 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         elif payload.get("kid1_absence_scope") not in valid_absence_scopes:
             payload.pop("kid1_absence_scope", None)
 
-        for key, value in payload.items():
-            if key in valid_keys and isinstance(value, bool):
-                # Save to database
-                str_val = "true" if value else "false"
-                set_context_state(key, str_val, expires_at=today_str)
-                print(f"[ContextExtractor] Updated {key} = {str_val}")
+        def persist() -> frozenset[str]:
+            """Apply the already validated semantic state through canonical writers."""
+            return _persist_context_payload(payload, valid_keys, today_str)
 
-        if "kid1_absence_scope" in payload:
-            # An explicitly confirmed stay remains in force until a later
-            # explicit temporary/home state replaces it.
-            scope_expiry = None if payload["kid1_absence_scope"] == "extended" else today_str
-            set_context_state("kid1_absence_scope", payload["kid1_absence_scope"], expires_at=scope_expiry)
-            # Retire any older legacy reason so it cannot reappear after the
-            # canonical scope is updated.
-            set_context_state("kid1_away_reason", "", expires_at=today_str)
+        applied_flags = (
+            clarification_commit(persist)
+            if clarification and clarification_commit is not None else persist()
+        )
+        if applied_flags is None:
+            # Interpretation owns this reply even if another worker resolved
+            # the question or it expired before this worker could commit it.
+            return ContextExtractionResult("related") if clarification else None
 
-        if "current_shift" in payload:
-            set_context_state("current_shift", payload["current_shift"], expires_at=today_str)
-            print(f"[ContextExtractor] Updated current_shift = {payload['current_shift']}")
-
-        if "partner_work_mode" in payload:
-            set_context_state(
-                "partner_work_mode",
-                payload["partner_work_mode"],
-                expires_at=today_str,
-            )
-            print(
-                "[ContextExtractor] Updated partner_work_mode = "
-                f"{payload['partner_work_mode']}"
-            )
+        if clarification:
+            # No second reconciler interpretation of a short answer. Existing
+            # consistency rules and the canonical writer above remain authoritative.
+            return ContextExtractionResult("related", frozenset(applied_flags))
 
         reconciled_directives = infer_routine_reconciliation_directives(
             user_text,
@@ -325,3 +365,24 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
 
     except Exception as exc:
         print(f"[ContextExtractor Error]: {exc!r}")
+        return empty_result
+
+
+def _persist_context_payload(payload: dict, valid_keys: set[str], today: str) -> frozenset[str]:
+    """Preserve the shared flag-writing path for ordinary and clarification turns."""
+    applied = set()
+    for key, value in payload.items():
+        if key in valid_keys and isinstance(value, bool):
+            str_val = "true" if value else "false"
+            set_context_state(key, str_val, expires_at=today)
+            applied.add(key)
+            print(f"[ContextExtractor] Updated {key} = {str_val}")
+    if "kid1_absence_scope" in payload:
+        expiry = None if payload["kid1_absence_scope"] == "extended" else today
+        set_context_state("kid1_absence_scope", payload["kid1_absence_scope"], expires_at=expiry)
+        set_context_state("kid1_away_reason", "", expires_at=today)
+    for key in ("current_shift", "partner_work_mode"):
+        if key in payload:
+            set_context_state(key, payload[key], expires_at=today)
+            print(f"[ContextExtractor] Updated {key} = {payload[key]}")
+    return frozenset(applied)

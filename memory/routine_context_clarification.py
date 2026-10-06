@@ -1,0 +1,349 @@
+"""Durable, bounded lifecycle for routine context clarification questions."""
+
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable
+from zoneinfo import ZoneInfo
+
+from filelock import FileLock
+
+
+ATHENS = ZoneInfo("Europe/Athens")
+FINAL_STATES = frozenset({"resolved", "declined", "expired"})
+VALID_STATES = FINAL_STATES | {"reserved", "sending", "sent"}
+
+
+@dataclass(frozen=True)
+class QuestionRequest:
+    """A prepared question with stable identity and a bounded routine slot."""
+
+    id: str
+    topic: str
+    routine_ids: tuple[str, ...]
+    flags: tuple[str, ...]
+    slot_at: datetime
+    question: str
+    channel: str
+    correlation: str | None = None
+
+
+def _aware(moment: datetime) -> datetime:
+    """Require an explicit instant before comparing Athens day and slot."""
+    if moment.tzinfo is None or moment.utcoffset() is None:
+        raise ValueError("An aware timestamp is required")
+    return moment.astimezone(ATHENS)
+
+
+def _bounded_text(value: Any, limit: int = 500) -> bool:
+    """Validate a persisted text field without interpreting its meaning."""
+    return isinstance(value, str) and bool(value.strip()) and len(value) <= limit
+
+
+def _stored_time(value: Any) -> datetime:
+    """Parse an aware timestamp from the authoritative ledger."""
+    if not isinstance(value, str):
+        raise ValueError("Invalid clarification timestamp")
+    return _aware(datetime.fromisoformat(value))
+
+
+class ClarificationStore:
+    """Serialize question reservations across the Web and external processes."""
+
+    def __init__(self, path: str | Path) -> None:
+        """Use an injected file path so tests never access the live ledger."""
+        self.path = Path(path)
+
+    def _lock(self) -> FileLock:
+        """Hold a short cross-process lock for a single ledger transaction."""
+        return FileLock(str(self.path) + ".lock", timeout=10)
+
+    def _load(self) -> dict[str, Any]:
+        """Read the ledger, treating absent and damaged files differently."""
+        try:
+            state = json.loads(self.path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {"version": 1, "requests": [], "evaluations": []}
+        self._validate(state)
+        return state
+
+    @staticmethod
+    def _validate(state: Any) -> None:
+        """Reject malformed or unbounded state before any subsequent write."""
+        if (not isinstance(state, dict) or set(state) != {"version", "requests", "evaluations"}
+                or type(state["version"]) is not int or state["version"] != 1
+                or not isinstance(state["requests"], list)
+                or len(state["requests"]) > 64
+                or not isinstance(state["evaluations"], list)
+                or len(state["evaluations"]) > 128):
+            raise ValueError("Invalid clarification ledger")
+        for evaluation in state["evaluations"]:
+            if (not isinstance(evaluation, dict) or not {"fingerprint", "day"} <= set(evaluation)
+                    or set(evaluation) - {"fingerprint", "day", "flags"}
+                    or not _bounded_text(evaluation["fingerprint"], 80)
+                    or not isinstance(evaluation["day"], str)):
+                raise ValueError("Invalid clarification evaluation")
+            if "flags" in evaluation:
+                from services.routine_context_evidence import VOLATILE_FLAGS
+                flags = evaluation["flags"]
+                if (not isinstance(flags, list) or len(flags) > 5
+                        or any(flag not in VOLATILE_FLAGS for flag in flags)
+                        or len(set(flags)) != len(flags)):
+                    raise ValueError("Invalid semantic dependencies")
+            try:
+                from datetime import date
+                if date.fromisoformat(evaluation["day"]).isoformat() != evaluation["day"]:
+                    raise ValueError("Noncanonical evaluation day")
+            except ValueError as exc:
+                raise ValueError("Invalid clarification evaluation day") from exc
+        seen: set[str] = set()
+        for row in state["requests"]:
+            required = {"id", "topic", "routine_ids", "flags", "slot_at", "question",
+                        "channel", "created_at", "status", "external_id", "sent_at",
+                        "closed_at", "history_recorded"}
+            if (not isinstance(row, dict) or not required <= set(row)
+                    or set(row) - required - {"correlation"}):
+                raise ValueError("Invalid clarification request")
+            if row.get("correlation") is not None and not _bounded_text(row["correlation"], 80):
+                raise ValueError("Invalid clarification correlation")
+            if (not _bounded_text(row["id"], 80) or row["id"] in seen
+                    or not _bounded_text(row["topic"], 120)
+                    or not _bounded_text(row["question"])):
+                raise ValueError("Invalid clarification identity")
+            seen.add(row["id"])
+            for field in ("routine_ids", "flags"):
+                values = row[field]
+                if (not isinstance(values, list) or not 1 <= len(values) <= 5
+                        or any(not _bounded_text(value, 100) for value in values)
+                        or len(set(values)) != len(values)):
+                    raise ValueError("Invalid clarification dependencies")
+            if (not isinstance(row["channel"], str)
+                    or row["channel"] not in ("matrix", "telegram")
+                    or not isinstance(row["status"], str)
+                    or row["status"] not in VALID_STATES):
+                raise ValueError("Invalid clarification status")
+            slot = _stored_time(row["slot_at"])
+            created = _stored_time(row["created_at"])
+            if slot <= created:
+                raise ValueError("Invalid clarification deadline")
+            for field in ("sent_at", "closed_at"):
+                if row[field] is not None:
+                    _stored_time(row[field])
+            if row["external_id"] is not None and not _bounded_text(row["external_id"], 200):
+                raise ValueError("Invalid clarification receipt")
+            if type(row["history_recorded"]) is not bool:
+                raise ValueError("Invalid clarification history status")
+            if row["history_recorded"] and row["external_id"] is None:
+                raise ValueError("Missing recorded clarification receipt")
+            if row["status"] in {"sent", "resolved", "declined"} and (
+                    row["sent_at"] is None or row["external_id"] is None):
+                raise ValueError("Missing clarification receipt")
+            if (row["status"] in FINAL_STATES) != (row["closed_at"] is not None):
+                raise ValueError("Invalid clarification closure")
+        if sum(row["status"] not in FINAL_STATES for row in state["requests"]) > 1:
+            raise ValueError("Multiple pending clarification questions")
+
+    def _save(self, state: dict[str, Any]) -> None:
+        """Replace a fully synced file while holding the process lock."""
+        self._validate(state)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=".routine-clarification-", suffix=".tmp", dir=self.path.parent,
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump(state, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return current state and the sole pending record, without changing it."""
+        with self._lock():
+            state = self._load()
+        pending = next((row for row in state["requests"] if row["status"] not in FINAL_STATES), None)
+        return {"requests": state["requests"], "pending": pending}
+
+    def claim_evaluation(self, fingerprint: str, *, now: datetime) -> bool:
+        """Claim an unchanged semantic snapshot once across workers and polls."""
+        current = _aware(now)
+        if not _bounded_text(fingerprint, 80):
+            raise ValueError("Invalid clarification fingerprint")
+        with self._lock():
+            state = self._load()
+            day = current.date().isoformat()
+            if any(item["day"] == day and item["fingerprint"] == fingerprint
+                   for item in state["evaluations"]):
+                return False
+            state["evaluations"] = (state["evaluations"] + [
+                {"fingerprint": fingerprint, "day": day},
+            ])[-128:]
+            self._save(state)
+            return True
+
+    def evaluation_flags(self, fingerprint: str, *, now: datetime) -> tuple[str, ...] | None:
+        """Read validated dependency output; an unfinished/failed claim is unknown."""
+        with self._lock():
+            state = self._load()
+            row = next((item for item in state["evaluations"]
+                        if item["fingerprint"] == fingerprint
+                        and item["day"] == _aware(now).date().isoformat()), None)
+        return tuple(row["flags"]) if row is not None and "flags" in row else None
+
+    def record_evaluation_flags(self, fingerprint: str, flags: tuple[str, ...], *, now: datetime) -> None:
+        """Finalize one previously claimed tool-free dependency decision."""
+        with self._lock():
+            state = self._load()
+            row = next((item for item in state["evaluations"]
+                        if item["fingerprint"] == fingerprint
+                        and item["day"] == _aware(now).date().isoformat()), None)
+            if row is None:
+                raise ValueError("Missing dependency claim")
+            row["flags"] = list(flags)
+            self._save(state)
+
+    @staticmethod
+    def _expire_pending(state: dict[str, Any], now: datetime) -> bool:
+        """Close a question at its scheduled routine time."""
+        for row in state["requests"]:
+            if row["status"] not in FINAL_STATES and now >= _stored_time(row["slot_at"]):
+                row["status"] = "expired"
+                row["closed_at"] = now.isoformat()
+                return True
+        return False
+
+    def expire(self, *, now: datetime) -> bool:
+        """Persist expiry without resetting today's topic or send budget."""
+        current = _aware(now)
+        with self._lock():
+            state = self._load()
+            changed = self._expire_pending(state, current)
+            if changed:
+                self._save(state)
+        return changed
+
+    def reserve(self, question: QuestionRequest, *, now: datetime) -> bool:
+        """Claim one question if its slot, topic and daily budget allow it."""
+        current = _aware(now)
+        slot = _aware(question.slot_at)
+        if slot <= current:
+            return False
+        with self._lock():
+            state = self._load()
+            if self._expire_pending(state, current):
+                self._save(state)
+            today = current.date().isoformat()
+            todays = [row for row in state["requests"]
+                      if _stored_time(row["created_at"]).date().isoformat() == today]
+            if (any(row["status"] not in FINAL_STATES for row in state["requests"])
+                    or len(todays) >= 2
+                    or any(row["topic"] == question.topic for row in todays)
+                    or any(row["id"] == question.id for row in state["requests"])):
+                return False
+            state["requests"] = state["requests"][-63:]
+            state["requests"].append({
+                "id": question.id, "topic": question.topic,
+                "routine_ids": list(question.routine_ids), "flags": list(question.flags),
+                "slot_at": slot.isoformat(), "question": question.question,
+                "channel": question.channel, "created_at": current.isoformat(),
+                "status": "reserved", "external_id": None, "sent_at": None,
+                "closed_at": None, "history_recorded": False,
+                "correlation": question.correlation,
+            })
+            self._save(state)
+            return True
+
+    def begin_send(
+        self, identifier: str, *, now: datetime,
+        budget: Callable[[], bool] | None = None,
+        current_time: Callable[[], datetime] | None = None,
+    ) -> bool:
+        """Persist intent before outbound delivery; do not retry uncertainty."""
+        current = _aware(now)
+        with self._lock():
+            state = self._load()
+            row = next((item for item in state["requests"] if item["id"] == identifier), None)
+            if row is None or row["status"] != "reserved" or current >= _stored_time(row["slot_at"]):
+                return False
+            # Only a fast local budget gate belongs here, never model/transport I/O.
+            if budget is not None and not budget():
+                return False
+            if current_time is not None and _aware(current_time()) >= _stored_time(row["slot_at"]):
+                return False
+            row["status"] = "sending"
+            self._save(state)
+            return True
+
+    def mark_sent(self, identifier: str, *, external_id: str, now: datetime) -> bool:
+        """Store a transport receipt once for an attempted question."""
+        current = _aware(now)
+        with self._lock():
+            state = self._load()
+            row = next((item for item in state["requests"] if item["id"] == identifier), None)
+            if row is None or row["status"] != "sending":
+                return False
+            row.update(status="sent", external_id=external_id, sent_at=current.isoformat())
+            self._save(state)
+            return True
+
+    def close(self, identifier: str, *, outcome: str, now: datetime) -> bool:
+        """Resolve or decline only a confirmed delivered question."""
+        if outcome not in {"resolved", "declined"}:
+            raise ValueError("Invalid clarification outcome")
+        current = _aware(now)
+        with self._lock():
+            state = self._load()
+            row = next((item for item in state["requests"] if item["id"] == identifier), None)
+            if (row is None or row["status"] != "sent"
+                    or current >= _stored_time(row["slot_at"])):
+                return False
+            row.update(status=outcome, closed_at=current.isoformat())
+            self._save(state)
+            return True
+
+    def mark_recorded(self, identifier: str) -> bool:
+        """Mark a confirmed question as present in canonical history."""
+        with self._lock():
+            state = self._load()
+            row = next((item for item in state["requests"] if item["id"] == identifier), None)
+            if row is None or not row["external_id"]:
+                return False
+            if row["history_recorded"]:
+                return True
+            row["history_recorded"] = True
+            self._save(state)
+            return True
+
+    def commit_answer(
+        self, identifier: str, *, received_at: datetime,
+        current_time: Callable[[], datetime], persist: Callable[[], frozenset[str]],
+        still_authoritative: Callable[[], bool],
+    ) -> frozenset[str] | None:
+        """Revalidate and serialize only the short persistence stage, never an LLM call.
+
+        Database and ledger files cannot form one transaction. A ledger save
+        failure leaves the request pending, never falsely resolved; canonical
+        context setters remain retryable upserts.
+        """
+        received = _aware(received_at)
+        with self._lock():
+            state = self._load()
+            row = next((item for item in state["requests"] if item["id"] == identifier), None)
+            current = _aware(current_time())
+            if (row is None or row["status"] != "sent" or not row["history_recorded"]
+                    or not (_stored_time(row["sent_at"]) <= received <= current
+                            < _stored_time(row["slot_at"]))
+                    or not still_authoritative()):
+                return None
+            applied = persist()
+            if set(row["flags"]) <= applied:
+                row.update(status="resolved", closed_at=current.isoformat())
+                self._save(state)
+            return applied

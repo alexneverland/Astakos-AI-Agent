@@ -35,6 +35,20 @@ def fixture_tree(root: Path) -> None:
     (root / "unknown.json").write_text("not-a-state-file")
 
 
+def test_clarification_ledger_backed_up_but_lock_and_partial_excluded(tmp_path):
+    from services.daily_data_backup import select_data_files
+    root = tmp_path / "installation"
+    root.mkdir()
+    fixture_tree(root)
+    for name in ("astakos_routine_context_questions.json", "astakos_routine_context_questions.json.lock",
+                 ".routine-clarification-test.tmp"):
+        (root / name).write_text("fixture")
+    selected = {path.relative_to(root).as_posix() for path in select_data_files(root)}
+    assert "astakos_routine_context_questions.json" in selected
+    assert "astakos_routine_context_questions.json.lock" not in selected
+    assert ".routine-clarification-test.tmp" not in selected
+
+
 def test_package_contains_only_recovery_data_and_indexed_assets(tmp_path: Path) -> None:
     """Preserve cold data/sidecars; exclude code, unknown JSON and temp media."""
     root = tmp_path / "installation"
