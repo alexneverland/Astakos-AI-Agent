@@ -141,20 +141,34 @@ def _is_safe_git_command(tokens: list[str]) -> bool:
     if len(tokens) == 1:
         return False
 
-    subcmd = tokens[1].lower()
+    # Accept only directory selection before the subcommand. In particular,
+    # -c/--config-env and unknown global options can alter execution behavior.
+    index = 1
+    while index < len(tokens) and tokens[index] == "-C":
+        if index + 1 >= len(tokens):
+            return False
+        directory = tokens[index + 1].strip("'\"")
+        if not directory or directory.startswith("-"):
+            return False
+        index += 2
+    if index >= len(tokens):
+        return False
+    subcmd = tokens[index].lower()
+    arguments = tokens[index + 1:]
+    # Inspection options may still write output or execute configured helpers.
+    if any(arg.lower().startswith(("--output", "--ext-diff", "--textconv"))
+           or arg.startswith("-o") for arg in arguments):
+        return False
     # Simple safe subcommands that only inspect state
     if subcmd in {"status", "log", "show"}:
         return True
 
     if subcmd == "diff":
         # Disallow --output / -o which writes diff output to a file
-        return not any(
-            arg.lower().startswith("--output") or arg.lower() == "-o"
-            for arg in tokens[2:]
-        )
+        return True
 
     if subcmd == "branch":
-        branch_args = tokens[2:]
+        branch_args = arguments
         if not branch_args:
             return True  # plain 'git branch' lists branches
 

@@ -297,6 +297,7 @@ def save_pending(
     tool_call_id: str,
     channel: str = "telegram",
     delivery_target_channel: str | None = None,
+    continuation_context: dict | None = None,
 ):
     """Saves CRITICAL tool call for later."""
     with _pending_lock():
@@ -313,6 +314,11 @@ def save_pending(
         if delivery_target_channel == "matrix":
             pending[tool_call_id]["delivery_target_channel"] = "matrix"
             pending[tool_call_id]["delivery_status"] = "queued"
+        if tool_name == "run_terminal_command" and continuation_context is not None:
+            from services.approved_terminal_continuation import normalize_terminal_context
+            context = normalize_terminal_context(continuation_context)
+            if context is not None:
+                pending[tool_call_id]["continuation_context"] = context
         _save_pending_unlocked(pending)
 
 
@@ -468,6 +474,8 @@ def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
         "status": "executed",
         "tool": tool_name,
         "result": result,
+        "continuation_context": item.get("continuation_context"),
+        "channel": item.get("channel", "telegram"),
     }
 
 
@@ -793,9 +801,14 @@ def approval_check_node(state):
                 sorted(active_external_content_tool_names(state["messages"])),
             )
         queue_for_matrix = selected_external_channel == "matrix" and current_channel == "web"
+        continuation_context = None
+        if tc["name"] == "run_terminal_command":
+            from services.approved_terminal_continuation import capture_terminal_context
+            continuation_context = capture_terminal_context(state)
         save_pending(
             tc["name"], pending_args, tc["id"], channel=current_channel,
             delivery_target_channel="matrix" if queue_for_matrix else None,
+            continuation_context=continuation_context,
         )
         print(f"\033[91m[Approval]: 🚨 CRITICAL — {tc['name']} blocked, awaiting approval\033[0m")
 

@@ -213,6 +213,13 @@ def _approval_result_text(result: object | None) -> str | None:
             else "core.approval.messenger_send_failed"
         )
     if status == "executed":
+        if tool_name == "run_terminal_command":
+            from services.approved_terminal_continuation import approved_terminal_reply
+            reply = approved_terminal_reply({"ok": True, "tool": tool_name,
+                "result": getattr(result, "execution_result", None),
+                "continuation_context": getattr(result, "continuation_context", None)})
+            if reply:
+                return reply
         return f"✅ `{tool_name}` executed."
     if status == "rejected":
         return f"❌ `{tool_name}` rejected."
@@ -220,15 +227,24 @@ def _approval_result_text(result: object | None) -> str | None:
 
 
 def _record_web_approval_result(result: object | None, text: str | None) -> None:
-    """Show the result in Web when its approval originated from a Web turn."""
-    if result is None or not text or getattr(result, "origin_channel", "") != "web":
+    """Record Web outcomes, and terminal analysis in its originating history."""
+    if result is None or not text:
+        return
+    channel = getattr(result, "origin_channel", "")
+    terminal = (getattr(result, "tool_name", "") == "run_terminal_command"
+                and getattr(result, "status", "") == "executed")
+    if terminal:
+        from services.approved_terminal_continuation import record_terminal_reply
+        record_terminal_reply(getattr(result, "continuation_context", None), channel, text,
+                              str(getattr(result, "tool_call_id", "") or ""))
+        return
+    if channel != "web":
         return
     try:
         from api.server import append_to_chat_history
-
         append_to_chat_history("assistant", text, agent="Web_Agent")
     except Exception as exc:
-        print(f"[Matrix Approval]: Web result history failed ({type(exc).__name__})")
+        print(f"[Matrix Approval]: Result history failed ({type(exc).__name__})")
 
 
 def verify_configured_owner_devices(
@@ -352,7 +368,7 @@ async def run_matrix() -> None:
 
     async def handle_approval_reaction(**kwargs: object) -> str | None:
         result = await asyncio.to_thread(approval_service.handle_reaction, **kwargs)
-        text = _approval_result_text(result)
+        text = await asyncio.to_thread(_approval_result_text, result)
         await asyncio.to_thread(_record_web_approval_result, result, text)
         return text
 

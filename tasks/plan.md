@@ -1,5 +1,29 @@
 # Astakos: Current Plan
 
+## Next narrow work: Git inspection and approved-result continuation
+
+PR #228 merged on 2026-10-07 after focused verification and Antigravity CLEAN.
+Live context-answer interpretation remains naturally observable, not claimed
+verified. Git inspection is separate: the classifier previously read token 1 as
+the subcommand and misclassified `git -C <directory> log`. The bounded fix skips
+only well-formed -C directory pairs and retains approval for unknown globals,
+config overrides, mutations, file output and external diff/textconv helpers.
+No terminal execution, credentials, live state or runtime changes belong here.
+Matrix approval result analysis now captures only a bounded original owner
+request and structured agent identity in the pending terminal record. A successful
+authenticated execution passes its output to a tool-free stage using that
+agent's canonical prompt. It does not re-enter the graph or executor. Shell
+errors are evidence, not success; missing/invalid context and provider failures
+preserve raw output without guessing another request or reexecuting the tool.
+Analysis is recorded in the originating Matrix/Web/Telegram history with external
+terminal-output provenance. Nonterminal approval behavior remains unchanged.
+Direct Web/Telegram approval callbacks now use the same bounded analysis and
+history helper. Web execution and inference run off the event loop; Telegram
+retains owner/chat authorization. No graph replay or extra tool execution is
+performed. Legacy approvals and unavailable providers preserve the raw result.
+Live interpretation and transport observation remain pending owner testing.
+No subagents or full-suite reruns for these slices, per owner request.
+
 ## Current work: dated routine feedback (2026-10-07)
 
 ### Current rollout status — supersedes historical checkpoints below
