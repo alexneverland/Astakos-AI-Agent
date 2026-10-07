@@ -37,6 +37,8 @@ class ApprovalReactionResult:
     origin_channel: str
     execution_result: Any = None
     error: str | None = None
+    continuation_context: dict | None = None
+    tool_call_id: str = ""
 
 
 class MatrixApprovalReactionService:
@@ -117,6 +119,8 @@ class MatrixApprovalReactionService:
                 tool_name=tool_name,
                 origin_channel=origin_channel,
                 execution_result=execution.get("result"),
+                continuation_context=execution.get("continuation_context"),
+                tool_call_id=tool_call_id,
             )
         return ApprovalReactionResult(
             status=str(execution.get("status") or "failed"),

@@ -524,6 +524,48 @@ def test_sensitive_path_wildcards_require_confirmation():
 
 # -- Git Actions & Safety -----------------------------------------
 
+def test_git_repository_directory_read_commands_are_safe():
+    """The reported commit inspection remains read-only with Git's -C option."""
+    for command in (
+        r"git -C C:\astakos_v2 log -n 1 --stat",
+        'git -C "C:\\project folder" status --short',
+        "git -C . -C subdir show HEAD --stat",
+        "git -C . diff HEAD~1 --stat",
+        "git -C . branch --show-current",
+    ):
+        assert classify_command(command)[0] == ExecPolicy.SAFE
+
+
+def test_git_repository_options_do_not_authorize_mutations_or_executable_options():
+    """Directory selection cannot hide writes, config overrides or shell actions."""
+    for command in (
+        "git -C . reset --hard HEAD",
+        "git -C . branch -D old",
+        "git -C . push origin main",
+        "git -c core.pager=malicious log",
+        "git -C . -c diff.external=malicious diff",
+        "git --exec-path=custom log",
+        "git -C",
+        "git -C --version log",
+        "git -C . log --output=out.txt",
+        "git -C . show --output=out.txt",
+        "git -C . diff --ext-diff",
+        "git -C . show --textconv",
+        "git -C . log; Write-Host other",
+    ):
+        assert classify_command(command)[0] != ExecPolicy.SAFE
+
+
+def test_git_directory_inspection_reaches_the_real_approval_risk_resolver():
+    """The original tool call no longer creates an unnecessary critical gate."""
+    from core.approval import _effective_risk
+
+    assert _effective_risk({"name": "run_terminal_command", "args": {
+        "command": r"git -C C:\astakos_v2 log -n 1 --stat"}}) == "SAFE"
+    assert _effective_risk({"name": "run_terminal_command", "args": {
+        "command": "git -C . reset --hard HEAD"}}) == "CRITICAL"
+
+
 def test_git_branch_listing_is_safe():
     for command in (
         "git branch",

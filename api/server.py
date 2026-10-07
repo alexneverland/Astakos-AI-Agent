@@ -3193,12 +3193,25 @@ async def approve_action(tool_call_id: str, _=Depends(require_token)):
     try:
         from core.approval import execute_approved_pending
         from tools.system import all_tools
-        execution = execute_approved_pending(tool_call_id, all_tools)
+        execution = await asyncio.to_thread(execute_approved_pending, tool_call_id, all_tools)
         if not execution["ok"]:
             return {"ok": False, "status": execution["status"], "error": execution["error"]}
 
         tool_name = execution["tool"]
         result = execution["result"]
+        if tool_name == "run_terminal_command":
+            from services.approved_terminal_continuation import approved_terminal_reply, record_terminal_reply
+            from services.external_delivery import external_delivery_router
+
+            reply = await asyncio.to_thread(approved_terminal_reply, execution)
+            if reply:
+                await asyncio.to_thread(record_terminal_reply, execution.get("continuation_context"),
+                                        execution["channel"], reply, tool_call_id)
+                try:
+                    await asyncio.to_thread(external_delivery_router.send_text, reply)
+                except Exception as exc:
+                    print(f"[Terminal Analysis]: Result delivery failed ({type(exc).__name__})")
+                return {"ok": True, "status": "executed", "tool": tool_name, "result": reply}
         from tools.telegram import send_telegram_msg_full
         send_telegram_msg_full(str(result), prefix=t("api.server.dashboard_action_success", tool_name=tool_name))
         return {"ok": True, "status": "executed", "tool": tool_name, "result": str(result)}

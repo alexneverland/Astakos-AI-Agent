@@ -19,13 +19,31 @@
   normal conversation, not writable scope. Semantic flag batches use atomic
   version comparison, including additional mixed-answer facts. Provenance tests
   include a real pending ledger and detect removal of the guard.
-- [ ] Final PR #228 review/merge. Matrix concurrent/replayed events are already
+- [x] Final PR #228 review/merge (merged 2026-10-07; branch deleted).
+  Matrix concurrent/replayed events are already
   claimed by the production transport; enum-only clarification questions are
   unsupported and rejected before provider inference. No new global replay
   subsystem or enum-question feature is part of this fix.
-- [ ] Separately investigate Git global-option read-only classification and
+- [x] Separately investigate Git global-option read-only classification and
   returning approved terminal results to the requesting agent. No change to
   terminal execution or approval continuation belongs to this context fix.
+- [x] Git classification slice: reproduce `git -C C:\astakos_v2 log -n 1 --stat`
+  incorrectly requiring approval. Parse only bounded directory-selection options;
+  mutations, config overrides, output writes and external diff/textconv helpers
+  remain outside SAFE. Focused offline classifier and approval-risk coverage.
+- [x] Matrix terminal approval analysis: save bounded original request/agent with
+  the pending terminal call; after authenticated execution, interpret its output
+  with the original agent prompt and no bound tools or graph replay. Failed
+  analysis/legacy context preserves raw output. Shared originating Matrix/Web
+  history retains the agent and external-output provenance; existing nonterminal
+  acknowledgements remain unchanged. Focused tests only; live wording pending.
+- [x] Apply the same tool-free result analysis to approvals handled directly by
+  Web or Telegram (not approvals delivered/executed through Matrix). Do not
+  assume those independent callbacks resume an agent automatically. Both use
+  the shared analysis/history helper, with authentication, sequential replay,
+  provider-failure fallback and original-agent/provenance offline coverage.
+- [ ] Naturally verify terminal result wording after a real approved inspection;
+  no live terminal execution or external send was performed during this fix.
 
 - [x] RF1/RF2: dated ledger, Athens day-close accounting and canonical semantic
   feedback. Separate three-occurrence unanswered/refusal streaks; acknowledgement,

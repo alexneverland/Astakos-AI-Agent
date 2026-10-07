@@ -3272,6 +3272,15 @@ def _handle_approval_callback(cq: dict) -> None:
 
             execution = execute_approved_pending(tool_call_id, all_tools)
 
+            if execution.get("ok") and tool_name == "run_terminal_command":
+                from services.approved_terminal_continuation import approved_terminal_reply, record_terminal_reply
+
+                reply = approved_terminal_reply(execution)
+                if reply:
+                    record_terminal_reply(execution.get("continuation_context"), origin_channel, reply, tool_call_id)
+                    send_telegram_msg_full(reply)
+                    return
+
             if execution.get("ok") and tool_name == "execute_local_pipeline":
                 from tools.web import messenger_send_result_succeeded
 
