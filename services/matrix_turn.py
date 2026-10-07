@@ -22,6 +22,7 @@ ExchangeCompletedHook = Callable[[str, str, str, str], None]
 ToolChannelSelector = Callable[[str], None]
 CommandHandler = Callable[[str], str | MatrixReply | None]
 RoutineConfirmationHandler = Callable[[str], Any | None]
+PersistedRoutineConfirmationHandler = Callable[[str, dict[str, Any]], Any | None]
 
 
 def _select_default_tool_channel(channel: str) -> None:
@@ -44,7 +45,10 @@ class MatrixTurnService:
         select_tool_channel: ToolChannelSelector = _select_default_tool_channel,
         command_handler: CommandHandler | None = None,
         routine_confirmation_handler: RoutineConfirmationHandler | None = None,
+        persisted_routine_confirmation_handler: PersistedRoutineConfirmationHandler | None = None,
     ) -> None:
+        if routine_confirmation_handler is not None and persisted_routine_confirmation_handler is not None:
+            raise ValueError("Use one routine confirmation handler, never two mutation paths")
         if graph is None:
             from core.graph import graph as default_graph
 
@@ -56,6 +60,8 @@ class MatrixTurnService:
         self._select_tool_channel = select_tool_channel
         self._command_handler = command_handler
         self._routine_confirmation_handler = routine_confirmation_handler
+        # Explicit dependency injection only; production activation waits for RF4.
+        self._persisted_routine_confirmation_handler = persisted_routine_confirmation_handler
 
     async def __call__(self, user_text: str, event_id: str) -> str | MatrixReply:
         """Run the blocking graph outside the Matrix sync event loop."""
@@ -229,22 +235,6 @@ class MatrixTurnService:
                 correlation_rowid=saved_user.get("rowid"), context_flags_processed=True,
             )
             return reply
-        if self._routine_confirmation_handler is not None:
-            try:
-                routine_result = self._routine_confirmation_handler(clean_user_text)
-                from services.matrix_routine_completion import MatrixRoutineDraftOffer
-
-                if isinstance(routine_result, MatrixRoutineDraftOffer):
-                    routine_draft_offer = routine_result
-                    routine_completion_context = routine_result.context
-                else:
-                    routine_completion_context = routine_result
-            except Exception as exc:
-                print(
-                    "[MatrixTurn]: routine confirmation failed: "
-                    f"{type(exc).__name__}"
-                )
-
         provenance = {
             "transport": "matrix",
             "matrix_event_id": normalized_event_id,
@@ -259,6 +249,33 @@ class MatrixTurnService:
             db_path=self._conversation_db_path,
         )
         self._run_hook(self._on_user_persisted, saved_user)
+
+        if not external_derived and (
+            self._routine_confirmation_handler is not None
+            or self._persisted_routine_confirmation_handler is not None
+        ):
+            try:
+                if self._persisted_routine_confirmation_handler is not None:
+                    from services.routine_context_clarification import current_matrix_reply_target
+                    reply_target = current_matrix_reply_target()
+                    reply_metadata = {"reply_event_id": reply_target} if reply_target is not None else {}
+                    routine_result = self._persisted_routine_confirmation_handler(
+                        clean_user_text, saved_user, **reply_metadata,
+                    )
+                else:
+                    routine_result = self._routine_confirmation_handler(clean_user_text)
+                from services.matrix_routine_completion import MatrixRoutineDraftOffer
+
+                if isinstance(routine_result, MatrixRoutineDraftOffer):
+                    routine_draft_offer = routine_result
+                    routine_completion_context = routine_result.context
+                else:
+                    routine_completion_context = routine_result
+            except Exception as exc:
+                print(
+                    "[MatrixTurn]: routine confirmation failed: "
+                    f"{type(exc).__name__}"
+                )
 
         draft_reply = None
         if routine_completion_context is None and not external_derived:

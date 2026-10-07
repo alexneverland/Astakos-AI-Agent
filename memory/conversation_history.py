@@ -732,6 +732,29 @@ def load_messages_after_rowid(
     return msgs
 
 
+def get_latest_trusted_user_rowid(*, db_path: str = CONVERSATION_DB_FILE) -> int:
+    """Return the latest persisted trusted user identity across all channels.
+
+    Insertion order, not a client timestamp or daily session, defines freshness.
+    Scan user rows until trusted provenance is found: limiting an intermediate
+    page could hide the owner behind uploads or background notifications.
+    Callers must authenticate the inbound owner before using this identity;
+    stored role/provenance is not itself an authentication mechanism.
+    """
+    from core.untrusted_content import external_content_source_names
+
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT rowid, * FROM conversation_messages "
+            "WHERE role IN ('user', 'human', 'Human') ORDER BY rowid DESC"
+        )
+        for row in rows:
+            if not external_content_source_names(_row_to_message(row).get("metadata")):
+                return int(row["rowid"])
+    return 0
+
+
 def get_max_rowid(
     *,
     db_path: str = CONVERSATION_DB_FILE,

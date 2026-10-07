@@ -21,6 +21,22 @@ class FakeTransport:
         raise AssertionError("approval delivery is outside this test")
 
 
+def test_default_history_recorder_has_stable_bounded_delivery_identity(monkeypatch, tmp_path):
+    """Recovery and the initial recorder deduplicate by the same transport proof."""
+    from memory import conversation_history as history
+    from services.external_assistant_delivery import _record_confirmed_assistant_message
+    original = history.append_message
+    path = str(tmp_path / "history.db")
+    monkeypatch.setattr(history, "append_message", lambda **kwargs: original(db_path=path, **kwargs))
+    for receipt in ("$short", "$" + "x" * 511):
+        _record_confirmed_assistant_message("matrix", "Reminder", "Routine_Agent", receipt)
+        _record_confirmed_assistant_message("matrix", "Reminder", "Routine_Agent", receipt)
+    rows = history.load_messages(db_path=path)
+    assert len(rows) == 2
+    assert len({row["id"] for row in rows}) == 2
+    assert all(len(row["id"]) <= 100 for row in rows)
+
+
 def test_assistant_delivery_records_the_selected_channel_only() -> None:
     from services.external_assistant_delivery import deliver_external_assistant_text
 

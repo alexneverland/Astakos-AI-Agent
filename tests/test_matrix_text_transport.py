@@ -119,6 +119,7 @@ def _transport(
     handler: Callable[[str], Awaitable[str]],
     *,
     approval_reaction_handler=None,
+    routine_reply_target=None,
     voice_sender=None,
     attachment_sender=None,
     close_client_on_exit=True,
@@ -134,11 +135,73 @@ def _transport(
         text_event_type=FakeTextEvent,
         reaction_event_type=FakeReactionEvent,
         approval_reaction_handler=approval_reaction_handler,
+        routine_reply_target=routine_reply_target,
         voice_sender=voice_sender,
         attachment_sender=attachment_sender,
         close_client_on_exit=close_client_on_exit,
         send_error_types=(FakeSendError,),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ["👍", "✅"])
+async def test_dated_routine_reply_reaches_saved_feedback_not_tool_approval(tmp_path, monkeypatch, answer):
+    """Transport -> saved Matrix turn -> real dated ledger, with no approval execution."""
+    import sqlite3
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace
+    from zoneinfo import ZoneInfo
+    from langchain_core.messages import AIMessage
+    from core import messenger_draft
+    from memory.conversation_history import load_messages
+    from memory.routine_feedback import RoutineFeedbackStore
+    from services import routine_context_clarification as clarification
+    from services.routine_completion_helper import DatedRoutineSelection
+    from services.routine_feedback_turn import PersistedRoutineFeedbackHandler
+    from services.matrix_turn import MatrixTurnService
+
+    monkeypatch.setattr(clarification, "is_current_context_question_target", lambda _: False)
+    monkeypatch.setattr(clarification, "try_context_question_reply", lambda *a, **kw: clarification.QuestionAnswer())
+    monkeypatch.setattr(messenger_draft, "active_draft_status", lambda: (False, "missing", None))
+    path = tmp_path / "routines.db"
+    def connect():
+        return sqlite3.connect(path)
+    with connect() as connection:
+        connection.execute("""CREATE TABLE routines (id INTEGER PRIMARY KEY,
+            event_name TEXT, notify_cooldown_hours REAL, explicit_skip_streak INTEGER,
+            unanswered_reminder_streak INTEGER, confidence REAL)""")
+        connection.execute("INSERT INTO routines VALUES (11, 'Καθάρισμα κουνελιού', 0, 0, 0, 1)")
+    ledger = RoutineFeedbackStore(connect)
+    ledger.initialize()
+    now = datetime(2026, 10, 7, 9, tzinfo=ZoneInfo("Europe/Athens"))
+    ledger.record_delivery(11, now.date(), at=now - timedelta(minutes=1),
+        receipt_id="$routine-reminder", question="Το έκανες;", channel="matrix")
+    history = str(tmp_path / "history.db")
+    def select(text, candidates, dates, **kwargs):
+        assert text == answer
+        assert kwargs["pending_question"].event_id == "$routine-reminder"
+        return DatedRoutineSelection("acknowledge", 11, now.date())
+    feedback = PersistedRoutineFeedbackHandler(store=ledger, selector=select,
+        clock=lambda: now, channel="matrix", conversation_db_path=history, trusted_owner=True)
+    graph = SimpleNamespace(stream=lambda *a, **kw: iter([
+        {"Chat_Agent": {"messages": [AIMessage(content="Σημειώθηκε.")]}}]))
+    turn = MatrixTurnService(graph=graph, conversation_db_path=history,
+        persisted_routine_confirmation_handler=feedback)
+    async def forbidden_approval(**kwargs):
+        raise AssertionError("Routine feedback must not enter tool approval")
+    client = FakeMatrixClient()
+    transport = _transport(tmp_path, client, turn, approval_reaction_handler=forbidden_approval,
+        routine_reply_target=feedback.owns_reply_target)
+    body = "> <@astakos:example.test> Το έκανες;\n\n" + answer
+    event = FakeTextEvent(body=body, source={"type": "m.room.message", "content": {
+        "msgtype": "m.text", "body": body,
+        "m.relates_to": {"m.in_reply_to": {"event_id": "$routine-reminder"}},
+    }})
+    await transport.handle_event(FakeRoom(), event)
+    await transport.handle_event(FakeRoom(), event)
+    assert ledger.occurrences(11)[0].feedback == "acknowledge"
+    assert [row["role"] for row in load_messages(db_path=history)] == ["user", "assistant"]
+    assert len(client.sent) == 1
 
 
 @pytest.mark.asyncio
@@ -657,7 +720,8 @@ async def test_previously_verified_device_removed_from_allowlist_cannot_approve(
 
 
 @pytest.mark.asyncio
-async def test_verified_encrypted_reply_to_approval_executes_without_graph(tmp_path) -> None:
+@pytest.mark.parametrize("ownership", [False, 1])
+async def test_verified_encrypted_reply_to_approval_executes_without_graph(tmp_path, ownership) -> None:
     client = FakeMatrixClient()
     handled: list[dict[str, Any]] = []
 
@@ -683,6 +747,7 @@ async def test_verified_encrypted_reply_to_approval_executes_without_graph(tmp_p
             },
         },
     )
+    transport._routine_reply_target = lambda _: ownership
     await transport.handle_event(FakeRoom(), event)
 
     assert handled == [{
@@ -693,6 +758,25 @@ async def test_verified_encrypted_reply_to_approval_executes_without_graph(tmp_p
         "key": "👍",
     }]
     assert client.sent[0]["content"]["body"] == "✅ Η ενέργεια εκτελέστηκε."
+
+
+@pytest.mark.asyncio
+async def test_routine_reply_ownership_storage_error_cannot_become_approval(tmp_path):
+    """Failed ownership lookup keeps the event retryable without any action."""
+    def unavailable(target):
+        raise OSError("isolated ledger unavailable")
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Unknown reply ownership must not authorize or classify")
+    client = FakeMatrixClient()
+    transport = _transport(tmp_path, client, forbidden, approval_reaction_handler=forbidden,
+        routine_reply_target=unavailable)
+    event = FakeTextEvent(body="👍", source={"type": "m.room.message", "content": {
+        "msgtype": "m.text", "body": "👍",
+        "m.relates_to": {"m.in_reply_to": {"event_id": "$unresolved-target"}},
+    }})
+    await transport.handle_event(FakeRoom(), event)
+    assert client.sent == []
+    assert get_matrix_event(event.event_id, db_path=str(tmp_path / "state.db")) is None
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,5 @@
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 from core.utils import (
@@ -7,6 +8,22 @@ from core.utils import (
     is_medium_web_chat_path_candidate,
     is_ultra_light_ack,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_routine_and_context_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep handler tests away from owner context files and model classification."""
+    import clients.telegram_bot as bot
+    import memory.routine_db as routine_db
+    import memory.pending_assets as pending_assets
+    import services.routine_context_clarification as clarification
+
+    monkeypatch.setattr(bot, "pending_routine_confirmations", {})
+    monkeypatch.setattr(routine_db, "get_eligible_preemptive_routines_for_day", lambda: [])
+    monkeypatch.setattr(routine_db, "get_active_routine_catalog", lambda: [])
+    monkeypatch.setattr(pending_assets, "get_latest_pending_asset_any", lambda *_args: None)
+    monkeypatch.setattr(clarification, "try_context_question_reply",
+                        lambda *args, **kwargs: SimpleNamespace(consumed=False))
 
 
 def test_fast_path_simple_ack():
@@ -107,8 +124,8 @@ def test_handle_message_ultra_light_ack_sends_reply_without_graph(monkeypatch):
     monkeypatch.setattr(bot, "pending_photo", None)
     monkeypatch.setattr(bot, "_safe_active_draft_status", lambda: (False, "missing", None))
     monkeypatch.setattr(bot, "_safe_classify_messenger_intent", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(bot, "_build_fast_chat_context", lambda _text: ([], object()))
-    monkeypatch.setattr(bot, "_append_to_analytics_log", lambda *_args: None)
+    monkeypatch.setattr(bot, "_build_fast_chat_context", lambda _text, **kwargs: ([], object()))
+    monkeypatch.setattr(bot, "_append_to_analytics_log", lambda *_args: 1)
     monkeypatch.setattr(bot, "_cache_bot_message", lambda *_args: None)
     monkeypatch.setattr(bot, "enqueue_fast_task", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(bot, "enqueue_slow_task", lambda *_args, **_kwargs: None)
@@ -136,7 +153,7 @@ def test_handle_message_ultra_light_ack_sends_reply_without_graph(monkeypatch):
 @patch("memory.pending_assets.clear_expired_pending_assets")
 @patch("core.messenger_draft.active_draft_status", return_value=(False, "missing", None))
 @patch("tools.telegram.send_telegram_msg")
-@patch("clients.telegram_bot._append_to_analytics_log")
+@patch("clients.telegram_bot._append_to_analytics_log", return_value=1)
 @patch("clients.telegram_bot.graph.stream")
 @patch("clients.telegram_bot._safe_classify_messenger_intent")
 def test_messenger_intent_clarify_does_not_create_draft(mock_classify, mock_stream, mock_append, mock_send, mock_active, mock_clear_assets, mock_get_asset):
@@ -161,7 +178,7 @@ def test_messenger_intent_clarify_does_not_create_draft(mock_classify, mock_stre
 @patch("core.messenger_draft.active_draft_status", return_value=(True, "active", {"message": "hello"}))
 @patch("core.messenger_draft.clear_draft", return_value=True)
 @patch("tools.telegram.send_telegram_msg")
-@patch("clients.telegram_bot._append_to_analytics_log")
+@patch("clients.telegram_bot._append_to_analytics_log", return_value=1)
 @patch("clients.telegram_bot.graph.stream")
 @patch("clients.telegram_bot._safe_classify_messenger_intent")
 def test_messenger_intent_clear_closes_draft(
@@ -199,7 +216,7 @@ def test_messenger_intent_clear_closes_draft(
 @patch("core.messenger_draft.active_draft_status", return_value=(False, "missing", None))
 @patch("core.messenger_draft.clear_draft", return_value=False)
 @patch("tools.telegram.send_telegram_msg")
-@patch("clients.telegram_bot._append_to_analytics_log")
+@patch("clients.telegram_bot._append_to_analytics_log", return_value=1)
 @patch("clients.telegram_bot.graph.stream")
 @patch("clients.telegram_bot._safe_classify_messenger_intent")
 def test_messenger_intent_clear_without_active_draft_stays_out_of_graph(

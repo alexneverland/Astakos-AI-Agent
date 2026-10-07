@@ -7,6 +7,7 @@ and the allowed action for the supplied candidate pool.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 import re
 from typing import Callable, Literal
 
@@ -34,6 +35,72 @@ class CompletionDecision:
 
 
 Selector = Callable[[str, dict[int, str], CandidatePool], RoutineSelection]
+
+
+@dataclass(frozen=True)
+class DatedRoutineSelection:
+    """Strict date-aware feedback; never an authorization for an external action."""
+
+    action: Literal["complete", "acknowledge", "skip_today", "pause", "defer", "clarify", "none"]
+    routine_id: int | None = None
+    occurrence_date: date | None = None
+
+
+@dataclass(frozen=True)
+class RoutineFeedbackQuestion:
+    """A caller-authenticated, exact reminder correlation, not arbitrary history."""
+
+    routine_id: int
+    occurrence_date: date
+    event_id: str
+    question: str
+
+
+@dataclass(frozen=True)
+class RoutineFeedbackGroupQuestion:
+    """Several dated routines delivered in one authenticated transport message."""
+
+    routine_ids: tuple[int, ...]
+    occurrence_date: date
+    event_id: str
+    question: str
+
+
+def validate_dated_selection(
+    payload: object, allowed_dates: dict[int, frozenset[date]], *, today: date,
+) -> DatedRoutineSelection:
+    """Validate identity/calendar bounds, allowing explicit unrecorded completions.
+
+    Known dates constrain every non-completion action. Historical completion
+    need not have a delivery row; semantic grounding remains the selector's job.
+    """
+    none = DatedRoutineSelection("none")
+    if not isinstance(payload, dict) or set(payload) != {"action", "routine_id", "occurrence_date"}:
+        return none
+    action, routine_id, day = payload["action"], payload["routine_id"], payload["occurrence_date"]
+    if action == "none":
+        return none
+    if action not in ("complete", "acknowledge", "skip_today", "pause", "defer", "clarify"):
+        return none
+    if action == "clarify" and routine_id is None and day is None:
+        return DatedRoutineSelection("clarify")
+    if type(routine_id) is not int or routine_id not in allowed_dates:
+        return none
+    if action == "clarify":
+        return DatedRoutineSelection("clarify", routine_id) if day is None else none
+    if not isinstance(day, str):
+        return none
+    try:
+        occurrence = date.fromisoformat(day)
+    except ValueError:
+        return none
+    if day != occurrence.isoformat() or occurrence > today:
+        return none
+    if occurrence not in allowed_dates[routine_id] and not (action == "complete" and occurrence < today):
+        return none
+    if action != "complete" and occurrence != today:
+        return none
+    return DatedRoutineSelection(action, routine_id, occurrence)
 
 
 def relevant_catalog_candidates(user_text: str, catalog: dict[int, str]) -> dict[int, str]:

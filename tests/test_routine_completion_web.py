@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Callable, Iterator
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -13,10 +15,154 @@ from api.server import LOCAL_TOKEN, server
 from services.routine_completion_helper import RoutineSelection
 
 
+def test_telegram_history_notification_preserves_provider_identity(tmp_path, monkeypatch):
+    """Actual Web bridge stores equal Telegram messages with distinct event IDs."""
+    import api.server as api
+    from memory import conversation_history as history
+    path = str(tmp_path / "telegram-history.db")
+    append = history.append_message
+    maximum = history.get_max_rowid
+    monkeypatch.setattr(history, "append_message", lambda **kwargs: append(db_path=path, **kwargs))
+    monkeypatch.setattr(history, "get_max_rowid", lambda: maximum(db_path=path))
+    monkeypatch.setattr(api, "_broadcast_ws", lambda event: None)
+    results = [api.notify_telegram_message("user", "ναι", return_saved=True,
+        message_id=f"telegram-user-123456-{event_id}") for event_id in (81, 82, 81)]
+    assert results[0]["rowid"] != results[1]["rowid"]
+    assert results[2]["rowid"] is None  # Replay cannot authorize a second turn.
+    assert len(history.load_messages(db_path=path)) == 2
+
+
+@pytest.fixture(autouse=True)
+def isolated_context_question_boundary() -> Iterator[None]:
+    """Do not consult the owner's pending context-question file in API tests."""
+    from services.routine_context_clarification import QuestionAnswer
+
+    with patch("services.routine_context_clarification.try_context_question_reply", return_value=QuestionAnswer()):
+        yield
+
+
 @pytest.fixture
 def client() -> TestClient:
     """Provide the actual Web API app with its normal authentication token."""
     return TestClient(server)
+
+
+def test_web_consumed_context_answer_never_reaches_routine_or_graph(client, tmp_path):
+    """One context-owned turn records once and cannot mutate another routine."""
+    from memory.conversation_history import append_message, load_messages
+    from services.routine_context_clarification import QuestionAnswer
+    path = str(tmp_path / "context-history.db")
+    answer = QuestionAnswer(True, "resolved")
+    handler = MagicMock()
+    def save(role, content, **kwargs):
+        return append_message(role=role, content=content, channel="web", db_path=path)
+    with (
+        patch("services.routine_context_clarification.try_context_question_reply", return_value=answer),
+        patch.object(server.state, "persisted_routine_feedback_handler", handler, create=True),
+    ):
+        response, mocks = _post_chat(client, message="Ναι είμαστε σπίτι", history_writer=save)
+    assert response.status_code == 200
+    assert response.json()["agent"] == "Routine_Context"
+    assert response.json()["response"] == answer.reply
+    handler.assert_not_called()
+    mocks["load_pending"].assert_not_called()
+    mocks["graph"].assert_not_called()
+    assert [row["role"] for row in load_messages(db_path=path)] == ["user", "assistant"]
+
+
+@pytest.mark.parametrize("outcome", [None, SystemMessage(content="dated feedback applied for yesterday")])
+def test_web_persisted_feedback_hook_replaces_legacy_mutation(client, outcome):
+    """An opt-in callback receives the actual saved row and never falls through."""
+    handler = MagicMock(return_value=outcome)
+    with patch.object(server.state, "persisted_routine_feedback_handler", handler, create=True):
+        response, mocks = _post_chat(client, message="Χθες το πρωί καθάρισα το κουνέλι")
+    assert response.status_code == 200
+    handler.assert_called_once_with("Χθες το πρωί καθάρισα το κουνέλι", {"id": "test-message", "rowid": 1})
+    mocks["load_pending"].assert_not_called()
+    mocks["selector"].assert_not_called()
+    mocks["triggered"].assert_not_called()
+    mocks["confirmed"].assert_not_called()
+    if outcome is not None:
+        assert outcome in mocks["graph"].call_args.args[0]
+
+
+def test_web_feedback_hook_failure_does_not_use_legacy_completion(client):
+    """No stale fallback mutation or false completion claim after an error."""
+    handler = MagicMock(side_effect=OSError("isolated storage failure"))
+    with patch.object(server.state, "persisted_routine_feedback_handler", handler, create=True):
+        response, mocks = _post_chat(client, message="Το έκανα χθες")
+    assert response.status_code == 200
+    mocks["load_pending"].assert_not_called()
+    mocks["triggered"].assert_not_called()
+    contexts = [msg for msg in mocks["graph"].call_args.args[0] if isinstance(msg, SystemMessage)]
+    assert any('"status": "error"' in str(msg.content) for msg in contexts)
+
+
+@pytest.mark.parametrize("broadcast_failure", [False, True])
+def test_real_web_history_writer_supplies_saved_identity_to_dated_handler(client, tmp_path, broadcast_failure):
+    """An ID-only writer result silently disables actual dated feedback."""
+    import sqlite3
+    from zoneinfo import ZoneInfo
+    from api.server import append_to_chat_history
+    from memory.conversation_history import append_message, load_messages
+    from memory.routine_feedback import RoutineFeedbackStore
+    from services.routine_completion_helper import DatedRoutineSelection
+    from services.routine_feedback_turn import PersistedRoutineFeedbackHandler
+
+    db = tmp_path / "routines.db"
+    def connect():
+        return sqlite3.connect(db)
+    with connect() as connection:
+        connection.execute("""CREATE TABLE routines (id INTEGER PRIMARY KEY,
+            event_name TEXT, notify_cooldown_hours REAL, explicit_skip_streak INTEGER,
+            unanswered_reminder_streak INTEGER, confidence REAL)""")
+        connection.execute("INSERT INTO routines VALUES (5, 'Καθάρισμα κουνελιού', 0, 0, 0, 1)")
+    ledger = RoutineFeedbackStore(connect)
+    ledger.initialize()
+    now = datetime(2026, 10, 7, 9, tzinfo=ZoneInfo("Europe/Athens"))
+    ledger.record_delivery(5, now.date(), at=now, receipt_id="$routine",
+        question="Το έκανες;", channel="web")
+    history = str(tmp_path / "history.db")
+    def persist(**kwargs):
+        return append_message(db_path=history, **kwargs)
+    handler = PersistedRoutineFeedbackHandler(store=ledger,
+        selector=lambda *a, **kw: DatedRoutineSelection("complete", 5, now.date()),
+        clock=lambda: now, channel="web", conversation_db_path=history, trusted_owner=True)
+    with (
+        patch("memory.conversation_history.append_message", side_effect=persist),
+        patch("api.server._broadcast_ws", side_effect=OSError("offline display failure") if broadcast_failure else None),
+        patch("services.behavioral_event_scheduler.schedule_persisted_user_intake"),
+        patch.object(server.state, "persisted_routine_feedback_handler", handler, create=True),
+        patch("memory.pending_assets.get_latest_recent_asset", return_value=None),
+        patch("memory.pending_assets.get_latest_pending_asset_any", return_value=None),
+    ):
+        response, mocks = _post_chat(client, message="Ναι το έκανα", history_writer=append_to_chat_history)
+    assert response.status_code == 200
+    assert ledger.occurrences(5)[0].feedback == "complete"
+    rows = load_messages(db_path=history)
+    assert [row["role"] for row in rows] == ["user", "assistant"]
+    assert response.json()["user_rowid"] == rows[0]["rowid"]
+    assert response.json()["assistant_rowid"] == rows[1]["rowid"]
+    mocks["load_pending"].assert_not_called()
+    mocks["triggered"].assert_not_called()
+
+
+@pytest.mark.parametrize("saved_local_draft", [False, True])
+def test_web_dated_hook_draft_consumed_only_after_local_creation(client, saved_local_draft):
+    """Draft metadata stays in the existing success-only consumption path."""
+    from services.matrix_routine_completion import MatrixRoutineDraftOffer
+    context = SystemMessage(content="trusted local draft offer")
+    offered_at = datetime(2026, 10, 7, 9)
+    offer = MatrixRoutineDraftOffer(5, offered_at, "Message Sofia", context)
+    with patch.object(server.state, "persisted_routine_feedback_handler", lambda *a: offer, create=True):
+        response, mocks = _post_chat(client, message="Ετοίμασέ το", saved_local_draft=saved_local_draft)
+    assert response.status_code == 200
+    assert context in mocks["graph"].call_args.args[0]
+    assert mocks["consume_offer"].call_count == int(saved_local_draft)
+    if saved_local_draft:
+        mocks["consume_offer"].assert_called_once_with(5, offered_at)
+    mocks["confirmed"].assert_not_called()
+    mocks["triggered"].assert_not_called()
 
 
 def _saved_message(*_args: object, **kwargs: object) -> object:
@@ -47,8 +193,11 @@ def _post_chat(
     active_draft_status: tuple[bool, str, dict | None] = (False, "missing", None),
     saved_local_draft: bool = False,
     voice_mode: bool = False,
+    photo_path: str = "",
     graph_budget_exhausted: bool = False,
     graph_runner: MagicMock | None = None,
+    history_writer: Callable[..., object] | None = None,
+    selection_callback: Callable[..., RoutineSelection] | None = None,
 ) -> tuple[object, dict[str, MagicMock]]:
     """Run one Web message under isolated completion and graph dependencies."""
     graph_runner = graph_runner if graph_runner is not None else MagicMock(side_effect=lambda *args, **kwargs: {
@@ -57,9 +206,9 @@ def _post_chat(
         "graph_budget_exhausted": graph_budget_exhausted,
     })
     selector = MagicMock(
-        side_effect=selector_returns
-        if selector_returns is not None
-        else [RoutineSelection(action="complete", routine_id=5)]
+        side_effect=(selection_callback if selection_callback is not None else
+                     selector_returns if selector_returns is not None else
+                     [RoutineSelection(action="complete", routine_id=5)])
     )
     with (
         patch("memory.routine_db.get_eligible_preemptive_routines_for_day", return_value=[{"id": 5, "event": "dynamic routine"}]) as eligible,
@@ -86,7 +235,7 @@ def _post_chat(
             "services.routine_completion_context.build_routine_completion_context",
             return_value=SystemMessage(content="Routine lifecycle updated."),
         ),
-        patch("api.server.append_to_chat_history", side_effect=_saved_message),
+        patch("api.server.append_to_chat_history", side_effect=history_writer or _saved_message),
         patch("api.server._load_shared_context_messages", return_value=[]),
         patch("core.messenger_draft.active_draft_status", return_value=active_draft_status),
         patch("api.server._run_web_graph_stream_sync", graph_runner),
@@ -95,7 +244,7 @@ def _post_chat(
     ):
         response = client.post(
             "/chat",
-            json={"message": message, "voice_mode": voice_mode},
+            json={"message": message, "voice_mode": voice_mode, "photo_path": photo_path},
             headers={"Authorization": f"Bearer {LOCAL_TOKEN}"},
         )
         return response, {
@@ -112,6 +261,146 @@ def _post_chat(
             "accepted_offer": accepted_offer,
             "graph": graph_runner,
         }
+
+
+def test_web_selector_sees_exact_persisted_user_once(client: TestClient, tmp_path: Path) -> None:
+    """Routine inference sees its actual shared-history row without duplicate writes."""
+    from memory.conversation_history import append_message, load_messages
+
+    db_path = str(tmp_path / "conversation.db")
+    saved_users = []
+
+    def save(role: str, content: str, agent: str | None = None, **kwargs: object) -> object:
+        """Use the real conversation abstraction with an isolated database."""
+        saved = append_message(role=role, content=content, agent=agent, channel="web", db_path=db_path)
+        if role == "user":
+            saved_users.append(saved)
+        return saved if kwargs.get("return_saved") else saved["id"]
+
+    def select(*args: object, **kwargs: object) -> RoutineSelection:
+        """Check the persisted input at the inference boundary."""
+        rows = load_messages(db_path=db_path)
+        assert len(saved_users) == 1
+        assert rows[-1]["rowid"] == saved_users[0]["rowid"]
+        assert rows[-1]["content"] == "I completed it today"
+        return RoutineSelection(action="complete", routine_id=5)
+
+    response, mocks = _post_chat(client, message="I completed it today", history_writer=save, selection_callback=select)
+    assert response.status_code == 200
+    mocks["triggered"].assert_called_once_with(5)
+    assert len(saved_users) == 1
+    assert response.json()["user_rowid"] == saved_users[0]["rowid"]
+
+
+def test_web_failed_user_persistence_cannot_mutate_routine(client: TestClient) -> None:
+    """Missing history identity must stop before inference or routine mutations."""
+    response, mocks = _post_chat(client, history_writer=lambda *args, **kwargs: {"id": None, "rowid": None})
+    assert response.status_code == 503
+    for key in ("selector", "triggered", "confirmed", "skipped", "paused", "graph"):
+        mocks[key].assert_not_called()
+
+
+@pytest.mark.parametrize("dated", [False, True])
+def test_web_photo_chat_cannot_complete_routine_before_asset_analysis(client, tmp_path, dated):
+    """An attachment caption must not consume a routine before graph provenance exists."""
+    import sqlite3
+    from contextlib import nullcontext
+    from memory.conversation_history import append_message, load_messages
+    from memory.routine_feedback import RoutineFeedbackStore
+    from services.routine_completion_helper import DatedRoutineSelection
+    from services.routine_feedback_turn import PersistedRoutineFeedbackHandler
+    from core.untrusted_content import external_content_source_names
+    from zoneinfo import ZoneInfo
+
+    path = tmp_path / "routines.db"
+    def connect():
+        return sqlite3.connect(path)
+    with connect() as connection:
+        connection.execute("""CREATE TABLE routines (id INTEGER PRIMARY KEY,
+            event_name TEXT, notify_cooldown_hours REAL, explicit_skip_streak INTEGER,
+            unanswered_reminder_streak INTEGER, confidence REAL)""")
+        connection.execute("INSERT INTO routines VALUES (5, 'Καθάρισμα κουνελιού', 0, 0, 0, 1)")
+    ledger = RoutineFeedbackStore(connect)
+    ledger.initialize()
+    now = datetime(2026, 10, 7, 9, tzinfo=ZoneInfo("Europe/Athens"))
+    ledger.record_delivery(5, now.date(), at=now, receipt_id="$routine", question="Το έκανες;", channel="web")
+    history = str(tmp_path / "history.db")
+    def save(role, content, **kwargs):
+        return append_message(role=role, content=content, channel="web",
+            metadata=kwargs.get("metadata"), db_path=history)
+    handler = PersistedRoutineFeedbackHandler(store=ledger,
+        selector=lambda *a, **kw: DatedRoutineSelection("complete", 5, now.date()),
+        clock=lambda: now, channel="web", conversation_db_path=history, trusted_owner=True)
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    photo = photos / "photo.png"
+    photo.write_bytes(b"offline vision fixture")
+    with (
+        patch("api.server.PHOTOS_DIR", str(photos)),
+        patch("core.brain.get_active_provider_adapter", return_value=MagicMock()),
+        patch("core.brain.safe_adapter_call", return_value="Ναι το έκανα"),
+        patch.object(server.state, "persisted_routine_feedback_handler", handler, create=True) if dated else nullcontext(),
+    ):
+        response, mocks = _post_chat(client, message="Ναι το έκανα", photo_path=str(photo),
+            history_writer=save, pending={5: {"event": "Καθάρισμα κουνελιού"}})
+    assert response.status_code == 200
+    assert ledger.occurrences(5)[0].feedback is None
+    for key in ("load_pending", "selector", "triggered", "confirmed"):
+        mocks[key].assert_not_called()
+    rows = load_messages(db_path=history)
+    assert external_content_source_names(rows[0]["metadata"]) == {"user_provided_asset"}
+    assert len(mocks["graph"].call_args.args[0]) > 0
+
+
+@pytest.mark.parametrize("intent", ["clarify_draft", "clear_draft"])
+def test_web_draft_intercept_reuses_persisted_user(client: TestClient, tmp_path: Path, intent: str) -> None:
+    """Short draft responses reuse the same user row and avoid the graph."""
+    from memory.conversation_history import append_message, load_messages
+
+    db_path = str(tmp_path / "conversation.db")
+
+    def save(role: str, content: str, agent: str | None = None, **kwargs: object) -> object:
+        """Store both intercepted messages through the real history API."""
+        saved = append_message(role=role, content=content, agent=agent, channel="web", db_path=db_path)
+        return saved if kwargs.get("return_saved") else saved["id"]
+
+    with (
+        patch("services.messenger_intent.classify_messenger_intent", return_value=SimpleNamespace(intent=intent)),
+        patch("core.messenger_draft.clear_draft", return_value=True),
+        patch("memory.execution_trace.ExecutionTrace"),
+    ):
+        response, mocks = _post_chat(
+            client, message="Show or discard the local draft",
+            selector_returns=[RoutineSelection(action="none", routine_id=None)],
+            history_writer=save,
+        )
+    assert response.status_code == 200
+    users = [row for row in load_messages(db_path=db_path) if row["role"] == "user"]
+    assert len(users) == 1
+    assert response.json()["user_rowid"] == users[0]["rowid"]
+    mocks["graph"].assert_not_called()
+    mocks["triggered"].assert_not_called()
+
+
+@pytest.mark.parametrize("authenticated", [False, True])
+def test_web_rejected_input_never_persists_or_classifies(client: TestClient, authenticated: bool) -> None:
+    """Authentication and firewall rejection still precede user persistence."""
+    with (
+        patch("api.server.detect_prompt_injection", return_value=True),
+        patch("api.server.append_to_chat_history") as save,
+        patch("services.routine_completion_selector.select_routine") as select,
+    ):
+        response = client.post(
+            "/chat", json={"message": "Rejected input"},
+            headers={"Authorization": f"Bearer {LOCAL_TOKEN}"} if authenticated else {},
+        )
+    if authenticated:
+        assert response.status_code == 200
+        assert response.json()["agent"] == "Security_Firewall"
+    else:
+        assert response.status_code in {401, 403}
+    save.assert_not_called()
+    select.assert_not_called()
 
 
 def test_web_preemptive_completion_continues_to_graph(client: TestClient) -> None:

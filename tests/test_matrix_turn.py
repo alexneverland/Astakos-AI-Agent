@@ -12,6 +12,14 @@ from memory.conversation_history import append_message, load_messages
 from services.matrix_turn import MatrixTurnService
 
 
+@pytest.fixture(autouse=True)
+def isolated_context_question_boundary(monkeypatch):
+    """These graph-turn tests must not inspect the owner's live question ledger."""
+    from services import routine_context_clarification as clarification
+    monkeypatch.setattr(clarification, "try_context_question_reply",
+                        lambda *args, **kwargs: clarification.QuestionAnswer())
+
+
 @pytest.mark.asyncio
 async def test_matrix_draft_clear_and_clarify_intercept_without_graph(
     tmp_path, monkeypatch,
@@ -39,6 +47,24 @@ async def test_matrix_draft_clear_and_clarify_intercept_without_graph(
     assert [entry["role"] for entry in load_messages(db_path=db_path)] == [
         "user", "assistant", "user", "assistant",
     ]
+
+
+@pytest.mark.asyncio
+async def test_consumed_matrix_context_reply_never_reaches_dated_feedback(tmp_path, monkeypatch):
+    """A context-owned response is persisted once, without a second interpretation."""
+    from unittest.mock import MagicMock
+    from services import routine_context_clarification as clarification
+    answer = clarification.QuestionAnswer(True, "resolved")
+    monkeypatch.setattr(clarification, "try_context_question_reply", lambda *a, **kw: answer)
+    path = str(tmp_path / "context-history.db")
+    graph = FakeGraph()
+    handler = MagicMock()
+    service = MatrixTurnService(graph=graph, conversation_db_path=path,
+        persisted_routine_confirmation_handler=handler)
+    assert await service("Ναι είμαστε σπίτι", "$context-answer") == answer.reply
+    handler.assert_not_called()
+    assert graph.states == []
+    assert [row["role"] for row in load_messages(db_path=path)] == ["user", "assistant"]
 
 
 @pytest.mark.asyncio
@@ -373,6 +399,87 @@ async def test_unhandled_matrix_command_continues_to_graph(tmp_path) -> None:
 
     assert reply == "Απάντηση από τον Αστακό"
     assert len(graph.states) == 1
+
+
+@pytest.mark.asyncio
+async def test_routine_handler_runs_after_current_user_is_persisted(tmp_path) -> None:
+    """The owner row must already exist while routine inference is running."""
+    path = str(tmp_path / "conversation.db")
+    seen = []
+    def handler(text):
+        rows = load_messages(db_path=path)
+        assert rows[-1]["content"] == text
+        assert rows[-1]["metadata"]["matrix_event_id"] == "$routine-order"
+        seen.append(rows[-1]["rowid"])
+        return SystemMessage(content="trusted result")
+    service = MatrixTurnService(graph=FakeGraph(), conversation_db_path=path,
+                                routine_confirmation_handler=handler)
+    await service("I did it", "$routine-order")
+    assert len(seen) == 1
+    assert [row["role"] for row in load_messages(db_path=path)] == ["user", "assistant"]
+
+
+@pytest.mark.asyncio
+async def test_persisted_routine_handler_receives_saved_identity_and_metadata(tmp_path) -> None:
+    """Opt-in dated handling gets the actual saved row, not a sampled maximum."""
+    path = str(tmp_path / "conversation.db")
+    seen = []
+    def handler(text, saved_user):
+        seen.append(saved_user)
+        assert load_messages(db_path=path)[0]["rowid"] == saved_user["rowid"]
+        return SystemMessage(content="dated feedback result")
+    service = MatrixTurnService(graph=FakeGraph(), conversation_db_path=path,
+        persisted_routine_confirmation_handler=handler)
+    await service("done yesterday", "$dated-routine")
+    assert seen[0]["content"] == "done yesterday"
+    assert seen[0]["metadata"]["matrix_event_id"] == "$dated-routine"
+
+
+def test_matrix_rejects_two_routine_mutation_handlers(tmp_path):
+    """Legacy and dated mutation must never both process the same inbound turn."""
+    with pytest.raises(ValueError):
+        MatrixTurnService(graph=FakeGraph(), conversation_db_path=str(tmp_path / "history.db"),
+            routine_confirmation_handler=lambda text: None,
+            persisted_routine_confirmation_handler=lambda text, saved: None)
+
+
+@pytest.mark.asyncio
+async def test_matrix_persisted_feedback_handler_receives_authenticated_reply_target(tmp_path):
+    """The dated callback must not reinterpret an exact reply as implicit today."""
+    from services.routine_context_clarification import matrix_reply_scope
+    received = []
+    def handler(text, saved, **kwargs):
+        received.append(kwargs)
+        return SystemMessage(content="recorded for the targeted occurrence")
+    service = MatrixTurnService(graph=FakeGraph(), conversation_db_path=str(tmp_path / "history.db"),
+        persisted_routine_confirmation_handler=handler)
+    with matrix_reply_scope("$yesterday-reminder"):
+        await service("Ναι το έκανα", "$owner-reply")
+    assert received == [{"reply_event_id": "$yesterday-reminder"}]
+
+
+@pytest.mark.asyncio
+async def test_failed_user_persistence_never_reaches_routine_mutation(tmp_path, monkeypatch):
+    import services.matrix_turn as turns
+    def fail(**kwargs):
+        raise OSError("temporary conversation failure")
+    def forbidden(*args):
+        pytest.fail("routine mutation without persisted owner identity")
+    monkeypatch.setattr(turns, "append_message", fail)
+    service = MatrixTurnService(graph=FakeGraph(), conversation_db_path=str(tmp_path / "history.db"),
+                                persisted_routine_confirmation_handler=forbidden)
+    with pytest.raises(OSError):
+        await service("done", "$failed-save")
+
+
+@pytest.mark.asyncio
+async def test_asset_derived_text_cannot_enter_dated_routine_handler(tmp_path):
+    def forbidden(*args):
+        pytest.fail("asset-derived text cannot be owner routine feedback")
+    service = MatrixTurnService(graph=FakeGraph(), conversation_db_path=str(tmp_path / "history.db"),
+                                persisted_routine_confirmation_handler=forbidden)
+    reply = service._run_sync("document says done", "$asset-text", external_derived=True)
+    assert reply == "Απάντηση από τον Αστακό"
 
 
 @pytest.mark.asyncio

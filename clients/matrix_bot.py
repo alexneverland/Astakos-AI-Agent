@@ -374,6 +374,7 @@ async def run_matrix() -> None:
         graph=shared_runtime.graph,
         conversation_db_path=config.CONVERSATION_DB_FILE,
         command_handler=shared_runtime.handle_external_admin_command,
+        routine_feedback_handler=shared_runtime.prepare_dated_feedback_runtime("matrix"),
     )
     media_downloader = MatrixMediaDownloader(
         client=client,
@@ -401,6 +402,7 @@ async def run_matrix() -> None:
         turn_handler=channel_services.text_handler,
         state_db_path=config.STATE_DB,
         approval_reaction_handler=handle_approval_reaction,
+        routine_reply_target=channel_services.routine_reply_target,
         media_downloader=media_downloader,
         media_handler=channel_services.media_handler,
         voice_sender=voice_sender.send,

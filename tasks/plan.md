@@ -1,5 +1,174 @@
 # Astakos: Current Plan
 
+## Current work: dated routine feedback (2026-10-07)
+
+### Current rollout status — supersedes historical checkpoints below
+
+PR #227 review scope: remove legacy inactive transitions from dated ordinary
+single/group/deferred sends, preserving the canonical draft-offer window.
+Carry authenticated Telegram inbound event IDs through text/voice and both
+history writers so repeated contents remain distinct and replay cannot create
+another saved turn. Tighten the test-only downloader hostname assertion.
+Context-answer additional facts and clarification persona are explicitly
+deferred to a separate change after this PR; no live storage repair/reset or
+runtime restart belongs to these review fixes.
+
+RF1-RF6 implementation and owner-approved migration/reset are complete.
+All 12 routines now have cooldown 0, confidence 1.0 and zero pressure counters;
+the scoped reset preserves pauses, conditions, schedules, receipts and history.
+The consistent pre-reset backup is Git-ignored at
+C:\astakos_v2\backups\routine-feedback\before-reset-20261007-184017.sqlite3.
+Paired Web/Telegram/Matrix dependencies install before workers on normal startup
+only when the occurrence schema already exists; startup never migrates or resets.
+Routine dispatch is serialized. Reflection remains disabled/unscheduled; its
+retained action code is defensively guarded, not activated by this change.
+Debug reports active policy only when its handler is installed.
+Focused verification passed; no full suite was run. Owner subsequently requested
+commit/PR for review on codex/dated-routine-feedback; no merge is authorized.
+No Astakos process was detected during reset. Normal launcher startup and natural
+observation remain; no hidden duplicate process or live test message was started.
+Web exact-reply UI is deferred, not required for semantic dated feedback.
+The older paragraphs below are chronological implementation evidence, not the
+current backlog. See tasks/todo.md for current remaining work.
+
+Contract: [routine-feedback-spec.md](routine-feedback-spec.md).
+Ordered implementation: [routine-feedback-plan.md](routine-feedback-plan.md).
+Owner approved the additive occurrence table and preserving existing tasks.
+RF1 is complete as an inactive temporary-store foundation (32 focused tests,
+atomic projection and durable baseline included); activation and the live
+cooldown=0/confidence=1 reset wait for all focused verification gates.
+No runtime or production storage changes are part of the foundation slice.
+Debug presentation now distinguishes recorded dispatch decisions from condition
+checks, stored cooldown from current scheduler cooldown, and staged dated policy
+from live behavior. Read-only diagnostics do not activate schema or reset data.
+All three channels now have default-inactive saved-turn feedback injection points
+and one common outcome-to-graph bridge. Web/Matrix dated persistence is verified
+against temporary stores; Telegram adapter ordering is separately offline tested.
+Structured draft delegation and Matrix exact-reply propagation are offline
+verified; preparation does not complete a routine or approve an external send.
+Canonical active-draft protection now rechecks before and after classification,
+including a draft created during inference (127 focused tests pass).
+Telegram text polling now forwards exact reply IDs without implicit fallback for
+invalid/external replies; 115 focused completion/compatibility tests pass.
+Telegram voice-note replies now preserve that scope through transcription;
+50 isolated completion tests and 39 voice/fast-path/approval compatibility tests
+pass (one dependency warning). Unknown explicit replies never reach classification.
+Other media, Web reply plumbing and scheduler wiring remain
+before rollout, along with final turn arbitration.
+RF4 now has an inactive durable per-occurrence dispatch reservation and receipt
+coordinator. Timeout holds prevent resend without counting silence; history
+repair does not invalidate confirmed delivery. Twelve offline dispatch tests
+cover restart/concurrency and receipt persistence. Existing scheduler integration,
+canonical eligibility/freshness, held-claim/ledger-write recovery and periodic
+reconciliation are still required. No live ledger/schema change was performed.
+Confirmed receipt-write errors retain a repair callback and durable staged proof
+in the same ledger row. Reopen/restart recovery writes only confirmed receipts;
+original delivery time and current pressure evaluation are separate. 144 focused
+tests pass (one dependency warning). Durable history repair now retains confirmed
+text/channel/time separately from staged receipt cleanup, replaying through a
+stable transport-derived conversation ID. Lost history commit acknowledgements
+are retryable without duplicate rows. The default confirmed assistant recorder
+uses that same bounded ID. Scheduler wiring remains pending; claims without
+committed proof remain held, never guessed sent. Latest checkpoint: 149 focused
+dispatch/store/policy/external-delivery tests pass, one dependency warning;
+compile and diff checks pass. No live migration was performed.
+RF4 maintenance now has a default-inactive callback on job_check_routines, before
+quiet/mute gates. It recovers confirmed receipt/history writes and reconciles
+only routines already represented in the dated ledger. Receipt-repair failure
+blocks projection from incomplete evidence; history repair can still progress.
+Maintenance failure prevents dispatch on that pass. No additional scheduler,
+transport call, schema initialization or live callback installation was added.
+Final dispatch eligibility, single/batch/deferred send wiring and removal of
+legacy timeout accounting remain prerequisites before installing this callback.
+Latest tick checkpoint: 194 focused dispatch/store/policy/transport/scheduler/
+inactive-window/context-worker tests pass, one dependency warning; compile and
+diff checks pass. The actual runtime still uses legacy dispatch and accounting.
+RF4 single ordinary-send wiring now exists behind a default-None sender injection.
+It snapshots the ledger revision before generation, rechecks canonical eligibility
+and selected channel at reservation, and uses a confirmed DeliveryReceipt rather
+than the legacy send wrapper. Confirmed ledger/history failures queue write-only
+repair; unknown transport outcomes stay held without fallback. This path stores
+bounded prompt scope in the ledger, not the legacy 30-minute pending-timeout pool.
+205 focused offline tests pass, one dependency warning; compilation/diff pass.
+This is not activation: batches, deferred sends, draft-offer routing, full
+freshness arbitration and exclusion of remaining legacy pressure writers still
+require their own slices. No live schema, installation, reset or runtime change.
+RF4 batch reservation foundation now shares the single-send policy under one
+BEGIN IMMEDIATE transaction. Any rejected member rolls back the entire group's
+claims and pressure projection; overlapping concurrent groups cannot both win.
+Fourteen new temporary-store cases cover completion, existing reservation,
+stale revision, backoff, gate failure, invalid dates/identifiers and a real
+second-member SQLite abort. 219 focused tests pass, one dependency warning;
+compile/diff checks pass. This is only reservation, not batch transport:
+atomic shared-receipt staging, group reply correlation and scheduler batch
+wiring remain pending. No live initialization, activation or reset performed.
+RF4 shared-receipt staging now commits immutable proof for the whole group in
+one transaction. Single staging delegates to that same path. Membership is
+unique and receipt/channel/instant/occurrence date must represent one send.
+Conflicts or a second-member SQLite abort leave no partial proof/history work.
+Restart recovery can finish partially projected receipts without transport;
+stable message identity yields one conversation row for the shared history.
+231 focused tests pass, one dependency warning; compile/diff checks pass.
+Group reply correlation now retains all unresolved members only when their
+transport proof matches. Exact replies cannot select an unrelated routine;
+ambiguous or multi-member answers clarify, and evidence changed during inference
+is rejected. Completing one member leaves the others pending. 234 focused
+store/selector/freshness/dispatch/policy tests pass, one dependency warning.
+The existing scheduler now has a default-disabled batch sender dependency.
+It captures member revisions before generation, rechecks canonical group/context/
+channel gates at reservation, sends once and stages all confirmed member proofs.
+Single and batch sends use the same coordinator; blocked/uncertain delivery never
+falls back to legacy transport. Confirmed group history and receipt repairs do
+not resend or create legacy 30-minute confirmations. Deferred/draft coordination,
+multi-outcome answers and full activation remain open.
+295 focused offline tests pass, one dependency warning; compile/diff checks pass.
+No schema field, live initialization, runtime installation or reset was added.
+Startup missed-slot recovery now also has a default-None dated sender. It uses
+the same reservation/receipt repairs and canonical eligibility, with the existing
+explicit late grace window rechecked after generation. It creates no legacy
+30-minute pending confirmation and never resends a confirmed/uncertain attempt.
+Draft coordination, legacy accounting exclusion and full activation remain open.
+Latest startup slice: 141 focused worker/scheduler/missed-routine/dispatch tests
+pass, one dependency warning; compile and diff checks pass. No full suite run.
+Local-draft acceptance now has an inactive dated recorder in the existing exact
+offer-consumption transaction. Only a confirmed local-draft result consumes the
+offer; dated acknowledgement and consumption roll back together. Completion,
+confidence and external-send authorization are not changed. Legacy Athens wall
+timestamps are normalized only at this bridge. Saved-turn deferral is verified
+for Web/Telegram/Matrix: clears pressure, retains the actual delivery receipt,
+asks for timing clarification and does not invent completion or a new schedule.
+Draft delivery and full activation still remain open.
+Verified: 239 focused ledger/feedback/Web/Matrix/connection tests and 50 separate
+Telegram adapter tests pass; one dependency warning, compile/diff checks clean.
+Response-window expiry now has a default-None dated callback in both normal and
+quiet-hour scheduler paths. It closes only the exact expired pending window,
+without legacy pressure/confidence decay or invented delivery evidence. Failed
+cleanup remains pending for retry; newer offers and the 30-minute boundary are
+protected. Seven focused regressions pass, one dependency warning; compile/diff
+checks pass. This is inactive wiring, not live activation or draft-send migration.
+Related verification: 279 worker/store/dispatch/connection/missed-routine tests
+pass, plus the seven-case expiry guard run; one dependency deprecation warning.
+Draft-offer sending now shares the inactive single-occurrence sender. Confirmed
+receipt and the separate canonical draft response window commit together;
+durable staged draft identity supports receipt/history repair after restart.
+Unknown transport never falls back or resends. Late repair retains the receipt
+without reopening an expired offer; newer pending context and resolved feedback
+are preserved. The existing tick reloads canonical pending state after recovery
+when the dated expiry callback is installed. No live callback/schema installation,
+external send, reset or Git operation occurred. Full activation remains open.
+Draft slice verification: 284 focused worker/store/dispatch/connection tests
+pass, one dependency deprecation warning; changed Python files compile.
+Unrecorded past-completion checkpoint: a known routine can receive an explicit
+owner-reported past completion without a prior delivery row. The common semantic
+selector uses the current Athens calendar; only completion may introduce such
+a past date. Future dates, unknown IDs, ambiguous reports and stale/untrusted
+turns remain rejected or clarified. No receipt is invented and today's occurrence
+is unchanged. Verified through real catalogue/history/ledger storage across the
+three channel identities: 203 focused selection/freshness/store/policy tests and
+16 legacy helper tests pass, dependency warnings only; compile/diff checks pass.
+This remains inactive; no live provider interpretation, installation or reset.
+
+
 Last reconciled with the owner: 2026-10-06 (context clarification completed;
 existing verification entries preserved).
 PR #224 review corrections are implemented and verified offline; natural
@@ -461,6 +630,58 @@ recovery after descendant shutdown failure without overlapping old writers.
 
 ## Standing boundaries, not pending tasks
 
+Actual Web writer checkpoint (2026-10-07): the real return_saved path now returns
+the canonical persisted row, including role/channel/content/provenance, required
+by the dated handler. ID-only reconstruction had silently made the handler return
+no observation; the earlier tests substituted the whole writer and missed this.
+Two real-writer regressions failed first; 72 focused completion/upload/mirror/
+behavioral-intake tests pass (one dependency warning), including a websocket
+failure after successful history commit. Default ID return stays compatible.
+This is a readiness fix, not live dated-handler/scheduler installation or reset.
+
+Text-adapter arbitration checkpoint (2026-10-07): the inactive Matrix transport
+resolver routes exact recorded routine Replies to dated feedback, not tool
+approval; resolved receipt identity retains replay deduplication. Canonical
+feedback scope/freshness remains separate from ownership. Lookup failure takes
+no action; unrelated targets retain verified-device approval behavior. 225
+focused tests pass (two dependency warnings), plus five Web/Matrix and one
+separate Telegram context-consumption tests. Production factory wiring,
+Web reply UI and live activation/reset remain pending. Media feedback isolation
+is covered by the checkpoints below, not a claim of full media command parity.
+
+Matrix audio Reply checkpoint (2026-10-07): media transport uses the same exact
+Reply resolver as text and propagates task-local scope through transcription and
+the saved turn. Real temporary history/ledger tests preserve yesterday's feedback
+without completing today; unrelated targets cannot become implicit answers.
+Scope restores on processing failure and absent Reply does not inherit another
+target. 101 focused Matrix media/text/turn tests and seven final media lifecycle
+cases pass (two dependency warnings); syntax/diff checks pass. The new dated
+handler is not wired into production and no live state/reset was changed.
+
+Matrix photo/document Reply safety checkpoint (2026-10-07): two characterization
+cases exercise the real media/turn/document paths with temporary history, asset
+and routine storage. Even an exact routine Reply with completion-like caption and
+analysis leaves the occurrence and question pending. Provenance remains external;
+a subsequent genuine owner text response completes the occurrence. 56 focused
+media/document/turn tests pass (two dependency warnings). No application change
+was necessary; this checkpoint does not prove live model behavior/tool execution.
+
+Web/Telegram asset-feedback checkpoint (2026-10-07): Web /chat with a validated
+attachment now stores user-provided-asset provenance before any routine inference,
+and excludes both dated and legacy routine feedback for that attachment turn.
+Two regressions failed before this guard, including an actual temporary dated
+ledger completion. 40 Web completion/upload tests and two focused vision/path
+cases pass. Telegram photo/document paths already persist asset provenance;
+13 document tests include two real temporary history/ledger isolation cases.
+Each run reports one dependency deprecation warning. Syntax/diff checks pass.
+No Telegram application change, live activation, reset or Git operation occurred.
+
+Routine-feedback arbitration checkpoint (2026-10-07): changed/expired draft
+classification ends the inactive shared handler without a second feedback
+mutation. 202 focused tests pass (one dependency warning), including real
+temporary history/ledger state across Web, Telegram and Matrix identities.
+No approval-path change, live activation, baseline reset or Git operation.
+
 - Owner-confirmed Telegram–Matrix parity and cross-channel context continuity
   are complete. Critical Matrix approvals use encrypted Reply to the exact
   prompt; no reaction-based replacement or legacy `/confirm`.
@@ -475,3 +696,8 @@ recovery after descendant shutdown failure without overlapping old writers.
   Completed supplied-link reporting is not an open task.
 - Documentation reconciliation needs document/diff checks; behavioral changes
   need focused offline regressions. No full-suite rerun by default.
+- Routine feedback expiry safeguard: incomplete dated wiring cannot fall back
+  to legacy 30-minute pressure accounting. Pending cleanup is held for retry.
+  Five initial regressions reproduced fallback; ten focused final cases pass
+  and 142 existing worker/dispatch cases passed. Paired runtime installation,
+  remaining pressure-writer audit and live reset are still pending.

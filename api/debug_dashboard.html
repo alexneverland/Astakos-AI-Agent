@@ -425,7 +425,7 @@ function renderStatusStrip(d) {
       <div class="label">Approvals</div><div class="value ${approvals ? 'warn' : 'ok'}">${approvals}</div>
     </div>
     <div class="status-item" data-search="routines active blocked" data-kind="routines">
-      <div class="label">Routines</div><div class="value">${active} active - <span class="${blocked ? 'warn' : 'ok'}">${blocked} blocked</span></div>
+      <div class="label">Routines</div><div class="value">${active} active - <span class="${blocked ? 'warn' : 'ok'}">${blocked} condition-blocked</span></div>
     </div>
     <div class="status-item" data-search="queue scheduler"><div class="label">Queue</div><div class="value ${s.queue_size > 5 ? 'warn' : ''}">${s.queue_size ?? '?'}</div></div>
     <div class="status-item" data-search="updated refresh"><div class="label">Updated</div><div class="value">${new Date().toLocaleTimeString('el-GR')}</div></div>
@@ -1033,20 +1033,46 @@ function render(d) {
 
   function renderOutcome(r) {
     let lbl = r.last_outcome_label || "Not evaluated";
-    let ts = r.last_outcome_ts ? " at " + r.last_outcome_ts.split('T')[1].substring(0, 5) : "";
+    let ts = r.last_outcome_ts ? " at " + esc(r.last_outcome_ts) : "";
     let reason = r.last_outcome_reason ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${esc(r.last_outcome_reason)}</div>` : "";
     
     let colorVar = "var(--text-muted)";
     if (lbl === "Sent" || lbl === "Sent: deferred follow-up" || lbl === "Completed today" || lbl === "Confirmed") colorVar = "var(--green)";
     else if (lbl.includes("Blocked") || lbl.includes("inactive") || lbl.includes("stale") || lbl.includes("Timed out")) colorVar = "var(--orange)";
     else if (lbl.includes("Skipped")) colorVar = "var(--yellow)";
+    const check = r.last_condition_check_action
+      ? `<div class="mono-small">Latest condition check: ${r.last_condition_check_action === 'routine_condition_allowed' ? 'passed' : 'blocked'}${r.last_condition_check_ts ? ' at ' + esc(r.last_condition_check_ts) : ''} — not proof of delivery</div>` : '';
 
     return `
       <div class="cond-box" style="border-left: 2px solid ${colorVar}; background: rgba(0,0,0,0.02);">
-        <div style="font-size:11px;font-weight:600;color:${colorVar}">Last outcome: ${esc(lbl)}${ts}</div>
+        <div style="font-size:11px;font-weight:600;color:${colorVar}">Last recorded decision: ${esc(lbl)}${ts}</div>
         ${reason}
+        ${check}
       </div>
     `;
+  }
+
+  function renderRoutineFeedback(r) {
+    const f = r.feedback_diagnostics;
+    if (!f) return '';
+    if (f.status === 'uninitialized') return '<div class="mono-small">Dated feedback: not activated</div>';
+    if (f.status !== 'recorded') return '<div class="mono-small err">Dated feedback: read error — unknown</div>';
+    const today = f.today;
+    const latest = f.latest_occurrence;
+    return `<div class="cond-box">
+      <div class="mono-small">${f.active === true ? 'Active dated feedback policy' : 'Staged policy preview — not the current dispatch gate'}</div>
+      <div class="mono-small">Today: ${today ? esc(today.date) + ' · ' + esc(today.feedback ?? (today.delivered_at ? 'delivered; no feedback' : 'no delivery')) : 'no dated record'}</div>
+      ${latest ? `<div class="mono-small">Latest occurrence: ${esc(latest.date)} · ${esc(latest.feedback ?? (latest.delivered_at ? 'delivered; no feedback' : 'no delivery'))}</div>` : ''}
+      <div class="mono-small">Unanswered days: ${esc(f.unanswered_streak ?? '?')} / 3 · Refusals: ${esc(f.refusal_streak ?? '?')} / 3</div>
+      <div class="mono-small">Derived backoff: ${esc(f.derived_cooldown_hours ?? '?')}h · until ${esc(f.backoff_until ?? 'none')} · remaining ${esc(f.backoff_remaining_h ?? 0)}h</div>
+      <div class="mono-small">Baseline: ${esc(f.baseline_at ?? 'not reset')}</div>
+    </div>`;
+  }
+
+  function renderRoutineCooldown(r) {
+    const hours = value => value == null ? 'unknown' : esc(value) + 'h';
+    return `<div class="mono-small">Stored: ${hours(r.cooldown_hours)} · Scheduler: ${hours(r.effective_cooldown_hours)}</div>
+      <div class="mono-small">Remaining: ${r.cooldown_read_error ? 'read error — unknown' : hours(r.cooldown_remaining_h)}</div>`;
   }
 
   const evts = d.events_1h||{}, pend = d.pending_confirmations||[];
@@ -1299,13 +1325,13 @@ function render(d) {
         <td class="off cell-tight" style="font-size:11px; vertical-align:middle">#${r.id}</td>
         <td class="cell-tight" style="vertical-align:middle"><div style="font-size:11px;color:var(--text-muted)">${r.day}</div><div style="font-weight:600;font-size:13px">${r.time}</div></td>
         <td class="cell-event" style="vertical-align:middle; font-weight: 500">${r.event}</td>
-        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}</div></td>
+        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}${renderRoutineFeedback(r)}</div></td>
         <td class="cell-tight" style="vertical-align:middle">
           <div style="margin-bottom:6px">${stateBadge(r)}</div>
           ${r.paused_indefinitely ? `<div style="font-size:10px;color:var(--orange);margin-bottom:4px;font-weight:bold" title="Reason: ${r.pause_reason||'N/A'}">⏸️ Paused indefinitely</div>` : r.paused_until ? `<div style="font-size:10px;color:var(--orange);margin-bottom:4px;font-weight:bold" title="Reason: ${r.pause_reason||'N/A'}">⏸️ Paused until: <br/>${r.paused_until}</div>` : ''}
           ${r.muted_until ? `<div style="font-size:10px;color:var(--purple);margin-bottom:4px;font-weight:bold">🔇 Muted until: <br/>${r.muted_until}</div>` : ''}
-          <div style="width:80px;margin-bottom:4px">${confBar(r.confidence)}</div>
-          <div style="font-size:10px;color:var(--text-muted)">CD: <span class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null?r.cooldown_remaining_h+'h':'-'}</span></div>
+          <div style="width:80px;margin-bottom:4px" title="Confidence in the habit, not a response rate">${confBar(r.confidence)}</div>
+          ${renderRoutineCooldown(r)}
         </td>
         <td class="cell-tight" style="text-align:right;vertical-align:middle;white-space:nowrap">
           <button onclick="resetCooldown(${r.id})" title="Reset Cooldown" style="background:rgba(56, 189, 248, 0.15);color:var(--blue-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;margin-right:4px;font-size:14px">⚡</button>
@@ -1348,7 +1374,7 @@ function render(d) {
         <td class="off cell-tight" style="font-size:11px;vertical-align:middle">#${r.id}</td>
         <td class="cell-tight" style="vertical-align:middle"><div style="font-size:11px;color:var(--text-muted)">${r.day||'-'}</div><div style="font-weight:600;font-size:13px">${r.time||'-'}</div></td>
         <td class="cell-event" style="vertical-align:middle; font-weight: 500">${r.event}</td>
-        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}</div></td>
+        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}${renderRoutineFeedback(r)}</div></td>
         <td class="cell-tight" style="vertical-align:middle">
           <div style="margin-bottom:6px">${stateBadge(r)}</div>
           <div style="width:80px">${confBar(r.confidence)}</div>

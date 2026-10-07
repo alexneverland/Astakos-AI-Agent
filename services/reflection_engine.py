@@ -374,6 +374,14 @@ def _apply_action(reflection: dict) -> bool:
             return False
 
     try:
+        if action in {"increase_cooldown", "reduce_frequency"}:
+            from memory.routine_db import get_connection
+            from memory.routine_feedback import load_initialized_feedback_store
+            if load_initialized_feedback_store(
+                    config.ROUTINES_DB, connection_factory=get_connection) is not None:
+                # Dated delivery/feedback is the sole automatic backoff authority.
+                # Other reflection actions and unmigrated installations stay intact.
+                return False
         conn = sqlite3.connect(config.ROUTINES_DB)
 
         if action == "increase_cooldown" and value:
