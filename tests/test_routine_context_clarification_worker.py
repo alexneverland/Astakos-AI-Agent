@@ -577,6 +577,10 @@ def test_scheduler_uses_real_dated_receipt_without_legacy_timeout(
         assert calls == ["Dated reminder"]
     elif failure is None:
         assert len(history.load_messages(db_path=history_path)) == 1
+    # Dated receipts own daily deduplication, not the legacy inactive lifecycle.
+    assert db.get_routine_state(rid).value == "active"
+    if batch:
+        assert all(db.get_routine_state(member).value == "active" for member in ids)
 
 
 @pytest.mark.parametrize("change", ["completion", "channel", "ledger_feedback"])
@@ -689,3 +693,4 @@ def test_restart_followup_uses_dated_delivery_and_fresh_grace(environment, monke
     if scenario == "sent":
         assert len(history.load_messages(db_path=history_path)) == 1
         assert store.pending_question(now=state["now"]).event_id == "$late"
+        assert db.get_routine_state(rid).value == "active"

@@ -518,6 +518,7 @@ def notify_telegram_message(
     *,
     metadata: dict | None = None,
     return_saved: bool = False,
+    message_id: str | None = None,
 ) -> int | dict[str, int | None] | None:
     """
     Called by the Telegram handler when a message arrives/is sent.
@@ -535,6 +536,7 @@ def notify_telegram_message(
             timestamp=now,
             agent=agent,
             metadata=metadata,
+            message_id=message_id,
         )
         msg_id = saved.get("rowid") or get_max_rowid()
         _broadcast_ws({

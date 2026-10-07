@@ -519,6 +519,70 @@ def test_polling_does_not_dispatch_other_chat_reply():
         "reply_to_message": {"chat": {"id": 999}, "message_id": 41}}]) == []
 
 
+@pytest.mark.parametrize("input_kind", ["text", "voice"])
+def test_polling_preserves_distinct_inbound_identity(input_kind):
+    """Equal contents from two actual provider events must not share identity."""
+    payload = {"text": "ναι"} if input_kind == "text" else {"voice": {"file_id": "synthetic"}}
+    turns = _poll_text_turns([
+        {"chat": {"id": 123456}, "message_id": message_id, **payload}
+        for message_id in (81, 82)
+    ])
+    assert [turn[2].get("inbound_message_id") for turn in turns] == [
+        "telegram-user-123456-81", "telegram-user-123456-82"]
+
+
+@pytest.mark.parametrize("event_id", [None, True, 0, -1, "81"])
+def test_invalid_provider_identity_cannot_claim_a_saved_turn(event_id):
+    """Only a positive integer from the owner transport can create identity."""
+    assert bot._telegram_inbound_identity({"chat": {"id": 123456}, "message_id": event_id}) == {}
+    assert bot._telegram_inbound_identity({"chat": {"id": 999}, "message_id": 81}) == {}
+
+
+@pytest.mark.parametrize("input_kind", ["text", "voice"])
+@pytest.mark.parametrize("broadcast_available", [True, False])
+def test_repeated_telegram_turns_persist_distinct_rows_and_replay_one_row(tmp_path, input_kind, broadcast_available):
+    """Exercise the real history writer through the actual text adapter."""
+    history = str(tmp_path / "repeated.db")
+    def notify(*, role, content, agent=None, metadata=None, message_id=None, return_saved=False):
+        if not broadcast_available:
+            raise RuntimeError("Web broadcast unavailable")
+        return real_append_message(role=role, content=content, channel="telegram",
+            agent=agent, metadata=metadata, message_id=message_id, db_path=history)
+    api = types.ModuleType("api.server")
+    api.notify_telegram_message = notify
+    writer = bot._append_to_analytics_log
+    payload = {"text": "ναι"} if input_kind == "text" else {"voice": {"file_id": "synthetic"}}
+    turns = _poll_text_turns([
+        {"chat": {"id": 123456}, "message_id": message_id, **payload}
+        for message_id in (81, 82, 81)
+    ])
+    class VoiceAdapter:
+        def transcribe_audio(self, data, *, mime_type):
+            return "ναι"
+    def download(url, **kwargs):
+        from urllib.parse import urlsplit
+        assert urlsplit(url).hostname == "api.telegram.org"
+        return types.SimpleNamespace(content=b"synthetic-ogg", json=lambda: {
+            "result": {"file_path": "voice/synthetic.ogg"}})
+    def fallback(**kwargs):
+        return real_append_message(db_path=history, **kwargs)
+    with (
+        patch.dict(sys.modules, {"api.server": api}),
+        patch("memory.conversation_history.append_message", side_effect=fallback),
+        patch.object(bot.os, "getcwd", return_value=str(tmp_path)),
+        patch("requests.get", side_effect=download),
+        patch.object(sys.modules["core.brain"], "get_voice_provider_adapter",
+                     return_value=VoiceAdapter(), create=True),
+        patch.object(bot, "_handle_transcribed_voice", return_value=False),
+    ):
+        for turn in turns:
+            _run_handle_message("ναι", history_writer=writer, handle_kwargs=turn[2],
+                                voice_call=turn if input_kind == "voice" else None)
+    users = [row for row in real_load_messages(db_path=history) if row["role"] == "user"]
+    assert len(users) == 2
+    assert {row["id"] for row in users} == {"telegram-user-123456-81", "telegram-user-123456-82"}
+
+
 def test_polling_external_reply_cannot_become_implicit_routine_feedback():
     """A Telegram external reply has no same-chat delivered question identity."""
     turns = _poll_text_turns([{"chat": {"id": 123456}, "text": "ναι",
@@ -575,7 +639,8 @@ def test_telegram_exact_reply_updates_only_the_delivered_occurrence(tmp_path, re
             assert data == b"synthetic-ogg" and mime_type == "audio/ogg"
             return "ναι"
     def download(url, **kwargs):
-        assert "api.telegram.org" in url
+        from urllib.parse import urlsplit
+        assert urlsplit(url).hostname == "api.telegram.org"
         return types.SimpleNamespace(content=b"synthetic-ogg", json=lambda: {
             "result": {"file_path": "voice/synthetic.ogg"}})
     with (

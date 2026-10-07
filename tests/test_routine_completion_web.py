@@ -15,6 +15,23 @@ from api.server import LOCAL_TOKEN, server
 from services.routine_completion_helper import RoutineSelection
 
 
+def test_telegram_history_notification_preserves_provider_identity(tmp_path, monkeypatch):
+    """Actual Web bridge stores equal Telegram messages with distinct event IDs."""
+    import api.server as api
+    from memory import conversation_history as history
+    path = str(tmp_path / "telegram-history.db")
+    append = history.append_message
+    maximum = history.get_max_rowid
+    monkeypatch.setattr(history, "append_message", lambda **kwargs: append(db_path=path, **kwargs))
+    monkeypatch.setattr(history, "get_max_rowid", lambda: maximum(db_path=path))
+    monkeypatch.setattr(api, "_broadcast_ws", lambda event: None)
+    results = [api.notify_telegram_message("user", "ναι", return_saved=True,
+        message_id=f"telegram-user-123456-{event_id}") for event_id in (81, 82, 81)]
+    assert results[0]["rowid"] != results[1]["rowid"]
+    assert results[2]["rowid"] is None  # Replay cannot authorize a second turn.
+    assert len(history.load_messages(db_path=path)) == 2
+
+
 @pytest.fixture(autouse=True)
 def isolated_context_question_boundary() -> Iterator[None]:
     """Do not consult the owner's pending context-question file in API tests."""

@@ -4,6 +4,15 @@
 
 ### Current rollout status — supersedes historical checkpoints below
 
+PR #227 review scope: remove legacy inactive transitions from dated ordinary
+single/group/deferred sends, preserving the canonical draft-offer window.
+Carry authenticated Telegram inbound event IDs through text/voice and both
+history writers so repeated contents remain distinct and replay cannot create
+another saved turn. Tighten the test-only downloader hostname assertion.
+Context-answer additional facts and clarification persona are explicitly
+deferred to a separate change after this PR; no live storage repair/reset or
+runtime restart belongs to these review fixes.
+
 RF1-RF6 implementation and owner-approved migration/reset are complete.
 All 12 routines now have cooldown 0, confidence 1.0 and zero pressure counters;
 the scoped reset preserves pauses, conditions, schedules, receipts and history.

@@ -1176,7 +1176,8 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
 # ────────────────────────────────────────────────────────────────
 # VOICE HANDLER (CONSOLIDATED)
 # ────────────────────────────────────────────────────────────────
-def handle_voice(voice_obj: dict, chat_id: str, *, reply_event_id: str | None = None) -> None:
+def handle_voice(voice_obj: dict, chat_id: str, *, reply_event_id: str | None = None,
+                 inbound_message_id: str | None = None) -> None:
     """Transcribe audio and preserve its authenticated reply scope for the turn."""
     from config import TELEGRAM_TOKEN
     from services.gemini import safe_gemini_call
@@ -1244,7 +1245,8 @@ def handle_voice(voice_obj: dict, chat_id: str, *, reply_event_id: str | None = 
         if _handle_transcribed_voice(ai_reply):
             return
         handle_message(ai_reply, chat_id, voice_input=True,
-                       **({"reply_event_id": reply_event_id} if reply_event_id is not None else {}))
+                       **({"reply_event_id": reply_event_id} if reply_event_id is not None else {}),
+                       **({"inbound_message_id": inbound_message_id} if inbound_message_id is not None else {}))
 
     except Exception as e:
         print(f"\033[91m[Voice Error]: {e}\033[0m")
@@ -1712,6 +1714,7 @@ def _append_to_analytics_log(
     agent: str | None = None,
     *,
     metadata: dict | None = None,
+    message_id: str | None = None,
 ) -> int | None:
     """Logging of a message in the shared SQLite conversation history (telegram channel)."""
     try:
@@ -1726,6 +1729,7 @@ def _append_to_analytics_log(
                 agent=agent,
                 metadata=metadata,
                 return_saved=True,
+                **({"message_id": message_id} if message_id is not None else {}),
             )
             rowid = saved.get("rowid") if isinstance(saved, dict) else None
             if shared_role == "user":
@@ -1747,6 +1751,7 @@ def _append_to_analytics_log(
                 timestamp=now,
                 agent=agent,
                 metadata=metadata,
+                message_id=message_id,
             )
             rowid = saved.get("rowid") if isinstance(saved, dict) else None
             if shared_role == "user":
@@ -2113,6 +2118,7 @@ def handle_message(
     voice_input: bool = False,
     voice_mode: bool = False,
     reply_event_id: str | None = None,
+    inbound_message_id: str | None = None,
 ):
     """Sends the message to Lobster and replies (Text or Audio)."""
     global last_interaction_time
@@ -2134,13 +2140,15 @@ def handle_message(
     )
     if context_answer.consumed:
         reply = context_answer.reply
-        _append_to_analytics_log("user", clean_user_text)
+        _append_to_analytics_log("user", clean_user_text,
+            **({"message_id": inbound_message_id} if inbound_message_id is not None else {}))
         _send_and_record_assistant(reply, chat_id, agent="Routine_Context")
         enqueue_fast_task(log_exchange, clean_user_text, reply, "Routine_Context", "telegram")
         last_interaction_time = time.time()
         return
     # Reuse this exact input identity for routine inference and background work.
-    user_rowid = _append_to_analytics_log("user", clean_user_text)
+    user_rowid = _append_to_analytics_log("user", clean_user_text,
+        **({"message_id": inbound_message_id} if inbound_message_id is not None else {}))
     if type(user_rowid) is not int or user_rowid <= 0:
         print("[ConversationHistory/telegram]: turn stopped; user identity not persisted")
         send_telegram_msg(t("api.server.internal_error"))
@@ -3546,6 +3554,16 @@ def _telegram_routine_reply_event_id(message: Mapping[str, object]) -> str | Non
     return str(message_id) if type(message_id) is int and message_id > 0 else ""
 
 
+def _telegram_inbound_identity(message: Mapping[str, object]) -> dict[str, str]:
+    """Namespace a real owner-chat provider event; never infer identity from text."""
+    chat = message.get("chat")
+    event_id = message.get("message_id")
+    if (not isinstance(chat, Mapping) or str(chat.get("id")) != str(TELEGRAM_CHAT_ID)
+            or type(event_id) is not int or event_id <= 0):
+        return {}
+    return {"inbound_message_id": f"telegram-user-{TELEGRAM_CHAT_ID}-{event_id}"}
+
+
 def run_polling():
     """Long-polling loop — reads updates from the Telegram API."""
     global voice_mode_enabled
@@ -3657,7 +3675,8 @@ def run_polling():
                     threading.Thread(
                         target=handle_voice,
                         args=(msg["voice"], chat_id),
-                        kwargs={"reply_event_id": _telegram_routine_reply_event_id(msg)},
+                        kwargs={"reply_event_id": _telegram_routine_reply_event_id(msg),
+                                **_telegram_inbound_identity(msg)},
                         daemon=True
                     ).start()
                     continue
@@ -3811,7 +3830,8 @@ def run_polling():
                 threading.Thread(
                     target=handle_message,
                     args=(user_text, chat_id),
-                    kwargs={"reply_event_id": _telegram_routine_reply_event_id(msg)},
+                    kwargs={"reply_event_id": _telegram_routine_reply_event_id(msg),
+                            **_telegram_inbound_identity(msg)},
                     daemon=True
                 ).start()
 
@@ -4731,9 +4751,9 @@ def startup_check_missed_routines():
             if not ordinary_dated:
                 _send_and_record_assistant(msg, agent="Routine_Agent")
 
-            mark_routine_notified(r_id)
             sent_at = datetime.now()
             if not ordinary_dated:
+                mark_routine_notified(r_id)
                 pending_routine_confirmations[r_id] = {
                     "event": event_name,
                     "sent_at": sent_at,
@@ -5286,7 +5306,8 @@ def job_check_routines():
                                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel=_current_external_runtime_channel())
                             else:
                                 sent_at = datetime.now()
-                                mark_routine_notified(r_id)
+                                if not dated_batch_delivery:
+                                    mark_routine_notified(r_id)
                                 log_event("routines", "routine_triggered", 
                                     routine_id=r_id,
                                     event=event_name, 
@@ -5431,7 +5452,8 @@ def job_check_routines():
                                 return
                             cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                             conn.commit()
-                            mark_routine_notified(r_id)
+                            if not dated_delivery:
+                                mark_routine_notified(r_id)
                             if dated_delivery and draft_offer:
                                 _refresh_dated_draft_confirmation(r_id)
                             log_event(

@@ -2,6 +2,15 @@
 
 ## Dated routine feedback — implementation and approved reset completed
 
+- [x] PR #227 review corrections: dated single/group/deferred notifications
+  stay on the dated lifecycle; Telegram text/voice turns retain provider event
+  identity through shared-history and fallback writes. The URL test assertion
+  checks the parsed hostname, not a substring.
+- [ ] Separate follow-up after PR #227: preserve additional trusted current
+  facts when a message answers an already-resolved context question; use the
+  shared Astakos persona/singular tone for clarification questions. Do not
+  bundle these behavioral changes into the dated-feedback review corrections.
+
 - [x] RF1/RF2: dated ledger, Athens day-close accounting and canonical semantic
   feedback. Separate three-occurrence unanswered/refusal streaks; acknowledgement,
   postponement and silence do not reduce confidence.
