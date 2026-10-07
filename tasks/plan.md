@@ -16,6 +16,10 @@ temporary history/feedback storage and mock only the provider boundary.
 Natural model wording remains owner-observed; no live state or runtime changes,
 subagents or full-suite rerun belong to this implementation. The owner authorized
 commit/PR for this slice; review and merge remain separate follow-up actions.
+PR #230 corrections also supply the canonical selected name for ambiguous-date
+clarifications (no feedback write) and limit wording history to the current
+daily shared session. Tests exclude obsolete sessions while retaining today's
+cross-channel dialogue, and require explicit stale/error context without names.
 
 ## Completed implementation: Git inspection and approved-result continuation
 

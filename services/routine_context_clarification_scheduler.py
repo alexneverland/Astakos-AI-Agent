@@ -194,9 +194,9 @@ def classify_packet(packet: dict[str, Any], *, dependencies: bool = False) -> An
 
 def _question_wording_history() -> list[dict[str, Any]]:
     """Read bounded shared dialogue for style, never for authoritative flags."""
-    from memory.conversation_history import load_messages
+    from memory.conversation_history import default_session_id, load_messages
     try:
-        messages = load_messages(limit=6)
+        messages = load_messages(limit=6, session_id=default_session_id())
         return [{"role": row["role"], "channel": row.get("channel"),
                  "timestamp": row.get("timestamp"), "content": row["content"][:800]}
                 for row in messages[-6:]

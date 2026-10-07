@@ -85,6 +85,27 @@ def test_question_still_generated_when_optional_history_is_unavailable(monkeypat
     assert '"id": "11"' in prompts[0][1].content
 
 
+@pytest.mark.parametrize("has_current_dialogue", [False, True])
+def test_wording_history_excludes_old_sessions_but_preserves_current_cross_channel_dialogue(
+        isolated_wording_history, monkeypatch, has_current_dialogue):
+    """An old topic cannot become today's conversational bridge after inactivity."""
+    from memory import conversation_history as history
+    from services.routine_context_clarification_scheduler import _question_wording_history
+    path = isolated_wording_history
+    monkeypatch.setattr(history, "default_session_id", lambda ts=None:
+                        (ts or datetime(2026, 10, 7, 10)).strftime("%Y-%m-%d"))
+    history.append_message(role="user", content="Obsolete topic", channel="matrix",
+                           timestamp=datetime(2026, 10, 1, 10), db_path=path)
+    if has_current_dialogue:
+        history.append_message(role="user", content="Today in Web", channel="web",
+                               timestamp=datetime(2026, 10, 7, 9), db_path=path)
+        history.append_message(role="assistant", content="Today in Matrix", channel="matrix",
+                               timestamp=datetime(2026, 10, 7, 9, 1), db_path=path)
+    reference = _question_wording_history()
+    assert [row["content"] for row in reference] == (
+        ["Today in Web", "Today in Matrix"] if has_current_dialogue else [])
+
+
 def test_dependency_classifier_does_not_read_conversation(monkeypatch):
     """Style context must never change the separate dependency classifier."""
     from memory import conversation_history as history

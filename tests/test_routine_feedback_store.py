@@ -87,7 +87,37 @@ def test_failed_feedback_cannot_supply_a_successful_routine_reference(status):
     result = FeedbackTurnResult(status, DatedRoutineSelection("complete", 11, stamp(7).date()),
                                 routine_name="Never acknowledge this stale name")
     context = build_dated_routine_feedback_context(result)
-    assert context is None or "Never acknowledge this stale name" not in context.content
+    if status == "none":
+        assert context is None
+    else:
+        import json
+        assert context is not None
+        assert "Never acknowledge this stale name" not in context.content
+        assert json.loads(context.content.splitlines()[0]) == {
+            "status": status, "action": "none", "routine_id": None,
+            "occurrence_date": None}
+
+
+@pytest.mark.parametrize("routine_id,expected", [(11, "Καθάρισμα κουνελιού"), (None, None), (999, None)])
+def test_routine_specific_date_clarification_keeps_name_without_recording_feedback(store, routine_id, expected):
+    """Clarify the selected routine, but never guess an identity or completion."""
+    from services.routine_feedback_turn import process_feedback_turn
+    from services.routine_completion_helper import DatedRoutineSelection
+    from services.routine_completion_context import build_dated_routine_feedback_context
+    result = process_feedback_turn("Το έκανα, δεν θυμάμαι πότε", {11: "Καθάρισμα κουνελιού"},
+        {11: frozenset({stamp(7).date()})}, store=store,
+        selector=lambda *a, **k: DatedRoutineSelection("clarify", routine_id),
+        now=stamp(7), trusted=True, is_current=lambda: True)
+    context = build_dated_routine_feedback_context(result)
+    assert store.occurrences(11) == []
+    if routine_id == 999:
+        assert result.status == "none" and context is None
+    else:
+        assert result.status == "clarify" and context is not None
+        assert result.routine_name == expected
+        assert ("Source tool: recorded routine display name" in context.content) == (expected is not None)
+        if expected is not None:
+            assert expected in context.content
 
 
 def test_routine_display_name_is_bounded_escaped_and_not_action_authority():

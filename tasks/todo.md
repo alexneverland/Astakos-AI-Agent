@@ -14,6 +14,9 @@
   questions in Astakos' singular voice. Offline tests verify prompt inputs,
   persistence and safety boundaries, not live model phrasing.
 - [x] Owner authorized commit/PR for this narrow wording slice.
+- [x] PR #230 review corrections: retain the canonical name for routine-specific
+  date clarifications without recording feedback; restrict wording dialogue to
+  the current daily session across channels; require stale/error context in tests.
 - [ ] Review and merge the wording PR separately after inspection.
 
 ## Dated routine feedback — implementation and approved reset completed
