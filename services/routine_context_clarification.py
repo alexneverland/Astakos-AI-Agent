@@ -10,7 +10,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 from itertools import product
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from langchain_core.messages import SystemMessage
 
 from memory.routine_context_clarification import ClarificationStore, QuestionRequest
 from services.routine_conditions import evaluate_routine_conditions
@@ -304,6 +307,16 @@ class QuestionAnswer:
 
     consumed: bool = False
     outcome: str = "unrelated"
+    continue_conversation: bool = False
+
+    @property
+    def context_flags_processed(self) -> bool:
+        """Related replies already used the guarded writer, even if it was held.
+
+        A refusal only closes the question; extra facts still need ordinary
+        extraction. Never retry a stale related answer in a background worker.
+        """
+        return self.consumed and self.outcome != "declined"
 
     @property
     def reply(self) -> str:
@@ -314,6 +327,24 @@ class QuestionAnswer:
             "resolved", "already_resolved", "partial", "declined", "deferred",
         } else "deferred"
         return t("routine_context." + key)
+
+
+def context_answer_graph_context(answer: QuestionAnswer) -> SystemMessage | None:
+    """Supply lifecycle information, not new user text or tool authorization."""
+    from langchain_core.messages import SystemMessage
+
+    if not answer.consumed or not answer.continue_conversation:
+        return None
+    return SystemMessage(content=(
+        "The current owner message also answered a routine-context question. "
+        f"The canonical answer outcome is {answer.outcome}. "
+        "Its clarification interpretation already ran under canonical guards; "
+        "do not reinterpret the short "
+        "answer as approval, refusal of an unrelated action, or routine completion. "
+        "Handle additional explicit facts and requests in the original user "
+        "message through normal conversation and tool approval paths. "
+        "Do not claim a tool executed or a reminder/memory was saved without its result."
+    ))
 
 
 def process_question_answer(
@@ -353,13 +384,18 @@ def process_question_answer(
         )
         if result is None:
             return QuestionAnswer(False, "uncertain")
+
+        def answer(outcome: str) -> QuestionAnswer:
+            """Preserve mixed-message routing even when the commit is held."""
+            return QuestionAnswer(True, outcome, result.continue_conversation)
+
         if result.relation == "refused":
             if still_authoritative() and store.close(pending["id"], outcome="declined", now=clock()):
-                return QuestionAnswer(True, "declined")
+                return answer("declined")
         if result.relation == "related" and result.applied_flags:
             completed = set(pending["flags"]) <= result.applied_flags
             if completed:
-                return QuestionAnswer(True, "resolved")
+                return answer("resolved")
         if result.relation in {"related", "refused"}:
             # GPS or another authoritative worker may have resolved this exact
             # question while inference ran. Acknowledge the ledger outcome,
@@ -367,10 +403,10 @@ def process_question_answer(
             completed = next((row for row in store.snapshot()["requests"]
                               if row["id"] == pending["id"]), None)
             if completed is not None and completed["status"] == "resolved":
-                return QuestionAnswer(True, "already_resolved")
+                return answer("already_resolved")
             if result.relation == "related" and result.applied_flags:
-                return QuestionAnswer(True, "partial")
-            return (QuestionAnswer(True, "deferred") if result.relation == "related"
+                return answer("partial")
+            return (answer("deferred") if result.relation == "related"
                     else QuestionAnswer(False, "uncertain"))
         return QuestionAnswer(False, result.relation)
     except (OSError, ValueError, RuntimeError, TimeoutError):

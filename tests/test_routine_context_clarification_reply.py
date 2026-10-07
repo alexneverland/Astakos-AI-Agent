@@ -53,6 +53,94 @@ def test_owner_reply_resolves_once_across_channels(delivered, channel):
     assert not second.consumed
 
 
+@pytest.mark.parametrize("channel", ["web", "telegram", "matrix"])
+def test_mixed_owner_reply_commits_all_current_facts_then_continues(delivered, monkeypatch, channel):
+    """Closing the question keeps extra facts and does not execute a request."""
+    monkeypatch.setattr(context_extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=
+        '{"relation":"related","flags":{"partner_with_user":false,'
+        '"partner_at_work":true},"continue_conversation":true}'))
+    result = process_question_answer(
+        store=delivered, user_text="Όχι, η Σοφία δουλεύει. Θυμήσου το ρεπό και βάλε reminder στις έξι.",
+        channel=channel, now=NOW + timedelta(seconds=1), trusted_owner=True)
+    assert result.consumed and result.outcome == "resolved"
+    assert result.continue_conversation and result.context_flags_processed
+    assert routine_db.get_context_state("partner_at_work")["value"] == "true"
+    assert delivered.snapshot()["requests"][0]["status"] == "resolved"
+
+
+def test_refusal_with_another_request_continues_without_claiming_flag_extraction(delivered, monkeypatch):
+    """Declining the question is not declining a separate reminder request."""
+    monkeypatch.setattr(context_extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=
+        '{"relation":"refused","flags":{},"continue_conversation":true}'))
+    result = process_question_answer(
+        store=delivered, user_text="Δεν θέλω να απαντήσω. Η Σοφία δουλεύει, βάλε reminder στις έξι.",
+        channel="matrix", now=NOW + timedelta(seconds=1), trusted_owner=True)
+    assert result.outcome == "declined" and result.continue_conversation
+    assert not result.context_flags_processed
+    assert delivered.snapshot()["requests"][0]["status"] == "declined"
+    assert routine_db.get_context_state("partner_with_user") is None
+
+
+def test_mixed_answer_batch_conflict_keeps_real_ledger_pending(delivered, monkeypatch):
+    """CAS rejection is a held answer, not a failed parser or a resolved ledger."""
+    def model(prompt):
+        routine_db.set_context_state("partner_at_work", "false")
+        return SimpleNamespace(text='{"relation":"related","flags":{"partner_with_user":false,'
+                                    '"partner_at_work":true},"continue_conversation":true}')
+
+    monkeypatch.setattr(context_extractor, "safe_gemini_call", model)
+    result = process_question_answer(
+        store=delivered, user_text="Όχι, είναι δουλειά. Βάλε reminder.",
+        channel="matrix", now=NOW + timedelta(seconds=1), trusted_owner=True)
+    assert result.outcome == "deferred" and result.continue_conversation
+    assert delivered.snapshot()["pending"]["status"] == "sent"
+    assert routine_db.get_context_state("partner_at_work")["value"] == "false"
+    assert routine_db.get_context_state("partner_with_user") is None
+
+
+def test_real_matrix_answer_persists_facts_and_continues_original_turn(delivered, monkeypatch):
+    """Exercise provider interpretation, ledger, canonical flags and turn history together."""
+    import config
+    from langchain_core.messages import AIMessage, HumanMessage
+    from memory import conversation_history as history
+    from services import routine_context_clarification as clarification, routine_context
+    from services.matrix_turn import MatrixTurnService
+    from core import messenger_draft
+    from services import messenger_intent
+
+    path = str(delivered.path.parent / "conversation.db")
+    monkeypatch.setattr(config, "BASE_DIR", str(delivered.path.parent))
+    monkeypatch.setattr(clarification, "context_confirmation_conflict", lambda: False)
+    monkeypatch.setattr(history, "get_max_rowid", lambda: 0)
+    monkeypatch.setattr(routine_context, "build_routine_context_evidence", lambda _: {})
+    monkeypatch.setattr(messenger_draft, "active_draft_status", lambda: (False, "none", None))
+    monkeypatch.setattr(messenger_intent, "classify_messenger_intent",
+                        lambda *a, **k: SimpleNamespace(intent="unrelated"))
+    monkeypatch.setattr(context_extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=
+        '{"relation":"related","flags":{"partner_with_user":false,'
+        '"partner_at_work":true},"continue_conversation":true}'))
+    text = "Όχι, η Σοφία δουλεύει. Θυμήσου το αυριανό ρεπό και βάλε reminder στις έξι."
+    inputs, exchanges = [], []
+
+    def stream(state, options):
+        """Stub the graph provider boundary, never real tools or transport."""
+        inputs.append(state)
+        yield {"Chat_Agent": {"messages": [AIMessage(content="Πάμε να το οργανώσουμε.")]}}
+
+    service = MatrixTurnService(
+        graph=SimpleNamespace(stream=stream), conversation_db_path=path,
+        select_tool_channel=lambda _: None,
+        on_exchange_completed=lambda *a, **k: exchanges.append((a, k)))
+    reply = service._run_sync(text, "$mixed-real-answer")
+    assert len(inputs) == 1
+    assert sum(text in message.content for message in inputs[0]["messages"]
+               if isinstance(message, HumanMessage)) == 1
+    assert routine_db.get_context_state("partner_at_work")["value"] == "true"
+    assert delivered.snapshot()["requests"][0]["status"] == "resolved"
+    assert [row["content"] for row in history.load_messages(db_path=path)] == [text, reply]
+    assert len(exchanges) == 1 and exchanges[0][1]["context_flags_processed"] is True
+
+
 @pytest.mark.parametrize("extra", [
     {"trusted_owner": False}, {"external_derived": True},
     {"competing_confirmation": True}, {"reply_to_id": "$another"},
@@ -88,7 +176,7 @@ def test_expiry_during_model_call_prevents_write(delivered, monkeypatch):
 def test_concurrent_replies_do_not_both_write(delivered, monkeypatch):
     barrier = Barrier(2)
     writes = []
-    canonical = routine_db.set_context_state
+    canonical = routine_db.set_context_states_if_unchanged
 
     def classify(_):
         barrier.wait(timeout=5)
@@ -96,10 +184,10 @@ def test_concurrent_replies_do_not_both_write(delivered, monkeypatch):
 
     def write(*args, **kwargs):
         writes.append(args)
-        canonical(*args, **kwargs)
+        return canonical(*args, **kwargs)
 
     monkeypatch.setattr(context_extractor, "safe_gemini_call", classify)
-    monkeypatch.setattr(context_extractor, "set_context_state", write)
+    monkeypatch.setattr(context_extractor, "set_context_states_if_unchanged", write)
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda channel: process_question_answer(
             store=delivered, user_text="no", channel=channel,

@@ -9,6 +9,24 @@ from services.routine_context_evidence import ContextEvidence
 NOW = datetime(2026, 10, 6, 10, tzinfo=ATHENS)
 
 
+def test_question_model_uses_shared_personality_without_tool_instructions(monkeypatch):
+    """The actual tool-free prompt inherits the canonical conversational tone."""
+    from core import brain, utils
+    from services.routine_context_clarification_scheduler import classify_packet
+    prompts = []
+    monkeypatch.setattr(utils, "load_agent_prompt", lambda *a, **k:
+        "Chat role\n═══ PERSONALITY ═══\nCanonical singular persona.\n"
+        "═══ GPS & MESSENGER ═══\nCall a tool.")
+    monkeypatch.setattr(brain, "safe_llm_invoke", lambda model, messages:
+        prompts.append(messages) or SimpleNamespace(content=
+            '{"routine_ids":["1"],"flags":["user_out_of_home"],"question":"Σπίτι είσαι;"}'))
+    result = classify_packet({"routine_ids": ["1"]})
+    assert result["question"] == "Σπίτι είσαι;"
+    assert "Canonical singular persona." in prompts[0][0].content
+    assert "Call a tool." not in prompts[0][0].content
+    assert "UNTRUSTED" in prompts[0][1].content
+
+
 def test_scoped_projection_keeps_unscoped_work_and_unknowns():
     from services.routine_context import project_routine_context
     original = {"user_out_of_home": True, "partner_with_user": True, "current_shift": "afternoon"}

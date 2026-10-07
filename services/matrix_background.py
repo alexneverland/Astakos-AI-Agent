@@ -27,7 +27,7 @@ from memory.working_memory import (
     update_working_memory,
 )
 from services.behavioral_event_scheduler import schedule_persisted_user_intake
-from services.context_extractor import extract_and_update_context_flags
+from services.context_extractor import extract_and_update_context_flags, reconcile_context_message
 from services.external_delivery import external_delivery_router
 
 TaskEnqueuer = Callable[..., None]
@@ -172,10 +172,14 @@ class MatrixBackgroundHooks:
         external_content_sources: Iterable[str] | None = None,
         correlation_rowid: int | None = None,
         context_flags_processed: bool = False,
+        context_reconciliation_pending: bool = False,
     ) -> None:
         """Queue the same memory, follow-up, and context pipelines as other channels."""
         if channel != "matrix":
             raise ValueError("Matrix background hooks require channel='matrix'")
+
+        if context_reconciliation_pending:
+            self._enqueue_slow_task(reconcile_context_message, user_text)
 
         self._enqueue_fast_task(
             log_exchange,

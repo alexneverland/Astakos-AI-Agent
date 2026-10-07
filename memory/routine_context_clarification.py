@@ -334,7 +334,7 @@ class ClarificationStore:
 
     def commit_answer(
         self, identifier: str, *, received_at: datetime,
-        current_time: Callable[[], datetime], persist: Callable[[], frozenset[str]],
+        current_time: Callable[[], datetime], persist: Callable[[], frozenset[str] | None],
         still_authoritative: Callable[[], bool],
     ) -> frozenset[str] | None:
         """Revalidate and serialize only the short persistence stage, never an LLM call.
@@ -354,6 +354,8 @@ class ClarificationStore:
                     or not still_authoritative()):
                 return None
             applied = persist()
+            if applied is None:
+                return None
             if set(row["flags"]) <= applied:
                 self._close_request(row, outcome="resolved", now=current)
                 self._save(state)

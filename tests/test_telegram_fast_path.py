@@ -23,7 +23,7 @@ def isolated_routine_and_context_boundary(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(routine_db, "get_active_routine_catalog", lambda: [])
     monkeypatch.setattr(pending_assets, "get_latest_pending_asset_any", lambda *_args: None)
     monkeypatch.setattr(clarification, "try_context_question_reply",
-                        lambda *args, **kwargs: SimpleNamespace(consumed=False))
+                        lambda *args, **kwargs: clarification.QuestionAnswer())
 
 
 def test_fast_path_simple_ack():

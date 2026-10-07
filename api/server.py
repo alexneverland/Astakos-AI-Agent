@@ -1044,13 +1044,18 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
     voice_delivery_context = _build_voice_delivery_context(is_voice_mode)
 
-    from services.routine_context_clarification import try_context_question_reply
+    from services.routine_context_clarification import (
+        context_answer_graph_context, try_context_question_reply,
+    )
 
     context_answer = await asyncio.to_thread(
         try_context_question_reply, user_input, "web", trusted_owner=True,
         external_derived=bool(photo_path),
     )
-    if context_answer.consumed:
+    if context_answer.context_flags_processed and context_answer.continue_conversation:
+        from services.context_extractor import reconcile_context_message
+        enqueue_slow_task(reconcile_context_message, user_input)
+    if context_answer.consumed and not context_answer.continue_conversation:
         reply = context_answer.reply
         user_saved = append_to_chat_history(
             "user", user_input, return_saved=True, mirror_target=mirror_target,
@@ -1476,7 +1481,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
+            if not context_answer.context_flags_processed:
+                enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
             return JSONResponse({
                 "agent": "Chat_Agent", "response": reply,
                 "user_rowid": user_saved["rowid"],
@@ -1500,7 +1506,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
+            if not context_answer.context_flags_processed:
+                enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
             return JSONResponse({
                 "agent": "Chat_Agent", "response": reply,
                 "user_rowid": user_saved["rowid"],
@@ -1543,7 +1550,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
+            if not context_answer.context_flags_processed:
+                enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
 
             _trace = ExecutionTrace(channel="web", user_message=user_input)
             _trace.mark_phase("messenger_intent_clear_intercept", 1)
@@ -1583,7 +1591,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
+            if not context_answer.context_flags_processed:
+                enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
 
             _trace = ExecutionTrace(channel="web", user_message=user_input)
             _trace.mark_phase("messenger_intent_clarify_intercept", 1)
@@ -1756,6 +1765,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             and routine_completion_context is None
             and not mail_prompt_active
             and not pending_plan_confirmation
+            and not context_answer.consumed
         ):
             _trace.mark_phase("ultra_light_ack_used", 1)
             final_ai_response = get_ultra_light_ack_response()
@@ -1778,6 +1788,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 if voice_delivery_context is not None
                 else []
             )
+            answer_context = context_answer_graph_context(context_answer)
+            if answer_context is not None:
+                voice_context_messages.append(answer_context)
 
             if pending_plan_confirmation:
                 limit = 100
@@ -1946,14 +1959,16 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 enqueue_fast_task(update_working_memory,         clean_user, "")
                 enqueue_fast_task(_enqueue_slow_memory_sifter,   clean_user, "", handling_agent, "web", None, True)
                 enqueue_slow_task(_enqueue_followup_pipeline, clean_user, "", handling_agent, "web")
-                enqueue_slow_task(extract_and_update_context_flags, clean_user, "", "web")
+                if not context_answer.context_flags_processed:
+                    enqueue_slow_task(extract_and_update_context_flags, clean_user, "", "web")
             else:
                 enqueue_fast_task(log_exchange,                  clean_user, clean_ai, handling_agent, "web")
                 enqueue_fast_task(update_working_memory,         clean_user, clean_ai, external_content_sources)
                 enqueue_fast_task(_enqueue_slow_memory_sifter,   clean_user, clean_ai, handling_agent, "web", external_content_sources)
                 enqueue_slow_task(_enqueue_capability_gap_web,   clean_user, clean_ai, handling_agent, "web", current_history_rowid)
                 enqueue_slow_task(_enqueue_followup_pipeline, clean_user, clean_ai, handling_agent, "web")
-                enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")
+                if not context_answer.context_flags_processed:
+                    enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")
             _trace.mark_phase("background_enqueue_ms", int((perf_counter() - t_bg_0) * 1000))
 
             _trace.save()

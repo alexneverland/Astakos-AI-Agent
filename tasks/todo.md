@@ -6,10 +6,26 @@
   stay on the dated lifecycle; Telegram text/voice turns retain provider event
   identity through shared-history and fallback writes. The URL test assertion
   checks the parsed hostname, not a substring.
-- [ ] Separate follow-up after PR #227: preserve additional trusted current
-  facts when a message answers an already-resolved context question; use the
-  shared Astakos persona/singular tone for clarification questions. Do not
-  bundle these behavioral changes into the dated-feedback review corrections.
+- [x] Separate follow-up after PR #227: mixed context answers continue through
+  the ordinary Web/Telegram/Matrix conversation once, retaining memory,
+  routine-feedback and reminder/skill requests. Extra current facts use the same
+  canonical schema and guarded write; background extraction cannot retry stale
+  related answers. Standalone answers remain context-only. Question generation
+  reuses Chat's personality section and singular tone, without tool instructions.
+- [ ] Review and naturally verify mixed context answers and question wording.
+  Offline verification is not proof of live model interpretation or tool delivery.
+- [x] PR #228 actionable review fixes: durable routine reconciliation continues
+  separately from live flags; missing continuation metadata fails open only for
+  normal conversation, not writable scope. Semantic flag batches use atomic
+  version comparison, including additional mixed-answer facts. Provenance tests
+  include a real pending ledger and detect removal of the guard.
+- [ ] Final PR #228 review/merge. Matrix concurrent/replayed events are already
+  claimed by the production transport; enum-only clarification questions are
+  unsupported and rejected before provider inference. No new global replay
+  subsystem or enum-question feature is part of this fix.
+- [ ] Separately investigate Git global-option read-only classification and
+  returning approved terminal results to the requesting agent. No change to
+  terminal execution or approval continuation belongs to this context fix.
 
 - [x] RF1/RF2: dated ledger, Athens day-close accounting and canonical semantic
   feedback. Separate three-occurrence unanswered/refusal streaks; acknowledgement,

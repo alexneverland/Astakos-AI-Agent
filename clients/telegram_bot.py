@@ -2130,7 +2130,9 @@ def handle_message(
         voice_input=voice_input,
         voice_mode=voice_mode,
     )
-    from services.routine_context_clarification import try_context_question_reply
+    from services.routine_context_clarification import (
+        context_answer_graph_context, try_context_question_reply,
+    )
 
     context_answer = try_context_question_reply(
         clean_user_text, "telegram",
@@ -2138,7 +2140,10 @@ def handle_message(
         and str(chat_id) == str(config.TELEGRAM_CHAT_ID),
         **({"reply_to_id": reply_event_id} if reply_event_id is not None else {}),
     )
-    if context_answer.consumed:
+    if context_answer.context_flags_processed and context_answer.continue_conversation:
+        from services.context_extractor import reconcile_context_message
+        enqueue_slow_task(reconcile_context_message, clean_user_text)
+    if context_answer.consumed and not context_answer.continue_conversation:
         reply = context_answer.reply
         _append_to_analytics_log("user", clean_user_text,
             **({"message_id": inbound_message_id} if inbound_message_id is not None else {}))
@@ -2673,7 +2678,8 @@ def handle_message(
         enqueue_fast_task(_enqueue_slow_memory_sifter, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
         enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, confirm_reply, "Chat_Agent")
         enqueue_slow_task(_enqueue_followup_pipeline, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
-        enqueue_slow_task(extract_and_update_context_flags, clean_user_text, confirm_reply)
+        if not context_answer.context_flags_processed:
+            enqueue_slow_task(extract_and_update_context_flags, clean_user_text, confirm_reply)
         return
 
     if pending_asset and reply_kind == "no" and asset_prompt_active:
@@ -2685,7 +2691,8 @@ def handle_message(
         enqueue_fast_task(_enqueue_slow_memory_sifter, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
         enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, cancel_reply, "Chat_Agent")
         enqueue_slow_task(_enqueue_followup_pipeline, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
-        enqueue_slow_task(extract_and_update_context_flags, clean_user_text, cancel_reply)
+        if not context_answer.context_flags_processed:
+            enqueue_slow_task(extract_and_update_context_flags, clean_user_text, cancel_reply)
         return
 
     # ── Messenger Draft Intent Guard ─────────────────────────────
@@ -2798,6 +2805,9 @@ def handle_message(
         )
         if voice_delivery_context is not None:
             context_msgs.append(voice_delivery_context)
+        answer_context = context_answer_graph_context(context_answer)
+        if answer_context is not None:
+            context_msgs.append(answer_context)
         context_load_ms = int((perf_counter() - t_context_0) * 1000)
         # ── Flow via LangGraph ───────────────────────────────────_
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"
@@ -2835,7 +2845,8 @@ def handle_message(
 
         mail_prompt_active = is_reply_to_recent_mail_prompt(context_msgs)
         
-        if is_ultra_ack and not pending_bug_followup and routine_completion_context is None and not mail_prompt_active:
+        if (is_ultra_ack and not pending_bug_followup and routine_completion_context is None
+                and not mail_prompt_active and not context_answer.consumed):
             _trace.mark_phase("ultra_light_ack_used", 1)
             handling_agent = "UltraLightACK"
             final_ai_response = get_ultra_light_ack_response()
@@ -3095,14 +3106,16 @@ def handle_message(
                 enqueue_fast_task(update_working_memory,          user_text, "")
                 enqueue_fast_task(_enqueue_slow_memory_sifter,    user_text, "", handling_agent, "telegram", None, True)
                 enqueue_slow_task(_enqueue_followup_pipeline, user_text, "", handling_agent, "telegram")
-                enqueue_slow_task(extract_and_update_context_flags, user_text, "")
+                if not context_answer.context_flags_processed:
+                    enqueue_slow_task(extract_and_update_context_flags, user_text, "")
             else:
                 enqueue_fast_task(log_exchange,                   user_text, final_ai_response, handling_agent, "telegram")
                 enqueue_fast_task(update_working_memory,          user_text, final_ai_response, external_content_sources)
                 enqueue_fast_task(_enqueue_slow_memory_sifter,    user_text, final_ai_response, handling_agent, "telegram", external_content_sources)
                 _schedule_capability_gap_if_valid(user_text, final_ai_response, handling_agent, user_rowid, chat_id)
                 enqueue_slow_task(_enqueue_followup_pipeline, user_text, final_ai_response, handling_agent, "telegram")
-                enqueue_slow_task(extract_and_update_context_flags, user_text, final_ai_response)
+                if not context_answer.context_flags_processed:
+                    enqueue_slow_task(extract_and_update_context_flags, user_text, final_ai_response)
             
             background_enqueue_ms = int((perf_counter() - t_bg_0) * 1000)
             _trace.mark_phase("background_enqueue_ms", background_enqueue_ms)

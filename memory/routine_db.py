@@ -2395,6 +2395,48 @@ def get_context_states(keys: list[str]) -> dict[str, dict]:
             out[key] = item
     return out
 
+def set_context_states_if_unchanged(
+    updates: dict[str, tuple[str, str | None]],
+    expected: dict[str, dict | None],
+) -> bool:
+    """Atomically write a semantic batch only if its pre-inference state survives.
+
+    BEGIN IMMEDIATE serializes the comparison and writes against all canonical
+    context writers, including other processes, without a schema migration.
+    """
+    if not set(updates) <= set(expected):
+        raise ValueError("Context batch requires an expected version for every write")
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            conn.execute("BEGIN IMMEDIATE")
+            for key, previous in expected.items():
+                row = conn.execute(
+                    "SELECT value, expires_at, updated_at FROM context_state WHERE key=?", (key,),
+                ).fetchone()
+                current = None if row is None else {
+                    "value": row[0], "expires_at": row[1], "updated_at": row[2],
+                }
+                if current != previous:
+                    conn.rollback()
+                    return False
+            now_str = datetime.now().isoformat()
+            for key, (value, expires_at) in updates.items():
+                conn.execute(
+                    "INSERT INTO context_state (key, value, expires_at, updated_at) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+                    "expires_at=excluded.expires_at, updated_at=excluded.updated_at",
+                    (key, value, expires_at, now_str),
+                )
+            conn.commit()
+            return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def set_context_state(key: str, value: str, expires_at: str | None = None) -> None:
     conn = get_connection()
     cursor = conn.cursor()

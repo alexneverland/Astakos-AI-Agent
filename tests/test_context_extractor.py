@@ -11,11 +11,20 @@ def mocked_context_pipeline():
     with (
         patch("services.context_extractor.safe_gemini_call") as mock_llm,
         patch("services.context_extractor.load_recent_trusted_user_messages", return_value=[]),
-        patch("services.context_extractor.set_context_state") as mock_set,
+        patch("services.context_extractor.get_context_state", return_value=None),
+        patch("services.context_extractor.set_context_states_if_unchanged") as mock_batch,
         patch("services.context_extractor.infer_routine_reconciliation_directives") as mock_reconcile,
         patch("services.context_extractor.apply_routine_reconciliation_directives") as mock_apply,
     ):
         mock_reconcile.return_value = []
+        mock_set = MagicMock()
+
+        def save(updates, expected):
+            for key, (value, expiry) in updates.items():
+                mock_set(key, value, expires_at=expiry)
+            return True
+
+        mock_batch.side_effect = save
         yield mock_llm, mock_set, mock_apply
 
 
