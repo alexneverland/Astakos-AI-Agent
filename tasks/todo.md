@@ -14,6 +14,15 @@
   reuses Chat's personality section and singular tone, without tool instructions.
 - [ ] Review and naturally verify mixed context answers and question wording.
   Offline verification is not proof of live model interpretation or tool delivery.
+- [x] PR #228 actionable review fixes: durable routine reconciliation continues
+  separately from live flags; missing continuation metadata fails open only for
+  normal conversation, not writable scope. Semantic flag batches use atomic
+  version comparison, including additional mixed-answer facts. Provenance tests
+  include a real pending ledger and detect removal of the guard.
+- [ ] Final PR #228 review/merge. Matrix concurrent/replayed events are already
+  claimed by the production transport; enum-only clarification questions are
+  unsupported and rejected before provider inference. No new global replay
+  subsystem or enum-question feature is part of this fix.
 - [ ] Separately investigate Git global-option read-only classification and
   returning approved terminal results to the requesting agent. No change to
   terminal execution or approval continuation belongs to this context fix.

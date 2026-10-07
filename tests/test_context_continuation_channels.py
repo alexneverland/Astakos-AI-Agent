@@ -56,6 +56,7 @@ def assert_background_continues_once(tasks: list[tuple[Any, ...]]) -> None:
     assert names.count("update_working_memory") == 1
     assert names.count("_enqueue_slow_memory_sifter") == 1
     assert names.count("_enqueue_followup_pipeline") == 1
+    assert names.count("reconcile_context_message") == 1
     assert "extract_and_update_context_flags" not in names
 
 

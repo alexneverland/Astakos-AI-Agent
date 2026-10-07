@@ -435,6 +435,29 @@ async def test_duplicate_event_never_reruns_handler_or_resends(tmp_path) -> None
 
 
 @pytest.mark.asyncio
+async def test_concurrent_mixed_event_and_replay_enter_handler_once(tmp_path) -> None:
+    """Production reservation precedes clarification and graph, not just history."""
+    import asyncio
+
+    client = FakeMatrixClient()
+    handled = []
+    body = "Όχι, και βάλε υπενθύμιση στις έξι."
+
+    async def handler(text: str, event_id: str) -> str:
+        handled.append(text)
+        await asyncio.sleep(0)  # deterministically yield during the first turn
+        return "Μία απάντηση."
+
+    transport = _transport(tmp_path, client, handler)
+    event = FakeTextEvent(body=body)
+    await asyncio.gather(transport.handle_event(FakeRoom(), event),
+                         transport.handle_event(FakeRoom(), event))
+    await transport.handle_event(FakeRoom(), event)
+    assert handled == [body]
+    assert len(client.sent) == 1
+
+
+@pytest.mark.asyncio
 async def test_send_failure_retries_saved_reply_without_rerunning_handler(tmp_path) -> None:
     client = FakeMatrixClient()
     client.send_results = [FakeSendError(), object()]
@@ -861,7 +884,7 @@ async def test_context_reply_reaches_final_canonical_flags_without_approval(tmp_
 
     def model(prompt):
         assert "👍" in prompt
-        return SimpleNamespace(text='{"relation":"related","flags":{"partner_with_user":true}}')
+        return SimpleNamespace(text='{"relation":"related","flags":{"partner_with_user":true},"continue_conversation":false}')
 
     monkeypatch.setattr(context_extractor, "safe_gemini_call", model)
 

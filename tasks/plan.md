@@ -25,6 +25,19 @@ review remain. Git/Terminal read-only classification and approved-result
 continuation stay separate. No live storage repair/reset, config change or
 runtime restart is part of this follow-up.
 
+PR #228 review corrections separate durable routine reconciliation from live
+flag interpretation. Continued mixed replies queue the canonical reconciler
+without rerunning live extraction. Missing model continuation metadata preserves
+normal conversation but does not expand permitted flag keys. Context batches
+compare pre-inference stored versions and write atomically in the existing
+routine DB abstraction; conflicting newer state holds the entire old batch.
+No schema migration or live data repair is required. Offline tests cover pending
+ledger provenance, held batch resolution, rollback, durable shifts, and Matrix
+transport reservation during concurrent/replayed mixed events. Enum identifiers
+remain invalid question dependencies; only additional explicit enum facts can
+be stored by the ordinary bounded schema. Live wording/tool interpretation and
+final PR review remain separate verification steps.
+
 RF1-RF6 implementation and owner-approved migration/reset are complete.
 All 12 routines now have cooldown 0, confidence 1.0 and zero pressure counters;
 the scoped reset preserves pauses, conditions, schedules, receipts and history.

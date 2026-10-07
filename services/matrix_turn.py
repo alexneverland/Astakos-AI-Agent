@@ -367,6 +367,8 @@ class MatrixTurnService:
                 "matrix",
                 correlation_rowid=saved_user.get("rowid"),
                 context_flags_processed=context_answer.context_flags_processed,
+                context_reconciliation_pending=(context_answer.context_flags_processed
+                                                and context_answer.continue_conversation),
             )
             return visible_draft_reply
 
@@ -510,6 +512,8 @@ class MatrixTurnService:
             external_content_sources=external_sources,
             correlation_rowid=saved_user.get("rowid"),
             context_flags_processed=context_answer.context_flags_processed,
+            context_reconciliation_pending=(context_answer.context_flags_processed
+                                            and context_answer.continue_conversation),
         )
         if created_files.paths:
             return MatrixReply(

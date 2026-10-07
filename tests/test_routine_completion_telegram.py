@@ -700,7 +700,7 @@ def test_telegram_consumed_context_reply_never_reaches_dated_feedback(tmp_path):
         return "context-receipt"
     with (
         patch.object(sys.modules["services.routine_context_clarification"], "try_context_question_reply",
-            return_value=types.SimpleNamespace(consumed=True, continue_conversation=False, reply="Context recorded")),
+            return_value=types.SimpleNamespace(consumed=True, context_flags_processed=True, continue_conversation=False, reply="Context recorded")),
         patch.object(bot, "_persisted_routine_feedback_handler", handler),
         patch.object(bot, "_send_and_record_assistant", side_effect=deliver),
     ):

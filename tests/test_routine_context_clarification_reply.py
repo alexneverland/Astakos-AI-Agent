@@ -81,6 +81,23 @@ def test_refusal_with_another_request_continues_without_claiming_flag_extraction
     assert routine_db.get_context_state("partner_with_user") is None
 
 
+def test_mixed_answer_batch_conflict_keeps_real_ledger_pending(delivered, monkeypatch):
+    """CAS rejection is a held answer, not a failed parser or a resolved ledger."""
+    def model(prompt):
+        routine_db.set_context_state("partner_at_work", "false")
+        return SimpleNamespace(text='{"relation":"related","flags":{"partner_with_user":false,'
+                                    '"partner_at_work":true},"continue_conversation":true}')
+
+    monkeypatch.setattr(context_extractor, "safe_gemini_call", model)
+    result = process_question_answer(
+        store=delivered, user_text="Όχι, είναι δουλειά. Βάλε reminder.",
+        channel="matrix", now=NOW + timedelta(seconds=1), trusted_owner=True)
+    assert result.outcome == "deferred" and result.continue_conversation
+    assert delivered.snapshot()["pending"]["status"] == "sent"
+    assert routine_db.get_context_state("partner_at_work")["value"] == "false"
+    assert routine_db.get_context_state("partner_with_user") is None
+
+
 def test_real_matrix_answer_persists_facts_and_continues_original_turn(delivered, monkeypatch):
     """Exercise provider interpretation, ledger, canonical flags and turn history together."""
     import config
@@ -159,7 +176,7 @@ def test_expiry_during_model_call_prevents_write(delivered, monkeypatch):
 def test_concurrent_replies_do_not_both_write(delivered, monkeypatch):
     barrier = Barrier(2)
     writes = []
-    canonical = routine_db.set_context_state
+    canonical = routine_db.set_context_states_if_unchanged
 
     def classify(_):
         barrier.wait(timeout=5)
@@ -167,10 +184,10 @@ def test_concurrent_replies_do_not_both_write(delivered, monkeypatch):
 
     def write(*args, **kwargs):
         writes.append(args)
-        canonical(*args, **kwargs)
+        return canonical(*args, **kwargs)
 
     monkeypatch.setattr(context_extractor, "safe_gemini_call", classify)
-    monkeypatch.setattr(context_extractor, "set_context_state", write)
+    monkeypatch.setattr(context_extractor, "set_context_states_if_unchanged", write)
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda channel: process_question_answer(
             store=delivered, user_text="no", channel=channel,

@@ -6,7 +6,8 @@ from services.context_extractor import extract_and_update_context_flags
 def test_context_extractor_uses_llm_relationship_state_without_phrase_overrides():
     with (
         patch("services.context_extractor.safe_gemini_call") as mock_llm,
-        patch("services.context_extractor.set_context_state") as mock_set,
+        patch("services.context_extractor.get_context_state", return_value=None),
+        patch("services.context_extractor.set_context_states_if_unchanged", return_value=True) as mock_set,
         patch("services.context_extractor.infer_routine_reconciliation_directives") as mock_reconcile,
         patch("services.context_extractor.apply_routine_reconciliation_directives"),
     ):
@@ -17,7 +18,7 @@ def test_context_extractor_uses_llm_relationship_state_without_phrase_overrides(
 
         extract_and_update_context_flags("Είμαστε μαζί τώρα.")
 
-    calls = {call.args[0]: call.args[1] for call in mock_set.call_args_list}
+    calls = {key: value for key, (value, _) in mock_set.call_args.args[0].items()}
     assert calls["partner_with_user"] == "true"
     assert calls["kid1_with_user"] == "true"
     assert calls["kid1_with_partner"] == "true"
@@ -27,7 +28,8 @@ def test_context_extractor_uses_llm_relationship_state_without_phrase_overrides(
 def test_context_extractor_work_state_overrides_only_incompatible_relationships():
     with (
         patch("services.context_extractor.safe_gemini_call") as mock_llm,
-        patch("services.context_extractor.set_context_state") as mock_set,
+        patch("services.context_extractor.get_context_state", return_value=None),
+        patch("services.context_extractor.set_context_states_if_unchanged", return_value=True) as mock_set,
         patch("services.context_extractor.infer_routine_reconciliation_directives") as mock_reconcile,
         patch("services.context_extractor.apply_routine_reconciliation_directives"),
     ):
@@ -41,7 +43,7 @@ def test_context_extractor_work_state_overrides_only_incompatible_relationships(
 
         extract_and_update_context_flags("Είμαι στη δουλειά τώρα.")
 
-    calls = {call.args[0]: call.args[1] for call in mock_set.call_args_list}
+    calls = {key: value for key, (value, _) in mock_set.call_args.args[0].items()}
     assert calls["user_at_work"] == "true"
     assert calls["partner_with_user"] == "false"
     assert calls["kid1_with_user"] == "false"

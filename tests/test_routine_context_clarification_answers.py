@@ -81,7 +81,7 @@ def test_failed_persistence_does_not_report_resolution(context_pipeline, monkeyp
     def fail(*args, **kwargs):
         raise OSError("temporary database failure")
 
-    monkeypatch.setattr(extractor, "set_context_state", fail)
+    monkeypatch.setattr(extractor, "set_context_states_if_unchanged", fail)
     result = extractor.extract_and_update_context_flags("Ναι", clarification_context=context_pipeline)
     assert result.relation == "uncertain"
     assert not result.applied_flags
@@ -101,23 +101,19 @@ def test_question_is_bounded_untrusted_reference_not_an_instruction(context_pipe
     assert "relation" in prompts[0]
 
 
-def test_partial_write_failure_is_not_an_acknowledged_answer(context_pipeline, monkeypatch):
-    """Already written evidence may survive failure, but resolution must not."""
+def test_batch_write_failure_is_not_an_acknowledged_answer(context_pipeline, monkeypatch):
+    """Failed batch persistence must not acknowledge or retain partial evidence."""
     context_pipeline["flags"].append("kid1_with_user")
     monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: SimpleNamespace(
         text='{"relation":"related","flags":{"partner_with_user":true,"kid1_with_user":true}}'))
-    canonical_write = routine_db.set_context_state
+    def write(*args, **kwargs):
+        raise OSError("batch write failed")
 
-    def write(key, value, **kwargs):
-        if key == "kid1_with_user":
-            raise OSError("second write failed")
-        canonical_write(key, value, **kwargs)
-
-    monkeypatch.setattr(extractor, "set_context_state", write)
+    monkeypatch.setattr(extractor, "set_context_states_if_unchanged", write)
     result = extractor.extract_and_update_context_flags("Ναι μαζί μου", clarification_context=context_pipeline)
     assert result.relation == "uncertain"
     assert not result.applied_flags
-    assert routine_db.get_context_state("partner_with_user")["value"] == "true"
+    assert routine_db.get_context_state("partner_with_user") is None
     assert routine_db.get_context_state("kid1_with_user") is None
 
 
@@ -130,6 +126,18 @@ def test_invalid_question_contract_never_contacts_provider(context_pipeline, mon
 
     monkeypatch.setattr(extractor, "safe_gemini_call", forbidden)
     result = extractor.extract_and_update_context_flags("Ναι", clarification_context=context_pipeline)
+    assert not result.applied_flags
+
+
+def test_enum_question_is_not_a_supported_clarification(context_pipeline, monkeypatch):
+    """Only bounded volatile booleans can be requested by this question flow."""
+    context_pipeline["flags"] = ["current_shift"]
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("An enum question cannot contact the provider")
+
+    monkeypatch.setattr(extractor, "safe_gemini_call", forbidden)
+    result = extractor.extract_and_update_context_flags("Πρωί", clarification_context=context_pipeline)
     assert not result.applied_flags
 
 

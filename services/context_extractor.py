@@ -7,7 +7,7 @@ from services.gemini import safe_gemini_call
 from core.utils import clean_message, extract_json_from_text
 from core.untrusted_content import external_content_source_names, format_untrusted_tool_result
 from memory.conversation_history import load_recent_trusted_user_messages
-from memory.routine_db import set_context_state
+from memory.routine_db import get_context_state, set_context_states_if_unchanged
 from datetime import datetime
 from services.routine_reconciler import (
     infer_routine_reconciliation_directives,
@@ -173,7 +173,7 @@ def extract_and_update_context_flags(
     user_text: str, ai_text: str = "", channel: str = "telegram", *,
     clarification_context: dict | None = None,
     clarification_still_current: Callable[[], bool] | None = None,
-    clarification_commit: Callable[[Callable[[], frozenset[str]]], frozenset[str] | None] | None = None,
+    clarification_commit: Callable[[Callable[[], frozenset[str] | None]], frozenset[str] | None] | None = None,
 ) -> ContextExtractionResult | None:
     """
     Calls the LLM to extract context flags based on the user's message,
@@ -190,6 +190,8 @@ def extract_and_update_context_flags(
         return empty_result
 
     try:
+        expected = {key: get_context_state(key) for key in
+                    _CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES) | {"kid1_away_reason"}}
         prompt = _CONTEXT_EXTRACTION_PROMPT.format(
             bot_name=config.BOT_NAME,
             user_name=config.USER_NAME,
@@ -234,12 +236,14 @@ def extract_and_update_context_flags(
                     or type(payload.get("continue_conversation", False)) is not bool):
                 return empty_result
             relation = payload["relation"]
-            continue_conversation = payload.get("continue_conversation", False)
+            # Missing routing metadata is not evidence of a standalone answer.
+            continue_conversation = payload.get("continue_conversation", True)
             if relation != "related":
                 return ContextExtractionResult(relation, continue_conversation=continue_conversation)
+            explicit_mixed = payload.get("continue_conversation") is True
             payload = payload["flags"]
             allowed = set(context["flags"])
-            if continue_conversation:
+            if explicit_mixed:
                 # Additional explicit facts use the existing bounded schema,
                 # never arbitrary model-selected state keys.
                 allowed |= _CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES)
@@ -321,9 +325,9 @@ def extract_and_update_context_flags(
         elif payload.get("kid1_absence_scope") not in valid_absence_scopes:
             payload.pop("kid1_absence_scope", None)
 
-        def persist() -> frozenset[str]:
+        def persist() -> frozenset[str] | None:
             """Apply the already validated semantic state through canonical writers."""
-            return _persist_context_payload(payload, valid_keys, today_str)
+            return _persist_context_payload(payload, valid_keys, today_str, expected)
 
         applied_flags = (
             clarification_commit(persist)
@@ -339,64 +343,47 @@ def extract_and_update_context_flags(
             # consistency rules and the canonical writer above remain authoritative.
             return ContextExtractionResult("related", frozenset(applied_flags), continue_conversation)
 
-        reconciled_directives = infer_routine_reconciliation_directives(
-            user_text,
-            category="family",
-            reason="live_message_context",
-            now=datetime.now(),
-        )
-
-        # Live whereabouts and co-presence belong exclusively to the semantic
-        # extractor above.  The reconciler remains responsible for durable
-        # routine changes (for example a weekly shift), but must not overwrite
-        # a current-state decision through token matching.
-        llm_owned_live_state_keys = {
-            "user_out_of_home",
-            "family_at_home",
-            "partner_with_user",
-            "kid1_away_from_home",
-            "kid1_absence_scope",
-            "user_at_work",
-            "kid1_with_user",
-            "kid1_with_partner",
-            "partner_at_work",
-            "quiet_hours",
-        }
-        directives = []
-        for directive in reconciled_directives:
-            if not (
-                directive.get("kind") == "context_state_set"
-                and directive.get("key") in llm_owned_live_state_keys
-            ):
-                directives.append(directive)
-
-        if directives:
-            apply_routine_reconciliation_directives(directives)
-            print(
-                f"[ContextExtractor] Applied {len(directives)} reconciler directive(s) "
-                f"from live message"
-            )
+        reconcile_context_message(user_text)
 
     except Exception as exc:
         print(f"[ContextExtractor Error]: {exc!r}")
         return empty_result
 
 
-def _persist_context_payload(payload: dict, valid_keys: set[str], today: str) -> frozenset[str]:
+def reconcile_context_message(user_text: str) -> None:
+    """Apply durable routine updates without reinterpreting guarded live flags."""
+    try:
+        inferred = infer_routine_reconciliation_directives(
+            user_text, category="family", reason="live_message_context", now=datetime.now(),
+        )
+        live_keys = _CONTEXT_BOOLEAN_FLAGS | {"kid1_absence_scope"}
+        directives = [item for item in inferred if not (
+            item.get("kind") == "context_state_set" and item.get("key") in live_keys)]
+        if directives:
+            apply_routine_reconciliation_directives(directives)
+            print(f"[ContextExtractor] Applied {len(directives)} reconciler directive(s) from live message")
+    except Exception as exc:
+        print(f"[ContextReconciler Error]: {type(exc).__name__}")
+
+
+def _persist_context_payload(
+    payload: dict, valid_keys: set[str], today: str, expected: dict[str, dict | None],
+) -> frozenset[str] | None:
     """Preserve the shared flag-writing path for ordinary and clarification turns."""
-    applied = set()
+    updates = {}
     for key, value in payload.items():
         if key in valid_keys and isinstance(value, bool):
             str_val = "true" if value else "false"
-            set_context_state(key, str_val, expires_at=today)
-            applied.add(key)
-            print(f"[ContextExtractor] Updated {key} = {str_val}")
+            updates[key] = (str_val, today)
     if "kid1_absence_scope" in payload:
         expiry = None if payload["kid1_absence_scope"] == "extended" else today
-        set_context_state("kid1_absence_scope", payload["kid1_absence_scope"], expires_at=expiry)
-        set_context_state("kid1_away_reason", "", expires_at=today)
+        updates["kid1_absence_scope"] = (payload["kid1_absence_scope"], expiry)
+        updates["kid1_away_reason"] = ("", today)
     for key in ("current_shift", "partner_work_mode"):
         if key in payload:
-            set_context_state(key, payload[key], expires_at=today)
-            print(f"[ContextExtractor] Updated {key} = {payload[key]}")
-    return frozenset(applied)
+            updates[key] = (payload[key], today)
+    if not set_context_states_if_unchanged(updates, expected):
+        return None
+    for key, (value, _) in updates.items():
+        print(f"[ContextExtractor] Updated {key} = {value}")
+    return frozenset(set(updates) - {"kid1_away_reason"})

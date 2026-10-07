@@ -2140,6 +2140,9 @@ def handle_message(
         and str(chat_id) == str(config.TELEGRAM_CHAT_ID),
         **({"reply_to_id": reply_event_id} if reply_event_id is not None else {}),
     )
+    if context_answer.context_flags_processed and context_answer.continue_conversation:
+        from services.context_extractor import reconcile_context_message
+        enqueue_slow_task(reconcile_context_message, clean_user_text)
     if context_answer.consumed and not context_answer.continue_conversation:
         reply = context_answer.reply
         _append_to_analytics_log("user", clean_user_text,

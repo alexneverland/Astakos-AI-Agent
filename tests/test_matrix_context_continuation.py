@@ -123,6 +123,30 @@ def test_external_derived_text_cannot_consume_question_or_trigger_feedback(
 ) -> None:
     """Asset-derived text remains untrusted even if it resembles a mixed reply."""
     from services import routine_context_clarification as clarification
+    import config
+    from datetime import datetime, timedelta
+    from memory.routine_context_clarification import ATHENS, ClarificationStore, QuestionRequest
+
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    store = ClarificationStore(tmp_path / "astakos_routine_context_questions.json")
+    now = datetime.now(ATHENS)
+    request = QuestionRequest("external-test", "presence", ("1",), ("partner_with_user",),
+                              now + timedelta(minutes=10), "Είναι μαζί σου;", "matrix")
+    assert store.reserve(request, now=now)
+    assert store.begin_send(request.id, now=now)
+    assert store.mark_sent(request.id, external_id="$question", now=now)
+    assert store.mark_recorded(request.id)
+
+    interpretations: list[bool] = []
+
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        """Untrusted asset text must never reach answer interpretation."""
+        interpretations.append(True)
+        raise AssertionError("External-derived text reached context interpretation")
+
+    monkeypatch.setattr(clarification, "process_question_answer", forbidden)
+    monkeypatch.setattr(clarification, "_answer_version", lambda: "test-version")
+    monkeypatch.setattr(clarification, "context_confirmation_conflict", lambda: False)
 
     original = clarification.try_context_question_reply
     observations: list[bool] = []
@@ -149,6 +173,8 @@ def test_external_derived_text_cannot_consume_question_or_trigger_feedback(
 
     assert reply == graph.reply
     assert observations == [False]
+    assert interpretations == []
+    assert store.snapshot()["pending"]["id"] == request.id
     assert len(graph.states) == 1
     assert routine_inputs == []
     rows = load_messages(db_path=path)
