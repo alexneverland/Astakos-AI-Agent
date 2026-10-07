@@ -468,6 +468,7 @@ def append_to_chat_history(
     now = datetime.now()
     shared_message_id = None
     shared_message_rowid = None
+    saved = None
     try:
         from memory.conversation_history import append_message
         saved = append_message(
@@ -504,7 +505,9 @@ def append_to_chat_history(
     except Exception as e:
         print(f"[ConversationHistory/web]: Error shared write: {e}")
     if return_saved:
-        return {"id": shared_message_id, "rowid": shared_message_rowid}
+        # Return canonical persisted provenance, not an ID-only reconstruction.
+        # A later display/telemetry failure does not undo the committed row.
+        return saved if saved is not None else {"id": shared_message_id, "rowid": shared_message_rowid}
     return shared_message_id
 
 
@@ -843,11 +846,25 @@ def _enqueue_slow_memory_sifter(
 # FASTAPI LIFESPAN
 # ────────────────────────────────────────────────────────────────
 
+def prepare_web_routine_feedback(app: FastAPI) -> None:
+    """Wire the approved dated store before workers, without migration or reset."""
+    from config import CONVERSATION_DB_FILE
+    from services.routine_feedback_runtime import build_existing_routine_feedback_runtime
+    feedback_runtime = build_existing_routine_feedback_runtime()
+    if feedback_runtime is not None:
+        app.state.persisted_routine_feedback_handler = feedback_runtime.handler(
+            channel="web", conversation_db_path=CONVERSATION_DB_FILE)
+        # Draft consumption shares the same canonical transaction in this process.
+        from memory import routine_db
+        routine_db._dated_draft_feedback_recorder = feedback_runtime.store.record_draft_acknowledgement
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Starts workers, waits, terminates cleanly."""
     global server_loop
     server_loop = asyncio.get_running_loop()
+    prepare_web_routine_feedback(app)
     sys.stdout = WsLogger(sys.stdout)
     threads = [
         # reminder_worker and proactive_worker run ONLY in telegram_bot.py
@@ -1046,6 +1063,23 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             "user_rowid": user_saved["rowid"], "assistant_rowid": assistant_saved["rowid"],
         })
 
+    # Persist this authenticated turn before routine-completion inference/mutation.
+    # Reuse the identity on every subsequent path rather than inserting it again.
+    asset_history_kwargs = {}
+    if photo_path:
+        from core.untrusted_content import external_content_history_metadata, USER_PROVIDED_ASSET_SOURCE
+        asset_history_kwargs["metadata"] = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
+    current_history_saved = append_to_chat_history(
+        "user", user_input, return_saved=True, mirror_target=mirror_target,
+        **asset_history_kwargs,
+    )
+    current_history_rowid = current_history_saved.get("rowid")
+    current_history_id = current_history_saved.get("id")
+    if (type(current_history_rowid) is not int or current_history_rowid <= 0
+            or not current_history_id):
+        logging.error("Web turn stopped: user history identity was not persisted")
+        return JSONResponse({"error": t("api.server.internal_error")}, status_code=503)
+
     # 2. --- XML CONTEXT ISOLATION ---
     # Web/Telegram are trusted local user channels.
     # We do NOT wrap in isolated_data — otherwise the user's commands
@@ -1078,285 +1112,316 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         print(f"[RecentAssetFollowup]: {e}")
 
     # ── Routine Completion Decision from Web UI ─────────────────────
-    try:
-        from core.messenger_draft import active_draft_status
-        from memory.routine_db import (
-            acknowledge_pending_draft_offer,
-            load_pending_confirmations,
-        )
-        from services.routine_completion_helper import decide_completion
-        from services.routine_completion_selector import select_routine as _completion_selector
-        from services.routine_completion_context import accept_pending_messenger_draft_offer
-
-        # Web and Telegram run in separate processes. The database is the shared
-        # pending-confirmation source of truth; importing the bot's RAM mapping
-        # here would always miss offers created by the Telegram scheduler.
-        pending_routine_confirmations = load_pending_confirmations()
-        if pending_routine_confirmations:
-            pending_candidates = {
-                rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
-                for rid, pdata in pending_routine_confirmations.items()
-            }
-            active_draft, _, _ = active_draft_status()
-            draft_offer_ids = frozenset(
-                rid
-                for rid, pdata in pending_routine_confirmations.items()
-                if not active_draft and isinstance(pdata, dict) and pdata.get("draft_offer") is True
+    # Explicit injection only: activate after scheduler/schema verification.
+    feedback_handler = getattr(server.state, "persisted_routine_feedback_handler", None)
+    if photo_path:
+        # The attachment turn is analyzed as external content, not as a second
+        # interpretation of the caption against a pending routine.
+        pass
+    elif feedback_handler is not None:
+        try:
+            routine_result = await asyncio.to_thread(
+                feedback_handler, user_input, current_history_saved,
             )
-            selector_candidates = {
-                rid: (
-                    f"{event_name}\n[MESSENGER_DRAFT_OFFER]"
-                    if rid in draft_offer_ids else event_name
-                )
-                for rid, event_name in pending_candidates.items()
-            }
-            accepted_draft_offer = None
-            draft_offer_consumed = False
-            if not active_draft:
-                accepted_draft_offer = accept_pending_messenger_draft_offer(
-                    pending_routine_confirmations,
-                    user_input,
-                )
-                if accepted_draft_offer is not None:
-                    pending_data = pending_routine_confirmations.get(
-                        accepted_draft_offer.routine_id,
-                        {},
-                    )
-                    sent_at = pending_data.get("sent_at")
-                    if sent_at is None:
-                        accepted_draft_offer = None
-                    else:
-                        routine_draft_offer_to_consume = (
-                            accepted_draft_offer.routine_id,
-                            sent_at,
-                        )
-            if accepted_draft_offer is not None:
-                from services.routine_completion_helper import RoutineSelection
-
-                decision = RoutineSelection(
-                    action="acknowledge",
-                    routine_id=accepted_draft_offer.routine_id,
-                )
+            from services.matrix_routine_completion import MatrixRoutineDraftOffer
+            if isinstance(routine_result, MatrixRoutineDraftOffer):
+                routine_draft_offer_context = routine_result.context
+                routine_draft_offer_to_consume = (routine_result.routine_id, routine_result.sent_at)
+                pending_routine_confirmations = {routine_result.routine_id: {
+                    "event": routine_result.event_name, "sent_at": routine_result.sent_at,
+                    "draft_offer": True,
+                }}
+                routine_completion_context = routine_result.context
             else:
-                decision = decide_completion(
-                    user_text=user_input,
-                    candidates=selector_candidates,
-                    pool="pending",
-                    semantic_selector=_completion_selector,
-                    draft_offer_ids=draft_offer_ids,
-                )
+                routine_completion_context = routine_result
+            if routine_completion_context is not None and not isinstance(routine_completion_context, SystemMessage):
+                raise TypeError("Routine feedback callback must return trusted context or None")
+        except Exception as exc:
+            from services.routine_completion_context import build_dated_routine_feedback_context
+            from services.routine_feedback_turn import FeedbackTurnResult
+            print(f"[Web Routine Feedback]: {type(exc).__name__}")
+            routine_completion_context = build_dated_routine_feedback_context(FeedbackTurnResult("error"))
+        routine_action_consumed = routine_completion_context is not None
+    else:
+        try:
+            from core.messenger_draft import active_draft_status
+            from memory.routine_db import (
+                acknowledge_pending_draft_offer,
+                load_pending_confirmations,
+            )
+            from services.routine_completion_helper import decide_completion
+            from services.routine_completion_selector import select_routine as _completion_selector
+            from services.routine_completion_context import accept_pending_messenger_draft_offer
 
-            if decision.action == "draft" and decision.routine_id is not None:
-                from services.routine_completion_context import get_pending_messenger_draft_offer
-
-                accepted_draft_offer = get_pending_messenger_draft_offer(
-                    pending_routine_confirmations,
-                    decision.routine_id,
+            # Web and Telegram run in separate processes. The database is the shared
+            # pending-confirmation source of truth; importing the bot's RAM mapping
+            # here would always miss offers created by the Telegram scheduler.
+            pending_routine_confirmations = load_pending_confirmations()
+            if pending_routine_confirmations:
+                pending_candidates = {
+                    rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
+                    for rid, pdata in pending_routine_confirmations.items()
+                }
+                active_draft, _, _ = active_draft_status()
+                draft_offer_ids = frozenset(
+                    rid
+                    for rid, pdata in pending_routine_confirmations.items()
+                    if not active_draft and isinstance(pdata, dict) and pdata.get("draft_offer") is True
                 )
+                selector_candidates = {
+                    rid: (
+                        f"{event_name}\n[MESSENGER_DRAFT_OFFER]"
+                        if rid in draft_offer_ids else event_name
+                    )
+                    for rid, event_name in pending_candidates.items()
+                }
+                accepted_draft_offer = None
+                draft_offer_consumed = False
+                if not active_draft:
+                    accepted_draft_offer = accept_pending_messenger_draft_offer(
+                        pending_routine_confirmations,
+                        user_input,
+                    )
+                    if accepted_draft_offer is not None:
+                        pending_data = pending_routine_confirmations.get(
+                            accepted_draft_offer.routine_id,
+                            {},
+                        )
+                        sent_at = pending_data.get("sent_at")
+                        if sent_at is None:
+                            accepted_draft_offer = None
+                        else:
+                            routine_draft_offer_to_consume = (
+                                accepted_draft_offer.routine_id,
+                                sent_at,
+                            )
                 if accepted_draft_offer is not None:
-                    pending_data = pending_routine_confirmations.get(decision.routine_id, {})
-                    sent_at = pending_data.get("sent_at")
-                    if sent_at is not None:
-                        routine_draft_offer_to_consume = (decision.routine_id, sent_at)
-                if accepted_draft_offer is None or routine_draft_offer_to_consume is None:
-                    accepted_draft_offer = None
-                    from services.routine_completion_helper import RoutineSelection
-
-                    decision = RoutineSelection(action="none", routine_id=None)
-                else:
                     from services.routine_completion_helper import RoutineSelection
 
                     decision = RoutineSelection(
                         action="acknowledge",
-                        routine_id=decision.routine_id,
+                        routine_id=accepted_draft_offer.routine_id,
+                    )
+                else:
+                    decision = decide_completion(
+                        user_text=user_input,
+                        candidates=selector_candidates,
+                        pool="pending",
+                        semantic_selector=_completion_selector,
+                        draft_offer_ids=draft_offer_ids,
                     )
 
-            if decision.action == "complete" and decision.routine_id is not None:
-                from memory.routine_db import (
-                    confirm_routine,
-                    mark_routine_responded,
-                    mark_routine_triggered_today,
-                    remove_pending_confirmation,
-                )
-                from memory.event_log import log_event
+                if decision.action == "draft" and decision.routine_id is not None:
+                    from services.routine_completion_context import get_pending_messenger_draft_offer
 
-                rid = decision.routine_id
-                pdata = pending_routine_confirmations.get(rid, {})
-                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+                    accepted_draft_offer = get_pending_messenger_draft_offer(
+                        pending_routine_confirmations,
+                        decision.routine_id,
+                    )
+                    if accepted_draft_offer is not None:
+                        pending_data = pending_routine_confirmations.get(decision.routine_id, {})
+                        sent_at = pending_data.get("sent_at")
+                        if sent_at is not None:
+                            routine_draft_offer_to_consume = (decision.routine_id, sent_at)
+                    if accepted_draft_offer is None or routine_draft_offer_to_consume is None:
+                        accepted_draft_offer = None
+                        from services.routine_completion_helper import RoutineSelection
 
-                confirm_routine(rid)
-                mark_routine_responded(rid)
-                mark_routine_triggered_today(rid)
-                remove_pending_confirmation(rid)
-                log_event(
-                    "routines", "confirmed",
-                    routine_id=rid, event=ev,
-                )
-                print(f"✅ [Web Routine Confirmed]: {pdata}")
-                pending_routine_confirmations.pop(rid, None)
+                        decision = RoutineSelection(action="none", routine_id=None)
+                    else:
+                        from services.routine_completion_helper import RoutineSelection
 
-                from services.routine_completion_context import build_routine_completion_context
-                routine_completion_context = build_routine_completion_context()
-                routine_action_consumed = True
-
-            elif decision.action == "acknowledge" and decision.routine_id is not None:
-                from memory.routine_db import mark_routine_acknowledged, remove_pending_confirmation
-                from memory.event_log import log_event
-
-                rid = decision.routine_id
-                pdata = pending_routine_confirmations.get(rid, {})
-                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
-
-                if not draft_offer_consumed and routine_draft_offer_to_consume is None:
-                    mark_routine_acknowledged(rid)
-                    remove_pending_confirmation(rid)
-                if routine_draft_offer_to_consume is None:
-                    log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
-                    print(f"[Web Routine Acknowledged]: {pdata}")
-                    pending_routine_confirmations.pop(rid, None)
-                    from services.routine_completion_context import build_routine_completion_context
-
-                    routine_completion_context = build_routine_completion_context()
-                if accepted_draft_offer is not None and accepted_draft_offer.routine_id == rid:
-                    routine_draft_offer_context = accepted_draft_offer.context
-                routine_action_consumed = True
-
-            elif decision.action == "skip_today" and decision.routine_id is not None:
-                from memory.routine_db import record_routine_skip_today, remove_pending_confirmation
-                from memory.event_log import log_event
-
-                rid = decision.routine_id
-                pdata = pending_routine_confirmations.get(rid, {})
-                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
-                skip_result = record_routine_skip_today(rid)
-                remove_pending_confirmation(rid)
-                log_event(
-                    "routines", "routine_skipped_today", routine_id=rid, event=ev,
-                    skip_streak=skip_result["skip_streak"],
-                    cooldown_applied=skip_result["cooldown_applied"],
-                )
-                print(f"[Web Routine Skipped Today]: {pdata}")
-                pending_routine_confirmations.pop(rid, None)
-                from services.routine_completion_context import build_routine_completion_context
-                routine_completion_context = build_routine_completion_context()
-                routine_action_consumed = True
-
-            elif decision.action == "pause" and decision.routine_id is not None:
-                from memory.routine_db import pause_routine_indefinitely, remove_pending_confirmation
-                from memory.event_log import log_event
-
-                rid = decision.routine_id
-                pdata = pending_routine_confirmations.get(rid, {})
-                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
-                pause_routine_indefinitely(rid)
-                remove_pending_confirmation(rid)
-                log_event("routines", "routine_paused", routine_id=rid, event=ev)
-                print(f"[Web Routine Paused]: {pdata}")
-                pending_routine_confirmations.pop(rid, None)
-                from services.routine_completion_context import build_routine_completion_context
-                routine_completion_context = build_routine_completion_context()
-                routine_action_consumed = True
-
-            # pass_through → continue to normal processing.
-        if not routine_action_consumed:
-            # ── Pre-emptive today-pool completion (no consumed pending action) ──
-            from datetime import datetime as _dt_now
-            from memory.routine_db import get_eligible_preemptive_routines_for_day, mark_routine_triggered_today
-
-            day_name = _dt_now.now().strftime("%A")
-            today_routines = get_eligible_preemptive_routines_for_day(day_name)
-            if today_routines:
-                today_candidates = {r["id"]: r["event"] for r in today_routines}
-                decision = decide_completion(
-                    user_text=user_input,
-                    candidates=today_candidates,
-                    pool="today",
-                    semantic_selector=_completion_selector,
-                )
+                        decision = RoutineSelection(
+                            action="acknowledge",
+                            routine_id=decision.routine_id,
+                        )
 
                 if decision.action == "complete" and decision.routine_id is not None:
+                    from memory.routine_db import (
+                        confirm_routine,
+                        mark_routine_responded,
+                        mark_routine_triggered_today,
+                        remove_pending_confirmation,
+                    )
                     from memory.event_log import log_event
 
                     rid = decision.routine_id
-                    ev = today_candidates.get(rid, "?")
+                    pdata = pending_routine_confirmations.get(rid, {})
+                    ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+
+                    confirm_routine(rid)
+                    mark_routine_responded(rid)
                     mark_routine_triggered_today(rid)
+                    remove_pending_confirmation(rid)
                     log_event(
-                        "routines", "preemptive_completed",
+                        "routines", "confirmed",
                         routine_id=rid, event=ev,
                     )
-                    print(f"✅ [Web Routine Pre-emptive Completed]: #{rid} {ev}")
+                    print(f"✅ [Web Routine Confirmed]: {pdata}")
+                    pending_routine_confirmations.pop(rid, None)
+
                     from services.routine_completion_context import build_routine_completion_context
                     routine_completion_context = build_routine_completion_context()
                     routine_action_consumed = True
+
                 elif decision.action == "acknowledge" and decision.routine_id is not None:
+                    from memory.routine_db import mark_routine_acknowledged, remove_pending_confirmation
                     from memory.event_log import log_event
-                    from memory.routine_db import mark_routine_acknowledged
 
                     rid = decision.routine_id
-                    ev = today_candidates.get(rid, "?")
-                    mark_routine_acknowledged(rid)
-                    log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
-                    print(f"[Web Routine Acknowledged]: #{rid} {ev}")
-                    from services.routine_completion_context import build_routine_completion_context
-                    routine_completion_context = build_routine_completion_context()
+                    pdata = pending_routine_confirmations.get(rid, {})
+                    ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+
+                    if not draft_offer_consumed and routine_draft_offer_to_consume is None:
+                        mark_routine_acknowledged(rid)
+                        remove_pending_confirmation(rid)
+                    if routine_draft_offer_to_consume is None:
+                        log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
+                        print(f"[Web Routine Acknowledged]: {pdata}")
+                        pending_routine_confirmations.pop(rid, None)
+                        from services.routine_completion_context import build_routine_completion_context
+
+                        routine_completion_context = build_routine_completion_context()
+                    if accepted_draft_offer is not None and accepted_draft_offer.routine_id == rid:
+                        routine_draft_offer_context = accepted_draft_offer.context
                     routine_action_consumed = True
+
                 elif decision.action == "skip_today" and decision.routine_id is not None:
+                    from memory.routine_db import record_routine_skip_today, remove_pending_confirmation
                     from memory.event_log import log_event
-                    from memory.routine_db import record_routine_skip_today
 
                     rid = decision.routine_id
-                    ev = today_candidates.get(rid, "?")
+                    pdata = pending_routine_confirmations.get(rid, {})
+                    ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
                     skip_result = record_routine_skip_today(rid)
+                    remove_pending_confirmation(rid)
                     log_event(
                         "routines", "routine_skipped_today", routine_id=rid, event=ev,
                         skip_streak=skip_result["skip_streak"],
                         cooldown_applied=skip_result["cooldown_applied"],
                     )
-                    print(f"[Web Routine Skipped Today]: #{rid} {ev}")
+                    print(f"[Web Routine Skipped Today]: {pdata}")
+                    pending_routine_confirmations.pop(rid, None)
                     from services.routine_completion_context import build_routine_completion_context
                     routine_completion_context = build_routine_completion_context()
                     routine_action_consumed = True
+
                 elif decision.action == "pause" and decision.routine_id is not None:
+                    from memory.routine_db import pause_routine_indefinitely, remove_pending_confirmation
                     from memory.event_log import log_event
-                    from memory.routine_db import pause_routine_indefinitely
 
                     rid = decision.routine_id
-                    ev = today_candidates.get(rid, "?")
+                    pdata = pending_routine_confirmations.get(rid, {})
+                    ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
                     pause_routine_indefinitely(rid)
+                    remove_pending_confirmation(rid)
                     log_event("routines", "routine_paused", routine_id=rid, event=ev)
-                    print(f"[Web Routine Paused]: #{rid} {ev}")
+                    print(f"[Web Routine Paused]: {pdata}")
+                    pending_routine_confirmations.pop(rid, None)
                     from services.routine_completion_context import build_routine_completion_context
                     routine_completion_context = build_routine_completion_context()
                     routine_action_consumed = True
+
                 # pass_through → continue to normal processing.
             if not routine_action_consumed:
-                from memory.routine_db import get_active_routine_catalog, pause_routine_indefinitely
-                from services.routine_completion_helper import relevant_catalog_candidates
+                # ── Pre-emptive today-pool completion (no consumed pending action) ──
+                from datetime import datetime as _dt_now
+                from memory.routine_db import get_eligible_preemptive_routines_for_day, mark_routine_triggered_today
 
-                catalog = {
-                    routine["id"]: routine["event"]
-                    for routine in get_active_routine_catalog()
-                }
-                pause_candidates = relevant_catalog_candidates(user_input, catalog)
-                decision = decide_completion(
-                    user_text=user_input,
-                    candidates=pause_candidates,
-                    pool="catalog",
-                    semantic_selector=_completion_selector,
-                )
-                if decision.action == "pause" and decision.routine_id is not None:
-                    from memory.event_log import log_event
+                day_name = _dt_now.now().strftime("%A")
+                today_routines = get_eligible_preemptive_routines_for_day(day_name)
+                if today_routines:
+                    today_candidates = {r["id"]: r["event"] for r in today_routines}
+                    decision = decide_completion(
+                        user_text=user_input,
+                        candidates=today_candidates,
+                        pool="today",
+                        semantic_selector=_completion_selector,
+                    )
 
-                    rid = decision.routine_id
-                    ev = pause_candidates[rid]
-                    pause_routine_indefinitely(rid)
-                    log_event("routines", "routine_paused", routine_id=rid, event=ev)
-                    print(f"[Web Routine Paused]: #{rid} {ev}")
-                    from services.routine_completion_context import build_routine_completion_context
-                    routine_completion_context = build_routine_completion_context()
-                    routine_action_consumed = True
-    except Exception as _rce:
-        print(f"[Web Routine Completion]: {_rce}")
+                    if decision.action == "complete" and decision.routine_id is not None:
+                        from memory.event_log import log_event
+
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+                        mark_routine_triggered_today(rid)
+                        log_event(
+                            "routines", "preemptive_completed",
+                            routine_id=rid, event=ev,
+                        )
+                        print(f"✅ [Web Routine Pre-emptive Completed]: #{rid} {ev}")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                    elif decision.action == "acknowledge" and decision.routine_id is not None:
+                        from memory.event_log import log_event
+                        from memory.routine_db import mark_routine_acknowledged
+
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+                        mark_routine_acknowledged(rid)
+                        log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
+                        print(f"[Web Routine Acknowledged]: #{rid} {ev}")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                    elif decision.action == "skip_today" and decision.routine_id is not None:
+                        from memory.event_log import log_event
+                        from memory.routine_db import record_routine_skip_today
+
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+                        skip_result = record_routine_skip_today(rid)
+                        log_event(
+                            "routines", "routine_skipped_today", routine_id=rid, event=ev,
+                            skip_streak=skip_result["skip_streak"],
+                            cooldown_applied=skip_result["cooldown_applied"],
+                        )
+                        print(f"[Web Routine Skipped Today]: #{rid} {ev}")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                    elif decision.action == "pause" and decision.routine_id is not None:
+                        from memory.event_log import log_event
+                        from memory.routine_db import pause_routine_indefinitely
+
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+                        pause_routine_indefinitely(rid)
+                        log_event("routines", "routine_paused", routine_id=rid, event=ev)
+                        print(f"[Web Routine Paused]: #{rid} {ev}")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                    # pass_through → continue to normal processing.
+                if not routine_action_consumed:
+                    from memory.routine_db import get_active_routine_catalog, pause_routine_indefinitely
+                    from services.routine_completion_helper import relevant_catalog_candidates
+
+                    catalog = {
+                        routine["id"]: routine["event"]
+                        for routine in get_active_routine_catalog()
+                    }
+                    pause_candidates = relevant_catalog_candidates(user_input, catalog)
+                    decision = decide_completion(
+                        user_text=user_input,
+                        candidates=pause_candidates,
+                        pool="catalog",
+                        semantic_selector=_completion_selector,
+                    )
+                    if decision.action == "pause" and decision.routine_id is not None:
+                        from memory.event_log import log_event
+
+                        rid = decision.routine_id
+                        ev = pause_candidates[rid]
+                        pause_routine_indefinitely(rid)
+                        log_event("routines", "routine_paused", routine_id=rid, event=ev)
+                        print(f"[Web Routine Paused]: #{rid} {ev}")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+        except Exception as _rce:
+            print(f"[Web Routine Completion]: {_rce}")
 
 
     # ── Pending Asset Confirmation from Web UI ───────────────────
@@ -1399,9 +1464,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
-            user_saved = append_to_chat_history(
-                "user", user_input, return_saved=True, mirror_target=mirror_target,
-            )
+            user_saved = current_history_saved
             assistant_saved = append_to_chat_history(
                 "assistant", reply, agent="Chat_Agent", return_saved=True,
                 mirror_target=mirror_target,
@@ -1425,9 +1488,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
-            user_saved = append_to_chat_history(
-                "user", user_input, return_saved=True, mirror_target=mirror_target,
-            )
+            user_saved = current_history_saved
             assistant_saved = append_to_chat_history(
                 "assistant", reply, agent="Chat_Agent", return_saved=True,
                 mirror_target=mirror_target,
@@ -1470,9 +1531,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
 
-            user_saved = append_to_chat_history(
-                "user", user_input, return_saved=True, mirror_target=mirror_target,
-            )
+            user_saved = current_history_saved
             assistant_saved = append_to_chat_history(
                 "assistant", reply, agent="Chat_Agent", return_saved=True,
                 mirror_target=mirror_target,
@@ -1512,9 +1571,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
 
-            user_saved = append_to_chat_history(
-                "user", user_input, return_saved=True, mirror_target=mirror_target,
-            )
+            user_saved = current_history_saved
             assistant_saved = append_to_chat_history(
                 "assistant", reply, agent="Chat_Agent", return_saved=True,
                 mirror_target=mirror_target,
@@ -1540,15 +1597,6 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
     with memory_lock:
         last_interaction_time = time.time()
-
-    # ── Save user message to history ────────────────────
-    # Note: We save the original `user_input` to the UI chat history, 
-    # not the XML-wrapped version, to keep the frontend looking clean.
-    current_history_saved = append_to_chat_history(
-        "user", user_input, return_saved=True, mirror_target=mirror_target
-    )
-    current_history_id = current_history_saved.get("id")
-    current_history_rowid = current_history_saved.get("rowid")
 
     final_ai_response = ""
     handling_agent    = "Chat_Agent"
@@ -1768,6 +1816,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 _trace,
             )
             if routine_draft_offer_to_consume and graph_result.get("saved_local_draft"):
+                from memory.routine_db import acknowledge_pending_draft_offer
                 draft_routine_id, draft_sent_at = routine_draft_offer_to_consume
                 if acknowledge_pending_draft_offer(draft_routine_id, draft_sent_at):
                     from memory.event_log import log_event
@@ -2598,12 +2647,13 @@ def _routine_outcome_label(action: str) -> str:
 
 
 def _latest_routine_outcome(events: list[dict], routine_id: int) -> dict | None:
-    """Return the latest valid routine event for one routine from today's event log."""
+    """Return the last decision; a condition pass alone is not a dispatch outcome."""
     outcomes = [
         event for event in events
         if event.get("routine_id") == routine_id
         and isinstance(event.get("action"), str)
         and event["action"]
+        and event["action"] != "routine_condition_allowed"
     ]
     return outcomes[-1] if outcomes else None
 
@@ -2611,12 +2661,19 @@ def _latest_routine_outcome(events: list[dict], routine_id: int) -> dict | None:
 def _routine_outcome_fields(events: list[dict], routine_id: int) -> dict[str, str | None]:
     """Build the Dashboard outcome fields shared by active and non-active routines."""
     latest = _latest_routine_outcome(events, routine_id)
+    checks = [event for event in events if event.get("routine_id") == routine_id
+              and event.get("action") in ("routine_condition_allowed", "routine_condition_blocked")]
+    check_fields = {}
+    if checks:
+        check_fields = {"last_condition_check_action": checks[-1]["action"],
+                        "last_condition_check_ts": checks[-1].get("timestamp")}
     if not latest:
         return {
             "last_outcome_action": None,
             "last_outcome_label": "Not evaluated",
             "last_outcome_ts": None,
             "last_outcome_reason": None,
+            **check_fields,
         }
 
     action = latest["action"]
@@ -2625,6 +2682,7 @@ def _routine_outcome_fields(events: list[dict], routine_id: int) -> dict[str, st
         "last_outcome_label": _routine_outcome_label(action),
         "last_outcome_ts": latest.get("timestamp"),
         "last_outcome_reason": latest.get("reason") or latest.get("debug_effect"),
+        **check_fields,
     }
 
 
@@ -2651,6 +2709,8 @@ async def debug_runtime(_=Depends(require_token)):
     active_routines   = []
     pending_from_db   = []
     cooldown_info     = []
+    from services.routine_feedback import ATHENS as feedback_timezone
+    evidence_now = datetime.now(feedback_timezone)
 
     try:
         from services.routine_context import build_runtime_routine_context, build_routine_context_evidence, project_routine_context
@@ -2711,16 +2771,11 @@ async def debug_runtime(_=Depends(require_token)):
         for row in cursor.fetchall():
             r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state, c_type, c_payload, c_mode, priority, memory_ref, conflict_group, paused_until, pause_reason, muted_until, paused_indefinitely = row
             now_dt = datetime.now()
-            cooldown_remaining = None
-            if last_ts:
-                try:
-                    last_dt = datetime.fromisoformat(last_ts)
-                    elapsed = (now_dt - last_dt).total_seconds()
-                    cd_secs = (cd_h or 20.0) * 3600
-                    remaining_secs = cd_secs - elapsed
-                    cooldown_remaining = max(0, round(remaining_secs / 3600, 1))
-                except Exception:
-                    pass
+            from services.routine_feedback_debug import cooldown_diagnostics
+            from memory.routine_db import clamp_cooldown_hours, COOLDOWN_DEFAULT_HOURS
+            cooldown_fields = cooldown_diagnostics(cd_h, last_ts,
+                effective_hours=clamp_cooldown_hours(cd_h if cd_h is not None else COOLDOWN_DEFAULT_HOURS),
+                now=evidence_now)
             
             cond_res = None
             cond_matched = None
@@ -2782,9 +2837,8 @@ async def debug_runtime(_=Depends(require_token)):
                 "event":             ev,
                 "confidence":        round(conf or 0, 2),
                 "mentions":          mentions or 1,
-                "cooldown_hours":    cd_h or 20.0,
                 "last_notified":     last_ts,
-                "cooldown_remaining_h": cooldown_remaining,
+                **cooldown_fields,
                 "state":             state,
                 "conditions":        conditions_list,
                 "condition_type":    c_type,
@@ -2912,6 +2966,18 @@ async def debug_runtime(_=Depends(require_token)):
         state_counts = dict(cursor.fetchall())
 
         conn.close()
+        from memory.routine_feedback import read_feedback_debug_snapshot
+        routine_rows = active_routines + cooldown_info
+        try:
+            feedback_debug = read_feedback_debug_snapshot(db_path,
+                [item["id"] for item in routine_rows], now=evidence_now)
+            for item in routine_rows:
+                item["feedback_diagnostics"] = feedback_debug[item["id"]]
+                item["feedback_diagnostics"]["active"] = (
+                    getattr(server.state, "persisted_routine_feedback_handler", None) is not None)
+        except Exception:
+            for item in routine_rows:
+                item["feedback_diagnostics"] = {"status": "read_error"}
     except Exception as e:
         state_counts = {}
         active_routines.append({"error": _api_internal_error("debug_runtime")})

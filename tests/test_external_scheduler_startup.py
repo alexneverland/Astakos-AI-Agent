@@ -23,6 +23,76 @@ class FakeScheduler:
         return None
 
 
+def test_routine_tick_serializes_the_entire_dispatch_not_only_elapsed_calculation(monkeypatch):
+    """Answer wakeups cannot enter dispatch while the periodic tick is in inference."""
+    import threading
+    from clients import telegram_bot as bot
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    def maintenance(now):
+        calls.append(now)
+        if len(calls) == 1:
+            entered.set()
+            assert release.wait(5)
+        return True
+    monkeypatch.setattr(bot, "_dated_routine_feedback_tick", maintenance)
+    monkeypatch.setattr(bot, "is_proactive_muted", lambda: True)
+    thread = threading.Thread(target=bot.job_check_routines)
+    thread.start()
+    try:
+        assert entered.wait(5)
+        bot.job_check_routines()
+        assert len(calls) == 1
+    finally:
+        release.set()
+        thread.join(5)
+    assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("channel", ["matrix", "telegram"])
+def test_existing_routine_tick_runs_injected_maintenance_before_quiet_gate(monkeypatch, channel):
+    """Quiet/muted hours stop sends, not confirmed recording or day-close work."""
+    import clients.telegram_bot as bot
+    events = []
+    monkeypatch.setattr(bot, "_external_background_runtime_channel", channel)
+    monkeypatch.setattr(bot, "pending_routine_confirmations", {})
+    def maintenance(at):
+        assert at.tzinfo is not None
+        events.append("maintenance")
+        return True
+    monkeypatch.setattr(bot, "_dated_routine_feedback_tick", maintenance)
+    monkeypatch.setattr(bot, "is_proactive_muted", lambda: events.append("muted") or False)
+    monkeypatch.setattr(bot, "is_quiet_hours", lambda: events.append("quiet") or True)
+    monkeypatch.setattr(bot, "_active_routine_pause_until", lambda: "paused")
+    monkeypatch.setattr(bot, "_log_vacation_routine_skip", lambda at: None)
+    bot.job_check_routines()
+    assert events == ["maintenance", "muted", "quiet"]
+
+
+@pytest.mark.parametrize("outcome", [False, None, "raises"])
+def test_failed_tick_maintenance_never_falls_through_to_dispatch(monkeypatch, outcome):
+    """Uncertain ledger readiness cannot authorize normal reminders."""
+    import clients.telegram_bot as bot
+    def maintenance(at):
+        if outcome == "raises":
+            raise OSError("unavailable")
+        return outcome
+    monkeypatch.setattr(bot, "_dated_routine_feedback_tick", maintenance)
+    monkeypatch.setattr(bot, "is_proactive_muted", lambda: pytest.fail("dispatch after failed maintenance"))
+    bot.job_check_routines()
+
+
+def test_default_tick_does_not_open_dated_storage(monkeypatch):
+    """An unconfigured callback is completely inactive, preserving legacy behavior."""
+    import clients.telegram_bot as bot
+    from memory.routine_feedback import RoutineFeedbackStore
+    monkeypatch.setattr(bot, "_dated_routine_feedback_tick", None)
+    monkeypatch.setattr(RoutineFeedbackStore, "initialize", lambda self: pytest.fail("implicit migration"))
+    monkeypatch.setattr(bot, "pending_routine_confirmations", {})
+    monkeypatch.setattr(bot, "is_proactive_muted", lambda: True)
+    bot.job_check_routines()
+
+
 def test_external_scheduler_registers_queued_matrix_approval_delivery(monkeypatch) -> None:
     """The active external runtime regularly drains Web-origin approvals."""
     import clients.telegram_bot as bot

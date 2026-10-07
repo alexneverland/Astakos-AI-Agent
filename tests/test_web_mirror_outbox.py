@@ -229,13 +229,14 @@ def test_web_chat_early_saved_replies_return_both_history_row_ids(mode: str) -> 
 
     saved_roles: list[str] = []
 
-    def save_history(role: str, _content: str, **kwargs: object) -> dict[str, int]:
+    def save_history(role: str, _content: str, **kwargs: object) -> dict[str, object]:
         assert kwargs["return_saved"] is True
         saved_roles.append(role)
-        return {"rowid": 700 + len(saved_roles)}
+        return {"id": f"test-message-{len(saved_roles)}", "rowid": 700 + len(saved_roles)}
 
     is_asset = mode in {"yes", "no"}
     with (
+        patch("services.routine_context_clarification.try_context_question_reply", return_value=SimpleNamespace(consumed=False)),
         patch("core.messaging_channel.resolve_external_channel", return_value="matrix"),
         patch("memory.pending_assets.get_latest_recent_asset", return_value=None),
         patch("memory.routine_db.load_pending_confirmations", return_value={}),

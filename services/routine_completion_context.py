@@ -1,14 +1,41 @@
 """Trusted graph context for already-recorded routine decisions."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from html import escape
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 from langchain_core.messages import BaseMessage, SystemMessage
 
 from core.i18n import load_prompt
 from services.messenger_intent import MESSENGER_ROUTINE_DRAFT_OFFER_MARKER
+
+if TYPE_CHECKING:
+    from services.routine_feedback_turn import FeedbackTurnResult
+
+
+def build_dated_routine_feedback_context(result: FeedbackTurnResult) -> SystemMessage | None:
+    """Expose only verified structured outcomes, never routine names or user prose.
+
+    Failed/stale inference conveys no claimed action. Deferral requests a
+    clarification, not a fabricated new time. External authorization stays in
+    the existing draft/critical-tool paths.
+    """
+    if result.status == "none":
+        return None
+    selection = result.selection
+    successful = result.status in {"applied", "clarify"}
+    payload = {
+        "status": result.status,
+        "action": selection.action if successful else "none",
+        "routine_id": selection.routine_id if successful else None,
+        "occurrence_date": (
+            selection.occurrence_date.isoformat()
+            if successful and selection.occurrence_date is not None else None
+        ),
+    }
+    return SystemMessage(content=json.dumps(payload) + "\n" + load_prompt("routine_feedback_context.md"))
 
 
 @dataclass(frozen=True)

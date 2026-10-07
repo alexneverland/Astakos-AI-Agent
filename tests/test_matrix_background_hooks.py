@@ -33,6 +33,18 @@ class CapturingQueue:
         self.tasks.append((function, args))
 
 
+def test_matrix_factory_selects_only_persisted_feedback_when_supplied(tmp_path):
+    """Composition cannot leave the legacy mutation path beside the new bridge."""
+    from services.matrix_background import build_matrix_turn_service
+    handler = lambda text, saved: None
+    service = build_matrix_turn_service(graph=object(),
+        conversation_db_path=str(tmp_path / "history.db"),
+        enqueue_fast_task=CapturingQueue(), enqueue_slow_task=CapturingQueue(),
+        routine_feedback_handler=handler)
+    assert service._persisted_routine_confirmation_handler is handler
+    assert service._routine_confirmation_handler is None
+
+
 def test_persisted_matrix_user_schedules_behavioral_intake(monkeypatch) -> None:
     import services.matrix_background as background
 

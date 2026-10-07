@@ -41,6 +41,7 @@ class MatrixChannelServices:
     text_handler: Any
     media_handler: Any
     location_handler: Any | None = None
+    routine_reply_target: Callable[[str], bool] | None = None
 
 
 def run_slow_memory_pipeline(
@@ -249,6 +250,7 @@ def build_matrix_turn_service(
     graph: Any | None = None,
     conversation_db_path: str = CONVERSATION_DB_FILE,
     command_handler: Callable[[str], str | None] | None = None,
+    routine_feedback_handler: Any | None = None,
 ):
     """Build a Matrix turn service with all required background hooks attached."""
     from services.matrix_turn import MatrixTurnService
@@ -265,7 +267,9 @@ def build_matrix_turn_service(
         on_user_persisted=hooks.on_user_persisted,
         on_exchange_completed=hooks.on_exchange_completed,
         command_handler=command_handler,
-        routine_confirmation_handler=process_pending_routine_confirmation,
+        routine_confirmation_handler=(process_pending_routine_confirmation
+                                      if routine_feedback_handler is None else None),
+        persisted_routine_confirmation_handler=routine_feedback_handler,
     )
 
 
@@ -283,6 +287,7 @@ def build_matrix_channel_services(
     transcribe_audio: Callable[..., str] | None = None,
     analyze_document: Callable[..., str] | None = None,
     memory_store: Any | None = None,
+    routine_feedback_handler: Any | None = None,
 ) -> MatrixChannelServices:
     """Compose Matrix text, media, pending-photo, and archive-confirmation flows."""
     from core.i18n import t
@@ -400,7 +405,9 @@ def build_matrix_channel_services(
         on_user_persisted=hooks.on_user_persisted,
         on_exchange_completed=hooks.on_exchange_completed,
         command_handler=matrix_command_handler,
-        routine_confirmation_handler=process_pending_routine_confirmation,
+        routine_confirmation_handler=(process_pending_routine_confirmation
+                                      if routine_feedback_handler is None else None),
+        persisted_routine_confirmation_handler=routine_feedback_handler,
     )
     georgian_turn = MatrixGeorgianTurnRouter(
         text_turn=text_turn,
@@ -451,4 +458,6 @@ def build_matrix_channel_services(
         ),
         media_handler=media_turn,
         location_handler=matrix_location_handler,
+        routine_reply_target=(routine_feedback_handler.owns_reply_target
+                              if routine_feedback_handler is not None else None),
     )

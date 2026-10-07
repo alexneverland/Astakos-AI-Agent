@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from hashlib import sha256
 
 from core.messaging_channel import ExternalChannel
 from services.external_delivery import (
@@ -12,6 +13,12 @@ from services.external_delivery import (
 )
 
 MessageRecorder = Callable[[ExternalChannel, str, str | None, str], None]
+
+
+def assistant_delivery_message_id(channel: str, external_id: str) -> str:
+    """Stable bounded history identity shared by confirmed delivery and recovery."""
+    identity = f"assistant-delivery-{channel}-{external_id}"
+    return identity if len(identity) <= 100 else "assistant-delivery-" + sha256(identity.encode()).hexdigest()
 
 
 class AssistantHistoryError(RuntimeError):
@@ -37,6 +44,7 @@ def _record_confirmed_assistant_message(
         content=text,
         channel=channel,
         agent=agent,
+        message_id=assistant_delivery_message_id(channel, external_id),
         metadata={
             "transport": channel,
             "external_message_id": external_id,

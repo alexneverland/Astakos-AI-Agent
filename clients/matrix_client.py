@@ -78,6 +78,7 @@ class MatrixTextTransport:
         text_event_type: type = RoomMessageText,
         reaction_event_type: type = ReactionEvent,
         approval_reaction_handler: MatrixApprovalReactionHandler | None = None,
+        routine_reply_target: Callable[[str], bool] | None = None,
         media_downloader: Any | None = None,
         media_handler: MatrixMediaHandler | None = None,
         media_event_types: tuple[type, ...] = (
@@ -103,6 +104,7 @@ class MatrixTextTransport:
         self._text_event_type = text_event_type
         self._reaction_event_type = reaction_event_type
         self._approval_reaction_handler = approval_reaction_handler
+        self._routine_reply_target = routine_reply_target
         if (media_downloader is None) != (media_handler is None):
             raise ValueError(
                 "Matrix media_downloader and media_handler must be configured together"
@@ -315,6 +317,16 @@ class MatrixTextTransport:
         mark_matrix_event_replied(event_id, db_path=self._state_db_path)
         return True
 
+    @staticmethod
+    def _reply_target(event: Any) -> str | None:
+        """Read exact Reply correlation after the channel's trust validation."""
+        source = getattr(event, "source", None)
+        content = source.get("content") if isinstance(source, dict) else None
+        relation = content.get("m.relates_to") if isinstance(content, dict) else None
+        reply = relation.get("m.in_reply_to") if isinstance(relation, dict) else None
+        reply_id = reply.get("event_id") if isinstance(reply, dict) else None
+        return reply_id if isinstance(reply_id, str) and reply_id else None
+
     async def handle_event(self, room: Any, event: Any) -> None:
         """Validate and process one live Matrix event at most once."""
         text = self._trusted_text(room, event)
@@ -325,14 +337,18 @@ class MatrixTextTransport:
             is_current_context_question_target, matrix_reply_scope,
         )
 
-        content = event.source["content"]
-        relation = content.get("m.relates_to")
-        reply = relation.get("m.in_reply_to") if isinstance(relation, dict) else None
-        reply_id = reply.get("event_id") if isinstance(reply, dict) else None
-        reply_id = reply_id if isinstance(reply_id, str) and reply_id else None
+        reply_id = self._reply_target(event)
         context_reply = bool(reply_id and is_current_context_question_target(reply_id))
+        routine_reply = False
+        if reply_id and self._routine_reply_target is not None:
+            try:
+                routine_reply = self._routine_reply_target(reply_id) is True
+            except Exception as exc:
+                # Unknown ownership cannot safely become a tool approval.
+                print(f"[Matrix]: Reply ownership deferred ({type(exc).__name__})")
+                return
 
-        if self._approval_reaction_handler is not None and not context_reply:
+        if self._approval_reaction_handler is not None and not (context_reply or routine_reply):
             from services.matrix_approval import (
                 APPROVE_REACTION_KEYS,
                 REJECT_REACTION_KEYS,
@@ -370,7 +386,7 @@ class MatrixTextTransport:
                         break
             return
 
-        if context_reply:
+        if context_reply or routine_reply:
             # Matrix's plaintext Reply fallback quotes the target before the
             # owner's actual body. Strip only the protocol quote block, while
             # preserving every paragraph/line of the answer itself.
@@ -465,9 +481,12 @@ class MatrixTextTransport:
                         break
             return
 
-        reply_text, reply_mode, attachment_paths = self._normalize_reply(
-            await self._run_while_typing(self._media_handler(asset))
-        )
+        from services.routine_context_clarification import matrix_reply_scope
+
+        with matrix_reply_scope(self._reply_target(event)):
+            reply_text, reply_mode, attachment_paths = self._normalize_reply(
+                await self._run_while_typing(self._media_handler(asset))
+            )
         store_matrix_event_reply(
             event_id,
             reply_text,

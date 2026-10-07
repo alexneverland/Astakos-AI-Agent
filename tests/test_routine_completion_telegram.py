@@ -17,10 +17,20 @@ import os
 import sys
 import types
 import tempfile
+import sqlite3
+import threading
 from datetime import datetime
+from zoneinfo import ZoneInfo
+from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
 import pytest
+from memory.conversation_history import (
+    append_message as real_append_message,
+    load_messages as real_load_messages,
+    load_recent_context as real_load_recent_context,
+)
+from memory.routine_feedback import RoutineFeedbackStore
 
 
 # ─────────────────────────────────────────────────────────────
@@ -373,6 +383,11 @@ def _run_handle_message(
     active_draft_status=(False, "missing", None),
     graph_reply="Natural graph reply.",
     output_calls=None,
+    history_writer=None,
+    selector_callback=None,
+    context_builder=None,
+    handle_kwargs=None,
+    voice_call=None,
 ):
     """
     Call ``bot.handle_message`` with controlled state.
@@ -392,6 +407,8 @@ def _run_handle_message(
         selector_mod.select_routine.return_value = selector_return
     else:
         selector_mod.select_routine.side_effect = selector_returns
+    if selector_callback is not None:
+        selector_mod.select_routine.side_effect = selector_callback
 
     bot.pending_routine_confirmations = dict(pending or {})
     bot.pending_reflection_confirmations = dict(pending_reflections or {})
@@ -418,8 +435,8 @@ def _run_handle_message(
         patch.object(bot, "send_telegram_msg", side_effect=lambda m, **kw: sent.append(m), create=True),
         patch.object(bot, "bus", sys.modules["core.event_bus"].bus),
         patch.object(bot, "log_event", sys.modules["memory.event_log"].log_event),
-        patch.object(bot, "_build_fast_chat_context", return_value=([], MagicMock(content=text))),
-        patch.object(bot, "_append_to_analytics_log", return_value=1),
+        patch.object(bot, "_build_fast_chat_context", side_effect=context_builder, return_value=([], MagicMock(content=text))),
+        patch.object(bot, "_append_to_analytics_log", side_effect=history_writer or (lambda *args, **kwargs: 1)),
         patch.object(bot, "_cache_bot_message", create=True),
         patch.object(bot, "_safe_active_draft_status", return_value=active_draft_status),
         patch.object(
@@ -438,13 +455,316 @@ def _run_handle_message(
         ),
     ):
         try:
-            bot.handle_message(text, "123456")
+            if voice_call is not None:
+                target, args, kwargs = voice_call
+                target(*args, **kwargs)
+            else:
+                bot.handle_message(text, "123456", **(handle_kwargs or {}))
         except AssertionError as e:
             if "Graph was invoked" in str(e) or "requests.post" in str(e):
                 raise
             # Other AssertionErrors from internal logic are acceptable.
 
     return sent
+
+
+def _poll_text_turns(messages):
+    """Use real polling with synthetic provider updates, without spawning workers."""
+    stopped = threading.Event()
+    turns = []
+    def fetch(*args, **kwargs):
+        stopped.set()
+        return types.SimpleNamespace(status_code=200, json=lambda: {
+            "result": [{"update_id": i + 1, "message": message}
+                       for i, message in enumerate(messages)]})
+    def worker(*, target, args, kwargs=None, daemon=False):
+        return types.SimpleNamespace(start=lambda: turns.append((target, args, kwargs or {})))
+    with (
+        patch.object(bot, "shutdown_event", stopped),
+        patch.object(bot.config, "USER_NAME", "Owner", create=True),
+        patch("requests.get", side_effect=fetch),
+        patch("requests.post", return_value=types.SimpleNamespace(status_code=200)),
+        patch.object(bot.threading, "Thread", side_effect=worker),
+        patch.object(bot, "_consume_pending_georgian", return_value=False),
+        patch.object(bot, "_consume_pending_partner", return_value=False),
+        patch.object(bot, "handle_external_admin_command", return_value=None),
+    ):
+        bot.run_polling()
+    return turns
+
+
+@pytest.mark.parametrize("reply,expected", [
+    ({"chat": {"id": 123456}, "message_id": 41}, "41"),
+    ({"chat": {"id": 123456}, "message_id": True}, ""),
+    ({"chat": {"id": 123456}, "message_id": 0}, ""),
+    ({"chat": {"id": 123456}, "message_id": "41"}, ""),
+    ({"chat": {"id": 999}, "message_id": 41}, ""),
+    ({"message_id": 41}, ""),
+    (None, ""),
+])
+def test_polling_carries_exact_reply_without_implicit_fallback(reply, expected):
+    """Dropping reply metadata must not turn an explicit reply into today's yes."""
+    turns = _poll_text_turns([{"chat": {"id": 123456}, "text": "ναι",
+                              "reply_to_message": reply}])
+    assert len(turns) == 1
+    target, args, kwargs = turns[0]
+    assert target is bot.handle_message
+    assert args == ("ναι", "123456")
+    assert kwargs == {"reply_event_id": expected}
+
+
+def test_polling_does_not_dispatch_other_chat_reply():
+    """The existing owner boundary still stops foreign incoming turns."""
+    assert _poll_text_turns([{"chat": {"id": 999}, "text": "ναι",
+        "reply_to_message": {"chat": {"id": 999}, "message_id": 41}}]) == []
+
+
+def test_polling_external_reply_cannot_become_implicit_routine_feedback():
+    """A Telegram external reply has no same-chat delivered question identity."""
+    turns = _poll_text_turns([{"chat": {"id": 123456}, "text": "ναι",
+        "external_reply": {"chat": {"id": 999}, "message_id": 41}}])
+    assert turns[0][2] == {"reply_event_id": ""}
+
+
+@pytest.mark.parametrize("input_kind", ["text", "voice"])
+@pytest.mark.parametrize("reply_id", ["41", "99", "", None])
+def test_telegram_exact_reply_updates_only_the_delivered_occurrence(tmp_path, reply_id, input_kind):
+    """Real adapter/history/ledger must preserve today when replying to yesterday."""
+    from services.routine_feedback_turn import PersistedRoutineFeedbackHandler
+    from services.routine_completion_helper import DatedRoutineSelection
+    zone = ZoneInfo("Europe/Athens")
+    yesterday = datetime(2026, 10, 6, 9, tzinfo=zone)
+    now = datetime(2026, 10, 7, 9, tzinfo=zone)
+    routine_path = tmp_path / "dated.db"
+    def connect():
+        return sqlite3.connect(routine_path)
+    with connect() as conn:
+        conn.execute("""CREATE TABLE routines (id INTEGER PRIMARY KEY, event_name TEXT,
+            notify_cooldown_hours REAL, explicit_skip_streak INTEGER,
+            unanswered_reminder_streak INTEGER, last_triggered TEXT, confidence REAL)""")
+        conn.execute("INSERT INTO routines VALUES (11, 'rabbit', 0, 0, 0, NULL, 1.0)")
+    ledger = RoutineFeedbackStore(connect)
+    ledger.initialize()
+    ledger.record_delivery(11, yesterday.date(), at=yesterday, receipt_id="41",
+                           question="Did you clean it?", channel="telegram")
+    ledger.record_delivery(11, now.date(), at=now, receipt_id="42",
+                           question="Did you clean it?", channel="telegram")
+    history = str(tmp_path / "history.db")
+    def save(role, content, **kwargs):
+        return real_append_message(role=role, content=content, channel="telegram", db_path=history)["rowid"]
+    classified_questions = []
+    def classify(*args, **kwargs):
+        classified_questions.append(kwargs["pending_question"].event_id)
+        assert reply_id in ("41", None), "Unknown explicit replies must not reach the model"
+        assert kwargs["pending_question"].event_id == ("41" if reply_id else "42")
+        return DatedRoutineSelection("complete", 11, yesterday.date() if reply_id else now.date())
+    handler = PersistedRoutineFeedbackHandler(store=ledger, selector=classify,
+        clock=lambda: now, channel="telegram", conversation_db_path=history, trusted_owner=True)
+    message = {"chat": {"id": 123456}, "text": "ναι"}
+    if input_kind == "voice":
+        message.pop("text")
+        message["voice"] = {"file_id": "synthetic-voice", "duration": 1, "mime_type": "audio/ogg"}
+    if reply_id is not None:
+        message["reply_to_message"] = {"chat": {"id": 123456},
+            "message_id": int(reply_id) if reply_id else True}
+    turns = _poll_text_turns([message])
+    assert len(turns) == 1
+    assert turns[0][0] is (bot.handle_message if input_kind == "text" else bot.handle_voice)
+    class VoiceAdapter:
+        def transcribe_audio(self, data, *, mime_type):
+            assert data == b"synthetic-ogg" and mime_type == "audio/ogg"
+            return "ναι"
+    def download(url, **kwargs):
+        assert "api.telegram.org" in url
+        return types.SimpleNamespace(content=b"synthetic-ogg", json=lambda: {
+            "result": {"file_path": "voice/synthetic.ogg"}})
+    with (
+        patch.object(bot, "_persisted_routine_feedback_handler", handler),
+        patch.object(bot.os, "getcwd", return_value=str(tmp_path)),
+        patch("requests.get", side_effect=download),
+        patch.object(sys.modules["core.brain"], "get_voice_provider_adapter",
+                     return_value=VoiceAdapter(), create=True),
+        patch.object(bot, "_handle_transcribed_voice", return_value=False),
+    ):
+        _run_handle_message("ναι", history_writer=save, handle_kwargs=turns[0][2],
+                            voice_call=turns[0] if input_kind == "voice" else None)
+    assert [row.feedback for row in ledger.occurrences(11)] == [
+        "complete" if reply_id == "41" else None,
+        "complete" if reply_id is None else None]
+    assert classified_questions == (["41"] if reply_id == "41" else ["42"] if reply_id is None else [])
+    with connect() as conn:
+        assert conn.execute("SELECT last_triggered FROM routines").fetchone()[0] is None
+    sys.modules["memory.routine_db"].confirm_routine.assert_not_called()
+    assert [row["role"] for row in real_load_messages(db_path=history)] == ["user", "ai"]
+    if input_kind == "voice":
+        assert list((tmp_path / "telegram_uploads").glob("*.ogg")) == []
+
+
+@pytest.mark.parametrize("has_context", [False, True])
+def test_telegram_persisted_feedback_hook_never_runs_legacy_completion(tmp_path, has_context):
+    """The opt-in path uses the actual rowid, then continues normal chat once."""
+    path = str(tmp_path / "conversation.db")
+    context = bot.SystemMessage(content="verified yesterday") if has_context else None
+    handler = MagicMock(return_value=context)
+    def save(role, content, **kwargs):
+        return real_append_message(role=role, content=content, channel="telegram", db_path=path)["rowid"]
+    with patch.object(bot, "_persisted_routine_feedback_handler", handler, create=True):
+        _run_handle_message("Χθες καθάρισα το κουνέλι", history_writer=save,
+            today_routines=[{"id": 5, "event": "routine"}],
+            selector_return=types.SimpleNamespace(action="complete", routine_id=5))
+    handler.assert_called_once_with("Χθες καθάρισα το κουνέλι", {
+        "rowid": 1, "role": "user", "content": "Χθες καθάρισα το κουνέλι", "channel": "telegram",
+    })
+    sys.modules["services.routine_completion_selector"].select_routine.assert_not_called()
+    sys.modules["memory.routine_db"].mark_routine_triggered_today.assert_not_called()
+    states = sys.modules["core.graph"].graph.stream.call_args.args[0]
+    if context is not None:
+        assert context in states["messages"]
+    assert [row["role"] for row in real_load_messages(db_path=path)] == ["user", "ai"]
+
+
+def test_telegram_consumed_context_reply_never_reaches_dated_feedback(tmp_path):
+    """The context acknowledgement owns the saved turn and bypasses routine inference."""
+    path = str(tmp_path / "context-history.db")
+    handler = MagicMock()
+    def save(role, content, **kwargs):
+        return real_append_message(role=role, content=content, channel="telegram", db_path=path)["rowid"]
+    def deliver(content, *args, **kwargs):
+        save("assistant", content)
+        return "context-receipt"
+    with (
+        patch.object(sys.modules["services.routine_context_clarification"], "try_context_question_reply",
+            return_value=types.SimpleNamespace(consumed=True, reply="Context recorded")),
+        patch.object(bot, "_persisted_routine_feedback_handler", handler),
+        patch.object(bot, "_send_and_record_assistant", side_effect=deliver),
+    ):
+        _run_handle_message("Ναι είμαστε σπίτι", history_writer=save)
+    handler.assert_not_called()
+    sys.modules["services.routine_completion_selector"].select_routine.assert_not_called()
+    sys.modules["core.graph"].graph.stream.assert_not_called()
+    assert [row["role"] for row in real_load_messages(db_path=path)] == ["user", "assistant"]
+
+
+def test_telegram_dated_handler_authorizes_local_draft_not_send():
+    """Graph preparation keeps the exact offer and never confirms completion."""
+    from services.matrix_routine_completion import MatrixRoutineDraftOffer
+    context = bot.SystemMessage(content="trusted local draft offer")
+    offered = MatrixRoutineDraftOffer(5, datetime(2026, 10, 7, 9), "Message Sofia", context)
+    with patch.object(bot, "_persisted_routine_feedback_handler", lambda *a: offered):
+        _run_handle_message("Ετοίμασέ το")
+    state = sys.modules["core.graph"].graph.stream.call_args.args[0]
+    assert state.get("routine_draft_offer_authorized") is True
+    assert context in state["messages"]
+    sys.modules["memory.routine_db"].confirm_routine.assert_not_called()
+    sys.modules["memory.routine_db"].acknowledge_pending_draft_offer.assert_not_called()
+
+
+def test_telegram_routine_selector_sees_persisted_input_once(tmp_path: Path) -> None:
+    """The real Telegram handler persists input before classification, once."""
+    from services.routine_completion_helper import RoutineSelection
+
+    db_path = str(tmp_path / "conversation.db")
+    user_rows = []
+
+    def save(role: str, text: str, **kwargs: object) -> int:
+        """Persist through the actual history abstraction, never the owner's DB."""
+        saved = real_append_message(role="assistant" if role == "ai" else role,
+                                    content=text, channel="telegram", db_path=db_path)
+        if role == "user":
+            user_rows.append(saved)
+        return saved["rowid"]
+
+    def select(*args: object, **kwargs: object) -> RoutineSelection:
+        """Inspect persisted input before returning a controlled model result."""
+        assert len(user_rows) == 1
+        rows = real_load_messages(db_path=db_path)
+        assert rows[-1]["rowid"] == user_rows[0]["rowid"]
+        assert rows[-1]["content"] == "I completed it today"
+        return RoutineSelection(action="complete", routine_id=5)
+
+    _run_handle_message("I completed it today", today_routines=[{"id": 5, "event": "dynamic routine"}],
+                        history_writer=save, selector_callback=select)
+    sys.modules["memory.routine_db"].mark_routine_triggered_today.assert_called_once_with(5)
+    assert len(user_rows) == 1
+
+
+def test_telegram_missing_persisted_identity_stops_routine_changes() -> None:
+    """No routine inference or execution may proceed without a saved input row."""
+    _run_handle_message("I completed it today", today_routines=[{"id": 5, "event": "dynamic routine"}],
+                        history_writer=lambda *args, **kwargs: None)
+    sys.modules["services.routine_completion_selector"].select_routine.assert_not_called()
+    rdb = sys.modules["memory.routine_db"]
+    for name in ("mark_routine_triggered_today", "confirm_routine", "record_routine_skip_today", "pause_routine_indefinitely"):
+        getattr(rdb, name).assert_not_called()
+    sys.modules["core.graph"].graph.stream.assert_not_called()
+
+
+def test_telegram_context_excludes_only_current_row_not_identical_text(tmp_path: Path) -> None:
+    """The current input is not repeated in context; an identical older turn stays."""
+    db_path = str(tmp_path / "conversation.db")
+    real_append_message(role="user", content="same text", channel="web", db_path=db_path)
+    current = real_append_message(role="user", content="same text", channel="telegram", db_path=db_path)
+    history = types.ModuleType("memory.conversation_history")
+    history.load_recent_context = lambda **kwargs: real_load_recent_context(db_path=db_path, **kwargs)
+    with patch.dict(sys.modules, {"memory.conversation_history": history}):
+        context, message = bot._build_fast_chat_context("same text", user_rowid=current["rowid"])
+    assert len(context) == 1
+    assert "/ web]" in context[0].content
+    assert "same text" in message.content
+
+
+def test_telegram_graph_gets_current_input_once_with_shared_web_history(tmp_path: Path) -> None:
+    """Exercise persistence, the real context builder and graph input together."""
+    db_path = str(tmp_path / "conversation.db")
+    real_append_message(role="user", content="Earlier Web message", channel="web", db_path=db_path)
+    history = types.ModuleType("memory.conversation_history")
+    history.load_recent_context = lambda **kwargs: real_load_recent_context(db_path=db_path, **kwargs)
+    builder = bot._build_fast_chat_context
+
+    def save(role: str, text: str, **kwargs: object) -> int:
+        """Write handler history to an isolated real conversation store."""
+        return real_append_message(role="assistant" if role == "ai" else role,
+                                   content=text, channel="telegram", db_path=db_path)["rowid"]
+
+    with patch.dict(sys.modules, {"memory.conversation_history": history}):
+        _run_handle_message("New Telegram message", history_writer=save, context_builder=builder)
+    messages = sys.modules["core.graph"].graph.stream.call_args.args[0]["messages"]
+    assert len(messages) == 2
+    assert "Earlier Web message" in messages[0].content
+    assert "New Telegram message" in messages[1].content
+    users = [row for row in real_load_messages(db_path=db_path) if row["role"] == "user"]
+    assert [row["content"] for row in users] == ["Earlier Web message", "New Telegram message"]
+
+
+@pytest.mark.parametrize("intent", ["clarify_draft", "clear_draft", "confirm_send"])
+def test_telegram_draft_intercepts_keep_single_user_record(tmp_path: Path, intent: str) -> None:
+    """Draft interception reuses input; send consent only queues its approval."""
+    db_path = str(tmp_path / "conversation.db")
+    approval = types.ModuleType("core.approval")
+    approval.save_pending = MagicMock()
+    approval._notify_telegram = MagicMock()
+
+    def save(role: str, text: str, **kwargs: object) -> int:
+        """Persist intercepted messages through the real isolated history API."""
+        return real_append_message(role="assistant" if role == "ai" else role,
+                                   content=text, channel="telegram", db_path=db_path)["rowid"]
+
+    with (
+        patch.dict(sys.modules, {"core.approval": approval}),
+        patch.object(bot, "_safe_classify_messenger_intent", return_value=types.SimpleNamespace(intent=intent)),
+        patch("core.messenger_draft.clear_draft", return_value=True),
+    ):
+        _run_handle_message("Act on the local draft", history_writer=save,
+                            active_draft_status=(True, "active", {"message": "fixture draft", "target_name": "fixture recipient"}))
+    users = [row for row in real_load_messages(db_path=db_path) if row["role"] == "user"]
+    assert len(users) == 1
+    sys.modules["core.graph"].graph.stream.assert_not_called()
+    if intent == "confirm_send":
+        approval.save_pending.assert_called_once()
+        assert approval.save_pending.call_args.args[0] == "execute_local_pipeline"
+        approval._notify_telegram.assert_called_once()
+    else:
+        approval.save_pending.assert_not_called()
 
 
 def test_telegram_generated_photo_marker_is_hidden_and_photo_is_sent() -> None:

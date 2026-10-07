@@ -1,10 +1,46 @@
 # Astakos: Current Tasks
 
-Last reconciled with the owner: 2026-10-06 (context-evidence added;
-existing verification entries preserved).
-[plan.md](plan.md) defines scope and policy. Completed entries were removed from
-this active checklist; evidence remains in Git history, specs/runbooks and the
-[archive](archive/2026-10-02-todo.md). Archived unchecked items are not this backlog.
+## Dated routine feedback — implementation and approved reset completed
+
+- [x] RF1/RF2: dated ledger, Athens day-close accounting and canonical semantic
+  feedback. Separate three-occurrence unanswered/refusal streaks; acknowledgement,
+  postponement and silence do not reduce confidence.
+- [x] RF3: paired Web/Telegram/Matrix startup composition, authenticated saved
+  owner turns, shared-history freshness and exact external reply correlation.
+  Local draft preparation remains separate from external-action approval.
+- [x] RF4: single/deferred/group delivery uses one durable dated sender. Confirmed
+  receipts survive history failures; concurrent routine ticks are serialized.
+  Maintenance uses the existing scheduler, not another background scheduler.
+- [x] RF5: debug distinguishes final decisions from condition checks, and active
+  dated policy from staged diagnostics. The canonical reader preserves cooldown
+  zero. Reflection remains unscheduled/disabled; its retained action code has a
+  defensive guard against overwriting dated automatic backoff. Legacy
+  adapters are excluded when the paired handler is installed; manual compatibility
+  APIs remain deliberately available, rather than being blindly deleted.
+- [x] RF6: owner explicitly approved live migration/reset on 2026-10-07.
+  All 12 routines reset to cooldown 0, confidence 1.0 and zero pressure counters.
+  Pause/mute/schedule/conditions/completed days/receipts/history are preserved.
+  Consistent pre-reset backup (Git-ignored):
+  C:\astakos_v2\backups\routine-feedback\before-reset-20261007-184017.sqlite3.
+  The reset transaction verified all confidence/cooldown fields; subsequent
+  canonical readback verified zero cooldown and derived pressure for all 12.
+- [ ] Natural observation after normal launcher startup: late completion,
+  acknowledgement/refusal, Athens midnight accounting and debug outcomes.
+  Offline verification is not a claim that live LLM interpretation was tested.
+  No Astakos runtime process was detected during the approved reset; the new
+  hooks install on next normal startup. No hidden duplicate runtime was started.
+
+Verification: 159 dispatch/clarification/debug cases, 51 isolated Telegram
+completion cases, 102 paired startup/Web/Matrix cases and focused store/reset/
+reflection regressions passed. Runs overlap; these are not a unique-test total.
+Only focused suites were run. Owner requested commit/PR for review; the task
+branch is codex/dated-routine-feedback. Runtime databases/backups are not staged.
+Web exact-reply UI is a future enhancement; current semantic dated feedback is
+supported without inventing a reply target.
+
+Contract/evidence: [routine-feedback-spec.md](routine-feedback-spec.md) and
+[routine-feedback-plan.md](routine-feedback-plan.md).
+Existing unrelated natural/live verification below is preserved.
 
 ## Current feature: context-evidence (foundation offline verified)
 
@@ -251,3 +287,17 @@ full-suite run.
 
 No completed channel, review or backup implementation phase remains an active
 task. Do not rerun the full test suite by default.
+
+Routine feedback RF3 checkpoint: shared catalog/dated-turn composition verified
+with 110 focused offline tests. Names, dates and revision tokens share one read
+snapshot; stale catalog selections cannot persist. Adapter activation, unrecorded
+historical occurrence resolution, dispatch/day-close integration and the final
+owner-approved cooldown/confidence baseline reset are still pending. No live
+schema activation, reset or runtime change was performed.
+
+Latest RF3 checkpoint (2026-10-07): stale draft classification can no longer
+fall through into routine-feedback mutation. 202 focused tests pass with one
+dependency warning; compile/diff checks pass. The previous paragraph is a
+historical checkpoint: unrecorded past completion is now offline verified.
+Remaining rollout gates include full adapter arbitration, activation/legacy
+exclusion and the scoped recoverable cooldown/confidence baseline reset.

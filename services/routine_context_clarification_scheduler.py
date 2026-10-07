@@ -132,9 +132,9 @@ def question_blocks_dispatch(
 
 def dispatch_context_current(
     routines: tuple[RoutineCandidate, ...], context: Mapping[str, Any],
-    store: ClarificationStore, now: datetime,
+    store: ClarificationStore, now: datetime, *, late_grace_minutes: int | None = None,
 ) -> bool:
-    """Revalidate timely context and existing gates after reminder generation."""
+    """Revalidate canonical gates; late recovery requires an explicit grace window."""
     from clients import telegram_bot as bot
     from memory import routine_db as db
     from services.routine_context import build_runtime_routine_context, build_routine_context_evidence, project_routine_context
@@ -152,7 +152,11 @@ def dispatch_context_current(
         if (row is None or row["time"] != routine.slot_at.strftime("%H:%M")
                 or row["event"] != routine.name):
             return False
-        if (not 0 <= (routine.slot_at - now).total_seconds() <= 900
+        timely = 0 <= (routine.slot_at - now).total_seconds() <= 900
+        if late_grace_minutes is not None:
+            timely = (type(late_grace_minutes) is int and late_grace_minutes > 0
+                      and 0 < (now - routine.slot_at).total_seconds() <= late_grace_minutes * 60)
+        if (not timely
                 or question_blocks_dispatch(store, now, routine)
                 or db.is_routine_temporarily_inactive_meta(db.get_routine_schedule_meta(rid), now=now)[0]
                 or db.get_routine_muted_until(rid)

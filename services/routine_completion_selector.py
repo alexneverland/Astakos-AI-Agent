@@ -2,10 +2,15 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 
 from core.i18n import load_prompt
 from services.gemini import safe_gemini_call
-from services.routine_completion_helper import CandidatePool, RoutineSelection
+from services.routine_completion_helper import (
+    CandidatePool, DatedRoutineSelection, RoutineFeedbackQuestion, RoutineFeedbackGroupQuestion,
+    RoutineSelection, validate_dated_selection,
+)
+from services.routine_feedback import aware
 
 
 _DRAFT_OFFER_MARKER = "[MESSENGER_DRAFT_OFFER]"
@@ -77,3 +82,64 @@ def select_routine(
         return _none_selection()
 
     return RoutineSelection(action=action, routine_id=routine_id)
+
+
+def select_dated_routine(
+    user_text: str, candidates: dict[int, str], allowed_dates: dict[int, frozenset[date]],
+    *, now: datetime, trusted: bool,
+    pending_question: RoutineFeedbackQuestion | RoutineFeedbackGroupQuestion | None = None,
+) -> DatedRoutineSelection:
+    """Interpret trusted feedback with authoritative dates; remain inactive until wired.
+
+    Callers supply known occurrence dates and the authoritative calendar. An
+    explicit owner report can complete an unrecorded past day, never invent a
+    reminder delivery or apply non-completion feedback to that past day.
+    Local-draft offers stay on the existing separate authorization path.
+    """
+    none = DatedRoutineSelection("none")
+    if trusted is not True or not candidates or not isinstance(user_text, str) or not user_text.strip():
+        return none
+    try:
+        now = aware(now)
+        eligible = {
+            rid: frozenset(day for day in allowed_dates.get(rid, ())
+                           if type(day) is date and day <= now.date())
+            for rid in candidates if type(rid) is int and rid > 0
+        }
+        eligible = {rid: days for rid, days in eligible.items() if days}
+        if not eligible:
+            return none
+        pending = None
+        if pending_question is not None:
+            if not isinstance(pending_question, (RoutineFeedbackQuestion, RoutineFeedbackGroupQuestion)):
+                return none
+            grouped = isinstance(pending_question, RoutineFeedbackGroupQuestion)
+            members = pending_question.routine_ids if grouped else (pending_question.routine_id,)
+            if (not isinstance(members, tuple) or not members
+                    or (grouped and len(members) < 2)
+                    or any(type(rid) is not int for rid in members)
+                    or len(set(members)) != len(members)
+                    or type(pending_question.occurrence_date) is not date
+                    or any(pending_question.occurrence_date not in eligible.get(rid, ()) for rid in members)
+                    or not isinstance(pending_question.event_id, str)
+                    or not 0 < len(pending_question.event_id.strip()) <= 512
+                    or not isinstance(pending_question.question, str)
+                    or not 0 < len(pending_question.question.strip()) <= 2000):
+                return none
+            pending = {("routine_ids" if grouped else "routine_id"):
+                           list(members) if grouped else members[0],
+                       "occurrence_date": pending_question.occurrence_date.isoformat(),
+                       "event_id": pending_question.event_id, "question": pending_question.question}
+        data = {"now": now.isoformat(), "timezone": "Europe/Athens",
+                "candidates": [{"routine_id": rid, "name": candidates[rid],
+                                "allowed_dates": sorted(day.isoformat() for day in days)}
+                               for rid, days in eligible.items()], "user_text": user_text,
+                "pending_question": pending}
+        prompt = load_prompt("routine_feedback_selector.md").replace(
+            "{input_json}", json.dumps(data, ensure_ascii=False))
+        response = safe_gemini_call(prompt)
+        parsed = json.loads(_strip_json_fence(str(response.text).strip()),
+                            object_pairs_hook=_strict_object)
+        return validate_dated_selection(parsed, eligible, today=now.date())
+    except Exception:
+        return none

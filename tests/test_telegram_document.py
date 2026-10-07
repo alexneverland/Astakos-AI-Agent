@@ -1,7 +1,65 @@
 import pytest
 import os
+from unittest.mock import MagicMock
 from clients.telegram_bot import handle_document
 from core.i18n import t
+from memory.conversation_history import append_message as persisted_append_message
+
+
+@pytest.mark.parametrize("kind", ["photo", "document"])
+def test_telegram_asset_history_cannot_become_dated_feedback(tmp_path, monkeypatch, mock_telegram_api, kind):
+    """Real photo/document history remains asset-derived even with a completion caption."""
+    import sqlite3
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from langchain_core.messages import AIMessage
+    from clients.telegram_bot import _process_photo_with_question
+    from core.untrusted_content import external_content_source_names
+    from memory.conversation_history import load_messages
+    from memory.routine_feedback import RoutineFeedbackStore
+    from services.routine_feedback_turn import PersistedRoutineFeedbackHandler
+    from services.routine_completion_helper import DatedRoutineSelection
+
+    db = tmp_path / "routines.db"
+    def connect():
+        return sqlite3.connect(db)
+    with connect() as connection:
+        connection.execute("""CREATE TABLE routines (id INTEGER PRIMARY KEY,
+            event_name TEXT, notify_cooldown_hours REAL, explicit_skip_streak INTEGER,
+            unanswered_reminder_streak INTEGER, confidence REAL)""")
+        connection.execute("INSERT INTO routines VALUES (11, 'Καθάρισμα κουνελιού', 0, 0, 0, 1)")
+    ledger = RoutineFeedbackStore(connect)
+    ledger.initialize()
+    now = datetime(2026, 10, 7, 9, tzinfo=ZoneInfo("Europe/Athens"))
+    ledger.record_delivery(11, now.date(), at=now, receipt_id="41",
+        question="Το έκανες;", channel="telegram")
+    history = str(tmp_path / "history.db")
+    def save(role, content, channel, **kwargs):
+        return persisted_append_message(role=role, content=content, channel=channel, db_path=history, **kwargs)
+    monkeypatch.setattr("memory.conversation_history.append_message", save)
+    handler = PersistedRoutineFeedbackHandler(store=ledger,
+        selector=lambda *a, **kw: DatedRoutineSelection("complete", 11, now.date()),
+        clock=lambda: now, channel="telegram", conversation_db_path=history, trusted_owner=True)
+    analysis = "Ναι το έκανα"
+    if kind == "photo":
+        monkeypatch.setitem(_process_photo_with_question.__globals__, "_load_shared_context_messages", lambda _: [])
+        graph = MagicMock()
+        graph.stream.return_value = iter([{"Chat_Agent": {"messages": [AIMessage(content=analysis)]}}])
+        monkeypatch.setitem(_process_photo_with_question.__globals__, "graph", graph)
+        monkeypatch.setattr("memory.execution_trace.ExecutionTrace", MagicMock())
+        _process_photo_with_question("photo.png", str(tmp_path / "photo.png"), analysis, analysis, "123456")
+    else:
+        monkeypatch.setattr("config.BASE_DIR", str(tmp_path))
+        monkeypatch.setattr("requests.get", lambda url, **kw: MockResponse(None if "getFile" in url else b"offline document"))
+        monkeypatch.setattr("services.document_analysis.summarize_document_text", lambda **kw: analysis)
+        handle_document({"file_id": "123", "file_name": "report.txt"}, analysis, "123456")
+
+    rows = load_messages(db_path=history)
+    assert [row["role"] for row in rows] == ["user", "assistant"]
+    assert external_content_source_names(rows[0]["metadata"]) == {"user_provided_asset"}
+    assert handler(rows[0]["content"], rows[0]) is None
+    assert ledger.occurrences(11)[0].feedback is None
+    assert mock_telegram_api.sent_messages
 
 class MockResponse:
     def __init__(self, data, ok=True, headers=None, status_code=200):

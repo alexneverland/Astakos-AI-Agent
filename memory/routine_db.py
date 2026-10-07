@@ -6,6 +6,7 @@ import hashlib
 import threading
 from difflib import SequenceMatcher
 from datetime import datetime
+from typing import Callable
 
 from core.exceptions import RoutineConflictError, DBWriteError
 from core.routine_state import RoutineState, validate_transition, is_notifiable, state_from_str
@@ -18,6 +19,8 @@ ROUTINE_DB_BUSY_TIMEOUT_MS = 5000
 _wal_setup_lock = threading.Lock()
 _wal_enabled = False
 _wal_enabled_path: str | None = None
+# Inactive until the dated feedback rollout; called inside the offer transaction.
+_dated_draft_feedback_recorder: Callable[..., bool] | None = None
 
 # ────────────────────────────────────────────────────────────────
 # CANONICALIZATION LAYER
@@ -870,13 +873,15 @@ UNANSWERED_REMINDER_CONFIDENCE_STEP = 0.2
 
 def clamp_cooldown_hours(value) -> float:
     """
-    Normalizes any cooldown value within the canonical limits of the system.
+    Preserve explicit zero backoff; bound nonzero legacy cooldown values.
     """
     try:
         cd = float(value)
     except (TypeError, ValueError):
         cd = COOLDOWN_DEFAULT_HOURS
 
+    if cd == 0.0:
+        return 0.0
     return max(COOLDOWN_MIN_HOURS, min(COOLDOWN_MAX_HOURS, cd))
 
 
@@ -1798,18 +1803,12 @@ def clear_routine_paused_until(routine_id: int) -> None:
 
 def pause_routine_indefinitely(routine_id: int, reason: str = "user_requested") -> None:
     """Pause a routine reversibly and restore any pending lifecycle state to active."""
+    from memory.routine_pause import apply_indefinite_pause
+
     conn = get_connection()
     try:
         with db_write_lock:
-            conn.execute(
-                """
-                UPDATE routines
-                SET paused_until=NULL, paused_indefinitely=1, pause_reason=?,
-                    unanswered_reminder_streak=0, state='active', is_active=1
-                WHERE id=?
-                """,
-                (reason, routine_id),
-            )
+            apply_indefinite_pause(conn, routine_id, reason=reason)
             conn.commit()
     except sqlite3.Error as e:
         raise DBWriteError("pause_routine_indefinitely", e) from e
@@ -1969,6 +1968,8 @@ def acknowledge_pending_draft_offer(routine_id: int, sent_at: datetime) -> bool:
 
     The pending row and routine state are changed in one SQLite transaction so
     Web and Telegram cannot both consume the same offer from separate processes.
+    When explicitly injected, dated engagement joins this same transaction;
+    rejection or a write failure leaves the offer and feedback untouched.
     """
     if not isinstance(sent_at, datetime):
         return False
@@ -1994,6 +1995,13 @@ def acknowledge_pending_draft_offer(routine_id: int, sent_at: datetime) -> bool:
                 conn.rollback()
                 return False
 
+            accepted_at = datetime.now()
+            if (_dated_draft_feedback_recorder is not None
+                    and not _dated_draft_feedback_recorder(
+                        conn, routine_id, offered_at=sent_at, at=accepted_at)):
+                conn.rollback()
+                return False
+
             cursor.execute(
                 """
                 UPDATE routines
@@ -2001,7 +2009,7 @@ def acknowledge_pending_draft_offer(routine_id: int, sent_at: datetime) -> bool:
                     state='active', is_active=1
                 WHERE id=?
                 """,
-                (datetime.now().isoformat(timespec="seconds"), routine_id),
+                (accepted_at.isoformat(timespec="seconds"), routine_id),
             )
             cursor.execute(
                 "DELETE FROM pending_confirmations WHERE routine_id=? AND sent_at=? AND draft_offer=1",
