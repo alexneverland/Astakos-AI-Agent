@@ -1,5 +1,21 @@
 # Astakos: Current Tasks
 
+## Routine conversation wording (2026-10-07)
+
+- [x] PR #229 merged; its task branch deleted. Terminal-result continuation
+  remains bounded/tool-free; natural approved-inspection observation is pending.
+- [x] Recorded dated feedback supplies the canonical selected routine name as
+  bounded untrusted display reference, separately from the trusted action/date.
+  Web, Telegram and Matrix share the same handler and conversation tone.
+- [x] Context questions receive up to six shared recent messages for wording
+  only. Current evidence and unknown-flag validation remain authoritative;
+  dependency classification does not read the added dialogue.
+- [ ] Naturally observe explicit routine acknowledgements and contextual
+  questions in Astakos' singular voice. Offline tests verify prompt inputs,
+  persistence and safety boundaries, not live model phrasing.
+- [x] Owner authorized commit/PR for this narrow wording slice.
+- [ ] Review and merge the wording PR separately after inspection.
+
 ## Dated routine feedback — implementation and approved reset completed
 
 - [x] PR #227 review corrections: dated single/group/deferred notifications

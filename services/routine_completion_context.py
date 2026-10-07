@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def build_dated_routine_feedback_context(result: FeedbackTurnResult) -> SystemMessage | None:
-    """Expose only verified structured outcomes, never routine names or user prose.
+    """Expose verified outcomes with a separate untrusted display reference.
 
     Failed/stale inference conveys no claimed action. Deferral requests a
     clarification, not a fabricated new time. External authorization stays in
@@ -35,7 +35,12 @@ def build_dated_routine_feedback_context(result: FeedbackTurnResult) -> SystemMe
             if successful and selection.occurrence_date is not None else None
         ),
     }
-    return SystemMessage(content=json.dumps(payload) + "\n" + load_prompt("routine_feedback_context.md"))
+    content = json.dumps(payload) + "\n" + load_prompt("routine_feedback_context.md")
+    if successful and isinstance(result.routine_name, str) and result.routine_name.strip():
+        from core.untrusted_content import format_untrusted_tool_result
+        content += "\n" + format_untrusted_tool_result(
+            "recorded routine display name", result.routine_name.strip()[:200])
+    return SystemMessage(content=content)
 
 
 @dataclass(frozen=True)

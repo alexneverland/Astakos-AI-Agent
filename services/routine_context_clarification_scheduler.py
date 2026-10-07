@@ -176,18 +176,35 @@ def classify_packet(packet: dict[str, Any], *, dependencies: bool = False) -> An
     from config import RESPONSE_LANGUAGE
     name = "routine_context_dependencies.md" if dependencies else "routine_context_question.md"
     prompt = (Path(__file__).resolve().parents[1] / "prompts" / name).read_text(encoding="utf-8")
+    reference = {**packet, "language": RESPONSE_LANGUAGE}
     if not dependencies:
         from core.utils import load_agent_prompt
         # Share conversational personality without importing Chat's tool policy.
         personality = load_agent_prompt("Chat_Agent").partition("═══ PERSONALITY ═══")[2].partition("═══")[0].strip()
         prompt = personality + "\n\n" + prompt
+        reference["recent_conversation"] = _question_wording_history()
     response = safe_llm_invoke(llm, [SystemMessage(content=prompt), HumanMessage(content=
         format_untrusted_tool_result("routine context evidence", json.dumps(
-            {**packet, "language": RESPONSE_LANGUAGE}, default=str, ensure_ascii=False)))])
+            reference, default=str, ensure_ascii=False)))])
     content = response.content
     if isinstance(content, list):
         content = "".join(item.get("text", "") for item in content if isinstance(item, dict))
     return extract_json_from_text(str(content))
+
+
+def _question_wording_history() -> list[dict[str, Any]]:
+    """Read bounded shared dialogue for style, never for authoritative flags."""
+    from memory.conversation_history import load_messages
+    try:
+        messages = load_messages(limit=6)
+        return [{"role": row["role"], "channel": row.get("channel"),
+                 "timestamp": row.get("timestamp"), "content": row["content"][:800]}
+                for row in messages[-6:]
+                if row.get("role") in {"user", "assistant"}
+                and isinstance(row.get("content"), str)]
+    except Exception:
+        # Optional wording context must not disable the canonical question path.
+        return []
 
 
 def load_poll_snapshot(now: datetime, store: ClarificationStore, *, classify: Callable | None = None):
