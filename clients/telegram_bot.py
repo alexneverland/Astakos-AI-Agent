@@ -293,10 +293,12 @@ def _seconds_since_user_activity() -> float:
 
 def should_skip_proactive_for_recent_activity(
     max_age_seconds: int = PROACTIVE_RECENT_ACTIVITY_GRACE_SECONDS,
+    *, quiet: bool = False,
 ) -> bool:
     elapsed = _seconds_since_user_activity()
     if elapsed < max_age_seconds:
-        print(f"⏸️ [Proactive]: Recent user activity ({int(elapsed)}s ago) — skipped.")
+        if not quiet:
+            print(f"⏸️ [Proactive]: Recent user activity ({int(elapsed)}s ago) — skipped.")
         log_event("proactive", "skipped", reason="recent_activity", elapsed_s=int(elapsed))
         return True
     return False
@@ -914,7 +916,8 @@ def slow_queue_worker(stop_event: threading.Event | None = None) -> None:
         try:
             task_func, args = slow_queue.get(timeout=2)
             try:
-                print(f"\033[90m[SlowQueue]: {task_func.__name__}\033[0m")
+                if not getattr(task_func, "quiet_queue_log", False):
+                    print(f"\033[90m[SlowQueue]: {task_func.__name__}\033[0m")
                 task_func(*args)
             except Exception as e:
                 print(f"\033[91m[Slow Queue Error in {task_func.__name__}]: {e}\033[0m")

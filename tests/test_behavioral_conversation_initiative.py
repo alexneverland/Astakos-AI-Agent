@@ -263,3 +263,37 @@ def test_diagnostics_failure_cannot_prevent_or_repeat_delivery(tmp_path, monkeyp
     assert run_initiative(**kw) == "delivered"
     assert run_initiative(**kw) == "skip"
     assert len(sent) == 1
+
+
+@pytest.mark.parametrize("minutes,result", [(20, "delivered"), (14, "skip"), (-1, "skip")])
+@pytest.mark.parametrize("offset_hours", [0, 3])
+def test_offset_history_is_compared_to_legacy_local_clock(tmp_path, minutes, result, offset_hours):
+    """A context question with an offset must not disable initiative gates."""
+    from datetime import timezone
+    kw, sent, db = setup(tmp_path)
+    append_message(role="assistant", content="Home?", channel="matrix", db_path=db,
+                   agent="Routine_Context",
+                   timestamp=(NOW - timedelta(minutes=minutes)).astimezone(
+                       timezone(timedelta(hours=offset_hours))))
+    if result == "skip":
+        kw["classify"] = lambda _: pytest.fail("Recent/future history must block the model")
+    assert run_initiative(**kw) == result
+    assert len(sent) == (result == "delivered")
+    assert kw["store"].load_diagnostics()["last_check"].get("error_type") is None
+
+
+def test_offset_delivery_receipt_preserves_daily_and_topic_limits(tmp_path):
+    """Persisted offset receipts retain the existing daily/seven-day policy."""
+    from datetime import timezone
+    kw, sent, _ = setup(tmp_path)
+    assert run_initiative(**kw) == "delivered"
+    state = kw["store"].load()
+    state["delivered"][0]["delivered_at"] = NOW.astimezone(timezone.utc).isoformat()
+    kw["store"].save(state)
+    kw["clock"] = lambda: NOW + timedelta(minutes=20)
+    assert run_initiative(**kw) == "skip"
+    kw["clock"] = lambda: NOW + timedelta(days=6)
+    assert run_initiative(**kw) == "skip"
+    kw["clock"] = lambda: NOW + timedelta(days=7)
+    assert run_initiative(**kw) == "delivered"
+    assert len(sent) == 2

@@ -89,7 +89,7 @@ def test_pending_question_blocks_competing_completion_and_expired_slot(tmp_path)
                                        RoutineCandidate("1", "Home activity", slot + timedelta(days=1), ()))
 
 
-def test_queue_coalesces_ticks_and_releases_after_worker_error(monkeypatch, tmp_path):
+def test_queue_coalesces_ticks_and_releases_after_worker_error(monkeypatch, tmp_path, capsys):
     import services.routine_context_clarification_scheduler as worker
     import config
     monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
@@ -103,5 +103,6 @@ def test_queue_coalesces_ticks_and_releases_after_worker_error(monkeypatch, tmp_
     worker.schedule_context_clarification(calls.append)
     assert len(calls) == 1
     calls[0]()
+    assert "clarification poll error" in capsys.readouterr().out
     worker.schedule_context_clarification(calls.append)
     assert len(calls) == 2

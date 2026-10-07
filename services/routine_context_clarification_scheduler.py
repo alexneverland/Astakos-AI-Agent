@@ -246,7 +246,7 @@ def clarification_unavailable() -> bool | str:
         return "muted"
     if bot._active_routine_pause_until():
         return "paused"
-    if bot.should_skip_proactive_for_recent_activity():
+    if bot.should_skip_proactive_for_recent_activity(quiet=True):
         return "recent_activity"
     if has_recent_reminder_delivery(datetime.now()):
         return "recent_reminder"
@@ -310,8 +310,15 @@ def run_context_clarification_job() -> None:
         outcome = "error"
     finally:
         _release_queue()
+    if outcome in {"error", "delivered"}:
+        print(f"[RoutineContext]: clarification poll {outcome}")
     if log_event is not None:
         log_event("routines", "context_clarification_poll", outcome=outcome,
                   run_id=run_id, entry_point="routine_scheduler", channel=channel,
                   debug_type="scheduler_decision", debug_source="context_clarification",
                   debug_effect=outcome)
+
+
+# The worker still executes this poll and reports errors; no-op ticks need no
+# terminal banner. Structured decision telemetry above remains available.
+run_context_clarification_job.quiet_queue_log = True

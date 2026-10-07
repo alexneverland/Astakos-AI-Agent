@@ -11,6 +11,17 @@ The [archived plan](archive/2026-10-02-plan.md) is not an active queue.
 
 ## Current feature: time-aware routine context evidence
 
+### Behavioral initiative timing and poll observability (2026-10-07)
+
+Compare legacy host-local timestamps and offset-bearing context/history receipts
+as UTC instants in initiative idle/cooldown and reminder gates. Daily delivery
+limits still use the host-local calendar; no stored timestamps are rewritten.
+Silence only the clarification poll's queue banner and its recent-activity
+terminal messages. Keep structured decisions, delivery/error output and ordinary
+queue task output. No scheduler intervals or proactive limits change.
+Offline regression verification is recorded in todo.md; natural runtime
+observation remains pending, without generating test messages to the owner.
+
 Live GPS/answer acknowledgement race is corrected and offline verified (86
 focused tests). The exact question may resolve during inference: acknowledge
 the existing resolution without rewriting state or rearming dispatch. Natural
