@@ -131,3 +131,57 @@ def test_invalid_question_contract_never_contacts_provider(context_pipeline, mon
     monkeypatch.setattr(extractor, "safe_gemini_call", forbidden)
     result = extractor.extract_and_update_context_flags("Ναι", clarification_context=context_pipeline)
     assert not result.applied_flags
+
+
+def test_mixed_answer_preserves_extra_current_facts(context_pipeline, monkeypatch):
+    """The same guarded write retains facts outside the question's flag list."""
+    monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=
+        '{"relation":"related","flags":{"partner_with_user":false,'
+        '"partner_at_work":true},"continue_conversation":true}'))
+    result = extractor.extract_and_update_context_flags(
+        "Όχι, η Σοφία δουλεύει. Θυμήσου ότι αύριο έχω ρεπό και βάλε reminder στις έξι.",
+        clarification_context=context_pipeline)
+    assert result.continue_conversation is True
+    assert "partner_at_work" in result.applied_flags
+    assert routine_db.get_context_state("partner_at_work")["value"] == "true"
+    assert routine_db.get_context_state("partner_with_user")["value"] == "false"
+
+
+def test_mixed_answer_never_retries_stale_flags(context_pipeline, monkeypatch):
+    """Continuation survives a lost context commit without retrying its writes."""
+    monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=
+        '{"relation":"related","flags":{"partner_with_user":false,'
+        '"partner_at_work":true},"continue_conversation":true}'))
+    result = extractor.extract_and_update_context_flags(
+        "Όχι, είναι στη δουλειά. Βάλε reminder.", clarification_context=context_pipeline,
+        clarification_commit=lambda persist: None)
+    assert result.continue_conversation is True
+    assert not result.applied_flags
+    assert routine_db.get_context_state("partner_at_work") is None
+
+
+@pytest.mark.parametrize("extra", [
+    '"continue_conversation":"true"',
+    '"continue_conversation":true,"execute":"send"',
+])
+def test_continuation_schema_cannot_coerce_or_authorize(context_pipeline, monkeypatch, extra):
+    """Continuation is a boolean routing decision, never tool authority."""
+    monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=
+        '{"relation":"related","flags":{"partner_with_user":false},' + extra + '}'))
+    result = extractor.extract_and_update_context_flags("Όχι", clarification_context=context_pipeline)
+    assert result.relation == "uncertain"
+    assert not result.applied_flags
+
+
+@pytest.mark.parametrize("flags", [
+    '{"partner_with_user":false,"owner_approved":true}',
+    '{"partner_with_user":false,"current_shift":"anything"}',
+    '{"partner_with_user":false,"partner_work_mode":true}',
+])
+def test_extra_current_facts_remain_bounded(context_pipeline, monkeypatch, flags):
+    """Routing continuation cannot grant arbitrary state or coerce enum values."""
+    monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=
+        '{"relation":"related","flags":' + flags + ',"continue_conversation":true}'))
+    result = extractor.extract_and_update_context_flags("Όχι, βάλε reminder", clarification_context=context_pipeline)
+    assert result.relation == "uncertain" and not result.applied_flags
+    assert routine_db.get_context_state("partner_with_user") is None

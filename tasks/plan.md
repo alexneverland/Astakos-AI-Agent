@@ -9,9 +9,21 @@ single/group/deferred sends, preserving the canonical draft-offer window.
 Carry authenticated Telegram inbound event IDs through text/voice and both
 history writers so repeated contents remain distinct and replay cannot create
 another saved turn. Tighten the test-only downloader hostname assertion.
-Context-answer additional facts and clarification persona are explicitly
-deferred to a separate change after this PR; no live storage repair/reset or
-runtime restart belongs to these review fixes.
+The separate context-answer follow-up now preserves mixed messages: semantic
+classification decides whether other facts/requests remain, rather than parsing
+user phrases. The original owner text enters ordinary conversation once, with
+one history pair and existing approval gates. Extra current flags are validated
+against the same ordinary schema and persisted through the answer's existing
+freshness guard. A held stale answer is never retried by background extraction;
+its additional conversation/requests still reach the normal agent. Refusal of
+the question is distinct from a separate request and allows ordinary extraction
+of independently stated facts. Already-closed questions before interpretation
+remain ordinary turns. Question generation imports only the canonical Chat
+personality section, not its tool instructions, with singular natural address.
+Offline routing/persistence regressions pass; live interpretation/wording and
+review remain. Git/Terminal read-only classification and approved-result
+continuation stay separate. No live storage repair/reset, config change or
+runtime restart is part of this follow-up.
 
 RF1-RF6 implementation and owner-approved migration/reset are complete.
 All 12 routines now have cooldown 0, confidence 1.0 and zero pressure counters;

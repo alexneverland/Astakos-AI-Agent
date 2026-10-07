@@ -273,8 +273,9 @@ def _stub_modules():
     # This suite owns completion, not clarification; exercise the absent-ledger
     # adapter boundary without importing real memory under its package stubs.
     sys.modules["services.routine_context_clarification"].try_context_question_reply = (
-        lambda *args, **kwargs: types.SimpleNamespace(consumed=False)
+        lambda *args, **kwargs: types.SimpleNamespace(consumed=False, context_flags_processed=False)
     )
+    sys.modules["services.routine_context_clarification"].context_answer_graph_context = lambda answer: None
     sys.modules["services.messenger_intent"].classify_messenger_intent = MagicMock(return_value=None)
     sys.modules["services.messenger_intent"].is_draft_offer_acceptance = MagicMock(return_value=False)
     sys.modules["services.messenger_intent"].MESSENGER_ROUTINE_DRAFT_OFFER_MARKER = (
@@ -699,7 +700,7 @@ def test_telegram_consumed_context_reply_never_reaches_dated_feedback(tmp_path):
         return "context-receipt"
     with (
         patch.object(sys.modules["services.routine_context_clarification"], "try_context_question_reply",
-            return_value=types.SimpleNamespace(consumed=True, reply="Context recorded")),
+            return_value=types.SimpleNamespace(consumed=True, continue_conversation=False, reply="Context recorded")),
         patch.object(bot, "_persisted_routine_feedback_handler", handler),
         patch.object(bot, "_send_and_record_assistant", side_effect=deliver),
     ):

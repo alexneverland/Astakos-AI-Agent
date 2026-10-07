@@ -212,12 +212,14 @@ class MatrixTurnService:
 
         routine_completion_context = None
         routine_draft_offer = None
-        from services.routine_context_clarification import try_context_question_reply
+        from services.routine_context_clarification import (
+            context_answer_graph_context, try_context_question_reply,
+        )
 
         context_answer = try_context_question_reply(
             clean_user_text, "matrix", trusted_owner=True, external_derived=external_derived,
         )
-        if context_answer.consumed:
+        if context_answer.consumed and not context_answer.continue_conversation:
             reply = context_answer.reply
             saved_user = append_message(
                 role="user", content=clean_user_text, channel="matrix",
@@ -364,6 +366,7 @@ class MatrixTurnService:
                 "Chat_Agent",
                 "matrix",
                 correlation_rowid=saved_user.get("rowid"),
+                context_flags_processed=context_answer.context_flags_processed,
             )
             return visible_draft_reply
 
@@ -384,7 +387,8 @@ class MatrixTurnService:
 
         final_reply = ""
         handling_agent = "Chat_Agent"
-        graph_messages = context + [current]
+        answer_context = context_answer_graph_context(context_answer)
+        graph_messages = context + ([answer_context] if answer_context is not None else []) + [current]
         if routine_completion_context is not None:
             graph_messages.append(routine_completion_context)
         graph_state: dict[str, Any] = {
@@ -505,6 +509,7 @@ class MatrixTurnService:
             "matrix",
             external_content_sources=external_sources,
             correlation_rowid=saved_user.get("rowid"),
+            context_flags_processed=context_answer.context_flags_processed,
         )
         if created_files.paths:
             return MatrixReply(

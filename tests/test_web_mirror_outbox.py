@@ -226,6 +226,7 @@ def test_web_chat_early_saved_replies_return_both_history_row_ids(mode: str) -> 
     """Exercise all four early /chat replies without a live DB or transport."""
     from api.server import LOCAL_TOKEN, server
     from services.routine_completion_helper import RoutineSelection
+    from services.routine_context_clarification import QuestionAnswer
 
     saved_roles: list[str] = []
 
@@ -236,7 +237,7 @@ def test_web_chat_early_saved_replies_return_both_history_row_ids(mode: str) -> 
 
     is_asset = mode in {"yes", "no"}
     with (
-        patch("services.routine_context_clarification.try_context_question_reply", return_value=SimpleNamespace(consumed=False)),
+        patch("services.routine_context_clarification.try_context_question_reply", return_value=QuestionAnswer()),
         patch("core.messaging_channel.resolve_external_channel", return_value="matrix"),
         patch("memory.pending_assets.get_latest_recent_asset", return_value=None),
         patch("memory.routine_db.load_pending_confirmations", return_value={}),

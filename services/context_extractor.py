@@ -14,6 +14,17 @@ from services.routine_reconciler import (
     apply_routine_reconciliation_directives,
 )
 
+_CONTEXT_BOOLEAN_FLAGS = {
+    "user_out_of_home", "family_at_home", "partner_with_user",
+    "kid1_away_from_home", "user_at_work", "kid1_with_user",
+    "kid1_with_partner", "partner_at_work", "quiet_hours",
+}
+_CONTEXT_ENUM_VALUES = {
+    "current_shift": {"morning", "afternoon", "night"},
+    "partner_work_mode": {"office", "remote"},
+    "kid1_absence_scope": {"extended", "temporary", "home"},
+}
+
 _CONTEXT_EXTRACTION_PROMPT = """
 You are {bot_name}, an AI assistant. The user ({user_name}) sends you a message.
 You need to understand from the context if any of the following states (context flags) are changing.
@@ -155,6 +166,7 @@ class ContextExtractionResult:
 
     relation: str = "uncertain"
     applied_flags: frozenset[str] = frozenset()
+    continue_conversation: bool = False
 
 
 def extract_and_update_context_flags(
@@ -168,6 +180,7 @@ def extract_and_update_context_flags(
     and directly updates astakos_routines.db context states.
     """
     clarification = clarification_context is not None
+    continue_conversation = False
     empty_result = ContextExtractionResult() if clarification else None
     if not user_text or (not clarification and len(user_text.strip()) < 3):
         return empty_result
@@ -213,36 +226,37 @@ def extract_and_update_context_flags(
         if payload is None:
             return empty_result
         if clarification:
-            if (not isinstance(payload, dict) or set(payload) != {"relation", "flags"}
+            if (not isinstance(payload, dict)
+                    or set(payload) not in ({"relation", "flags"}, {"relation", "flags", "continue_conversation"})
                     or not isinstance(payload["relation"], str)
                     or payload["relation"] not in {"related", "unrelated", "uncertain", "refused"}
-                    or not isinstance(payload["flags"], dict)):
+                    or not isinstance(payload["flags"], dict)
+                    or type(payload.get("continue_conversation", False)) is not bool):
                 return empty_result
             relation = payload["relation"]
+            continue_conversation = payload.get("continue_conversation", False)
             if relation != "related":
-                return ContextExtractionResult(relation)
+                return ContextExtractionResult(relation, continue_conversation=continue_conversation)
             payload = payload["flags"]
-            if (not payload or not set(payload) <= set(context["flags"])
-                    or any(type(value) is not bool for value in payload.values())
+            allowed = set(context["flags"])
+            if continue_conversation:
+                # Additional explicit facts use the existing bounded schema,
+                # never arbitrary model-selected state keys.
+                allowed |= _CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES)
+            enum_values = _CONTEXT_ENUM_VALUES
+            if (not payload or not set(payload) <= allowed
+                    or any((type(value) is not str or value not in enum_values[key])
+                           if key in enum_values else type(value) is not bool
+                           for key, value in payload.items())
                     or (clarification_still_current is not None
                         and not clarification_still_current())):
                 return empty_result
         
         # Validate and apply only known flags
-        valid_keys = {
-            "user_out_of_home",
-            "family_at_home",
-            "partner_with_user",
-            "kid1_away_from_home",
-            "user_at_work",
-            "kid1_with_user",
-            "kid1_with_partner",
-            "partner_at_work",
-            "quiet_hours",
-        }
-        valid_shifts = {"morning", "afternoon", "night"}
-        valid_partner_work_modes = {"office", "remote"}
-        valid_absence_scopes = {"extended", "temporary", "home"}
+        valid_keys = _CONTEXT_BOOLEAN_FLAGS
+        valid_shifts = _CONTEXT_ENUM_VALUES["current_shift"]
+        valid_partner_work_modes = _CONTEXT_ENUM_VALUES["partner_work_mode"]
+        valid_absence_scopes = _CONTEXT_ENUM_VALUES["kid1_absence_scope"]
         
         # Only update if the payload is a dictionary
         if not isinstance(payload, dict):
@@ -318,12 +332,12 @@ def extract_and_update_context_flags(
         if applied_flags is None:
             # Interpretation owns this reply even if another worker resolved
             # the question or it expired before this worker could commit it.
-            return ContextExtractionResult("related") if clarification else None
+            return ContextExtractionResult("related", continue_conversation=continue_conversation) if clarification else None
 
         if clarification:
             # No second reconciler interpretation of a short answer. Existing
             # consistency rules and the canonical writer above remain authoritative.
-            return ContextExtractionResult("related", frozenset(applied_flags))
+            return ContextExtractionResult("related", frozenset(applied_flags), continue_conversation)
 
         reconciled_directives = infer_routine_reconciliation_directives(
             user_text,

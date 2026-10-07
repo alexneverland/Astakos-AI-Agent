@@ -176,6 +176,11 @@ def classify_packet(packet: dict[str, Any], *, dependencies: bool = False) -> An
     from config import RESPONSE_LANGUAGE
     name = "routine_context_dependencies.md" if dependencies else "routine_context_question.md"
     prompt = (Path(__file__).resolve().parents[1] / "prompts" / name).read_text(encoding="utf-8")
+    if not dependencies:
+        from core.utils import load_agent_prompt
+        # Share conversational personality without importing Chat's tool policy.
+        personality = load_agent_prompt("Chat_Agent").partition("═══ PERSONALITY ═══")[2].partition("═══")[0].strip()
+        prompt = personality + "\n\n" + prompt
     response = safe_llm_invoke(llm, [SystemMessage(content=prompt), HumanMessage(content=
         format_untrusted_tool_result("routine context evidence", json.dumps(
             {**packet, "language": RESPONSE_LANGUAGE}, default=str, ensure_ascii=False)))])
