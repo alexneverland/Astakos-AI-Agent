@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 import logging
@@ -34,7 +34,11 @@ def _idle(rows: list[dict[str, Any]], now: datetime) -> bool:
     """Require known valid timestamps and fifteen minutes without any message."""
     if not rows:
         return False
-    return all(now - datetime.fromisoformat(row["timestamp"]) >= timedelta(minutes=15) for row in rows)
+    # Legacy history/clock values are host-local; new context receipts include
+    # offsets. Compare instants, preserving offsets rather than stripping them.
+    instant = now.astimezone(timezone.utc)
+    return all(instant - datetime.fromisoformat(row["timestamp"]).astimezone(timezone.utc)
+               >= timedelta(minutes=15) for row in rows)
 
 
 def _decision_valid(raw: Any, evidence: list[dict[str, Any]]) -> bool:
@@ -105,10 +109,14 @@ def run_initiative(
                     return outcome("held", "ambiguous_pending_delivery")
             else:
                 delivered = state["delivered"]
-                if any(datetime.fromisoformat(item["delivered_at"]) > now or
-                       datetime.fromisoformat(item["delivered_at"]).date() == now.date() for item in delivered):
+                delivered_times = [datetime.fromisoformat(item["delivered_at"]).astimezone()
+                                   for item in delivered]
+                instant = now.astimezone(timezone.utc)
+                if any(stamp.astimezone(timezone.utc) > instant or
+                       stamp.date() == now.astimezone().date() for stamp in delivered_times):
                     return outcome("skip", "daily_limit_or_future_delivery")
-                recent = [item for item in delivered if now - datetime.fromisoformat(item["delivered_at"]) < timedelta(days=7)]
+                recent = [item for item, stamp in zip(delivered, delivered_times)
+                          if instant - stamp.astimezone(timezone.utc) < timedelta(days=7)]
                 diagnostic["stage"] = "evidence"
                 packets = evidence_loader(today=now.date(), window_days=30)
                 evidence = [packet for packet in packets
@@ -165,7 +173,8 @@ def run_initiative(
             diagnostic["stage"] = "history"
             return outcome(_finish_record(state, store, record), "delivered")
     except Exception as exc:
-        _logger.warning("Behavioral initiative skipped or held (%s)", type(exc).__name__)
+        _logger.warning("Behavioral initiative skipped or held (stage=%s, error=%s)",
+                        diagnostic["stage"], type(exc).__name__)
         diagnostic["error_type"] = type(exc).__name__
         reason = {"classify": "model_error", "delivery": "delivery_error",
                   "history": "history_error", "receipt": "receipt_persistence_error"}.get(diagnostic["stage"], "worker_error")

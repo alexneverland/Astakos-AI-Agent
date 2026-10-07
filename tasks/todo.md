@@ -8,6 +8,19 @@ this active checklist; evidence remains in Git history, specs/runbooks and the
 
 ## Current feature: context-evidence (foundation offline verified)
 
+- [x] Fix mixed naive/offset timestamps blocking behavioral initiative before
+  model evaluation; cover idle, future history, daily/topic limits and reminders.
+  Clarification no-op ticks are quiet in the terminal; errors/deliveries and
+  structured diagnostics remain visible. 94 tests pass in the expanded offline
+  check; syntax checks and git diff --check pass. Ten regressions failed first.
+- [ ] Repair legacy test transport isolation in two missed-routine tests
+  (test_event_log_and_missed_routines.py): they mock Telegram sends despite
+  Matrix selection. Both also fail with the pre-change queue/activity/reminder
+  implementations from HEAD; deferred rather than bundled into this fix.
+- [ ] Naturally verify that the active external worker no longer reports the
+  initiative timestamp TypeError and clarification no-op banners after restart.
+  An opener remains optional: model decisions and existing safety gates apply.
+
 - [x] Fix live Matrix GPS/answer race: acknowledge an already-resolved question
   without reapplying the old answer or offering a spurious capability bug.
   Verified with 86 focused offline tests; approval gates unchanged.

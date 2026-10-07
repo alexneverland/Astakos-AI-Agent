@@ -186,14 +186,14 @@ def has_recent_reminder_delivery(now: datetime, *, grace_seconds: int = 900) -> 
     Include yesterday across midnight. These existing sent records are a
     conservative activity signal, not proof of external delivery success.
     """
-    from datetime import timedelta
+    from datetime import timedelta, timezone
 
     for day in (now.date(), (now - timedelta(seconds=grace_seconds)).date()):
         for event in get_events(day.isoformat(), action="sent", strict=True):
             if event.get("job") not in {"reminder", "reminders"}:
                 continue
             sent_at = datetime.fromisoformat(event["timestamp"])
-            if now - sent_at < timedelta(seconds=grace_seconds):
+            if now.astimezone(timezone.utc) - sent_at.astimezone(timezone.utc) < timedelta(seconds=grace_seconds):
                 return True
     return False
 
