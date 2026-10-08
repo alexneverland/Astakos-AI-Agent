@@ -1,5 +1,13 @@
 # Astakos: Current Plan
 
+## Current entry point (2026-10-08)
+
+Start with `handoff.md` for the verified Git snapshot and current boundaries.
+PRs #227 through #236 are merged; their implementation/review checkpoints below
+are historical, not instructions to reopen work or repeat a migration/reset.
+Natural/live observation and explicitly deferred tasks remain open in `todo.md`.
+There is no open owner feature PR at this checkpoint; Dependabot PRs are separate.
+
 ## General behavioral identity repair (2026-10-08)
 
 Owner-approved contract: `tasks/behavioral-entity-identity-spec.md`. Extend the

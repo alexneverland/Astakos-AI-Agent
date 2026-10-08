@@ -1,5 +1,13 @@
 # Astakos: Current Tasks
 
+## Current status (2026-10-08)
+
+See `handoff.md` before interpreting older checkpoints. PRs #227 through #236
+are merged; implementation/review lifecycle wording below is historical.
+Unfinished natural observation, isolated recovery rehearsal, legacy test transport
+isolation and separately scoped enhancements are not implicitly completed.
+The dated routine migration/baseline reset already happened; do not repeat it.
+
 ## General behavioral identity repair (2026-10-08)
 
 - [x] Reproduce semantic identity resolution through extraction, temporary storage
@@ -30,7 +38,7 @@
   and whitespace/diff review passed; no full-suite run or live-data changes.
 - [ ] Observe a natural project update/follow-up reply; offline bindings and
   persistence do not prove the provider's future semantic tool selection.
-- PR requested by the owner; review/merge remain separate next steps.
+- PR #235 merged and its task branch deleted; natural observation remains open.
   No live goal backfill or storage migration.
 - [x] PR #235 Codex P2 findings reproduced: creation cannot replace an existing
   active/paused/done project; approved status/progress updates retain external
@@ -107,7 +115,7 @@
   Changed Python files compiled and diff review/whitespace checks passed.
   These runs overlap; counts are not added. No full suite or live model test.
 - [x] Owner authorized a separate commit/PR after merging PR #232.
-- [ ] Owner-controlled live observation and review lifecycle.
+- [ ] Owner-controlled live observation (PR #233 review/merge completed).
 
 ## Bounded context re-questions (2026-10-08)
 
@@ -177,7 +185,7 @@
   canonical schema and guarded write; background extraction cannot retry stale
   related answers. Standalone answers remain context-only. Question generation
   reuses Chat's personality section and singular tone, without tool instructions.
-- [ ] Review and naturally verify mixed context answers and question wording.
+- [ ] Naturally verify mixed context answers and question wording (PR #228 merged).
   Offline verification is not proof of live model interpretation or tool delivery.
 - [x] PR #228 actionable review fixes: durable routine reconciliation continues
   separately from live flags; missing continuation metadata fails open only for
@@ -495,6 +503,8 @@ full-suite run.
 
 No completed channel, review or backup implementation phase remains an active
 task. Do not rerun the full test suite by default.
+
+### Historical RF3 checkpoints (superseded by the completed rollout above)
 
 Routine feedback RF3 checkpoint: shared catalog/dated-turn composition verified
 with 110 focused offline tests. Names, dates and revision tokens share one read
