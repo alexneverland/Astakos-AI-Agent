@@ -23,8 +23,8 @@ def request(
     return QuestionRequest(
         id=identifier,
         topic=topic,
-        routine_ids=("routine-1",),
-        flags=("user_out_of_home",),
+        routine_ids=(identifier,),
+        flags=(topic,),
         slot_at=NOW + timedelta(minutes=minutes_until_slot),
         question="Γυρίσατε σπίτι;",
         channel="matrix",
@@ -65,7 +65,7 @@ def test_refused_send_budget_preserves_reserved_request(tmp_path):
 
 
 def test_delivery_and_decline_keep_topic_and_daily_budget(tmp_path):
-    """Closing a question does not permit the same topic or a third question."""
+    """Decline stays respected while three distinct topics share the daily cap."""
     store = ClarificationStore(tmp_path / "clarification.json")
     assert store.reserve(request("one"), now=NOW)
     assert store.begin_send("one", now=NOW)
@@ -76,7 +76,68 @@ def test_delivery_and_decline_keep_topic_and_daily_budget(tmp_path):
     assert store.begin_send("two", now=NOW + timedelta(minutes=1))
     assert store.mark_sent("two", external_id="$event-2", now=NOW + timedelta(minutes=1))
     assert store.close("two", outcome="resolved", now=NOW + timedelta(minutes=1))
-    assert not store.reserve(request("three", topic="kid1_with_user"), now=NOW + timedelta(minutes=2))
+    assert store.reserve(request("three", topic="kid1_with_user"), now=NOW + timedelta(minutes=2))
+    assert store.begin_send("three", now=NOW + timedelta(minutes=2))
+    assert store.mark_sent("three", external_id="$event-3", now=NOW + timedelta(minutes=2))
+    assert store.close("three", outcome="resolved", now=NOW + timedelta(minutes=2))
+    assert not store.reserve(request("four", topic="family_at_home"), now=NOW + timedelta(minutes=3))
+
+
+@pytest.mark.parametrize("outcome", ["expired", "resolved"])
+def test_later_routine_can_reask_location_after_half_hour(tmp_path, outcome):
+    """Rabbit context cannot permanently block the later market's location question."""
+    path = tmp_path / "state.json"
+    store = ClarificationStore(path)
+    assert store.reserve(request("rabbit"), now=NOW)
+    assert store.begin_send("rabbit", now=NOW)
+    assert store.mark_sent("rabbit", external_id="$rabbit", now=NOW)
+    if outcome == "resolved":
+        assert store.close("rabbit", outcome=outcome, now=NOW + timedelta(minutes=1))
+    else:
+        assert store.expire(now=NOW + timedelta(minutes=12))
+    assert ClarificationStore(path).reserve(
+        request("market", minutes_until_slot=45), now=NOW + timedelta(minutes=30))
+
+
+def test_same_routine_and_overlapping_flags_cannot_bypass_repeat_guard(tmp_path):
+    """Renaming a topic or adding another flag cannot bypass half-hour spacing."""
+    from dataclasses import replace
+    store = ClarificationStore(tmp_path / "state.json")
+    assert store.reserve(request("rabbit"), now=NOW)
+    assert store.begin_send("rabbit", now=NOW)
+    assert store.mark_sent("rabbit", external_id="$rabbit", now=NOW)
+    assert store.expire(now=NOW + timedelta(minutes=12))
+    grouped = replace(request("market", minutes_until_slot=75),
+                      topic="grouped", flags=("user_out_of_home", "partner_with_user"))
+    assert not store.reserve(grouped, now=NOW + timedelta(minutes=29))
+    assert not store.reserve(replace(grouped, routine_ids=("rabbit",)),
+                             now=NOW + timedelta(minutes=30))
+    assert store.reserve(grouped, now=NOW + timedelta(minutes=30))
+
+
+def test_explicit_decline_blocks_same_flag_for_rest_of_day(tmp_path):
+    """An explicit refusal is not treated like an unanswered expired question."""
+    store = ClarificationStore(tmp_path / "state.json")
+    assert store.reserve(request("rabbit"), now=NOW)
+    assert store.begin_send("rabbit", now=NOW)
+    assert store.mark_sent("rabbit", external_id="$rabbit", now=NOW)
+    assert store.close("rabbit", outcome="declined", now=NOW)
+    assert not store.reserve(request("market", minutes_until_slot=135),
+                             now=NOW + timedelta(hours=2))
+
+
+def test_three_location_questions_but_not_four_survive_restart(tmp_path):
+    """The owner can move repeatedly without receiving unlimited questions."""
+    path = tmp_path / "state.json"
+    for index in range(3):
+        now = NOW + timedelta(hours=index)
+        store = ClarificationStore(path)
+        assert store.reserve(request(str(index), minutes_until_slot=index * 60 + 12), now=now)
+        assert store.begin_send(str(index), now=now)
+        assert store.mark_sent(str(index), external_id=f"$event-{index}", now=now)
+        assert store.close(str(index), outcome="resolved", now=now)
+    assert not ClarificationStore(path).reserve(request("four", minutes_until_slot=192),
+                                               now=NOW + timedelta(hours=3))
 
 
 def test_uncertain_send_reserves_budget_across_restart(tmp_path):

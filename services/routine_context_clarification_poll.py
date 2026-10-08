@@ -123,7 +123,7 @@ def run_clarification_poll(
             runtime_context=snapshot.runtime_context, evidence=snapshot.evidence,
             channel=channel, now=now, history_marker=snapshot.history_marker,
             classify=classify, still_current=fresh, current_time=clock,
-            evaluation_claim=store.claim_evaluation)
+            evaluation_claim=store.claim_evaluation, question_allowed=store.can_ask)
         if question is None:
             relevant = any(0 < (row.slot_at - now).total_seconds() <= 900
                 and candidate_unknown_flags(row, snapshot.runtime_context, snapshot.evidence, now=now)
