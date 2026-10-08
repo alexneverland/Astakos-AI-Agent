@@ -120,11 +120,11 @@ def test_aggregator_groups_case_variants_under_one_deterministic_signature():
     }]
 
 
-def test_aggregator_groups_named_observations_despite_taxonomy_drift():
-    """Repeated named observations remain visible when extractor labels evolve."""
+def test_aggregator_groups_canonical_behavior_despite_category_drift():
+    """Categories are display data; specific behavior is resolved at extraction."""
     candidates = aggregate_behavioral_pattern_candidates([
         _event(
-            event_type="consumption",
+            event_type="alcohol_consumption",
             action_kind="consume",
             category="alcohol",
             item="beer",
@@ -132,7 +132,7 @@ def test_aggregator_groups_named_observations_despite_taxonomy_drift():
             event_date="2026-08-01",
         ),
         _event(
-            event_type="consume",
+            event_type="alcohol_consumption",
             action_kind="consume",
             category="food_and_drink",
             item="beer",

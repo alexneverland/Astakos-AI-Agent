@@ -1,5 +1,12 @@
 # Spec: Behavioral Events — Phase 3 Read-Only Patterns
 
+Current refinement (2026-10-08): the named-item grouping contract below is
+superseded by `behavioral-entity-identity-spec.md`. Specific event type now
+participates in pattern identity; semantic extraction reuses canonical behavior
+references instead of grouping all actions under one broad action kind. The
+old broader key remains only for initiative topic suppression. Historical
+events are not rewritten; stricter grouping can change their candidate counts.
+
 ## Objective
 
 Derive inspectable, deterministic pattern candidates from already confirmed
