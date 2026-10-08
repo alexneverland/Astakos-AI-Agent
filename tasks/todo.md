@@ -1,5 +1,31 @@
 # Astakos: Current Tasks
 
+## Optional routine context notes (2026-10-08)
+
+- [x] Owner-approved scope: one 30% gate; work/shift may allow a relevant comment,
+  never the blocked activity. Explicit silence and quiet hours remain respected.
+- [x] Review the scoped implementation sequence at the top of `tasks/plan.md`.
+- [x] Reproduce blocked-path and durable evaluation/delivery lifecycles offline;
+  confirm storage reuse without schema or live-data changes.
+- [x] Unified structured semantic note decision without keyword lists; exact
+  positive, no-note and safety/error cases fail before repair and pass afterward.
+- [x] Shared scheduler integration and fresh-state/once-per-occurrence delivery;
+  no pending confirmation, completion, cooldown or confidence mutation.
+- [x] Focused regression tests, compilation and whitespace/diff review; no full suite.
+  263 passed, one existing Google dependency deprecation warning. Both channels
+  record one note without dated feedback/confirmation changes; owner-history,
+  GPS, completion, silence and channel races reject stale comments. Fixed the
+  old silent-skip fixture's stale package reference after combined tests exposed
+  cross-module contamination. Five changed Python files compile successfully.
+  No live messages, provider calls, schema migration or owner-data changes.
+- [ ] Owner-controlled natural observation remains separate from offline evidence.
+- [x] PR #234 Codex P1/P2 reproduced in both channels (four failing regressions):
+  pin note delivery through the canonical helper's optional target channel and
+  invalidate inference on any shared-history update, not only owner messages.
+  277 related offline tests passed, one existing dependency warning; compilation
+  and whitespace checks clean. Matching-channel history repair remains idempotent;
+  no full suite, live messages, configuration or owner-data changes.
+
 ## Daily context inference (approved 2026-10-08)
 
 - [x] RED/GREEN: source-timed daily references and canonical flag persistence.

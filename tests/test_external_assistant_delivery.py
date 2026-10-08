@@ -81,6 +81,32 @@ def test_assistant_delivery_does_not_record_a_failed_send() -> None:
     assert recorded == []
 
 
+@pytest.mark.parametrize("channel", ["matrix", "telegram"])
+@pytest.mark.parametrize("selection_changed", [False, True])
+def test_pinned_assistant_delivery_never_redirects_or_records_wrong_channel(channel, selection_changed):
+    """Pinned delivery retains default recording but fails before any wrong send."""
+    from services.external_assistant_delivery import deliver_external_assistant_text
+    other = "telegram" if channel == "matrix" else "matrix"
+    selected = other if selection_changed else channel
+    router = ExternalDeliveryRouter(channel_selector=lambda: selected)
+    transports = {channel: FakeTransport(), other: FakeTransport()}
+    for name, transport in transports.items():
+        router.register(name, transport)
+    records = []
+    def deliver():
+        return deliver_external_assistant_text("note", agent="Routine_Agent", router=router,
+            target_channel=channel, record_message=lambda *args: records.append(args))
+    if selection_changed:
+        with pytest.raises(ExternalDeliveryError, match="not selected"):
+            deliver()
+        assert records == [] and transports[channel].texts == []
+    else:
+        assert deliver().channel == channel
+        assert records == [(channel, "note", "Routine_Agent", "event-42")]
+        assert transports[channel].texts == [("note", False)]
+    assert transports[other].texts == []
+
+
 def test_bot_retains_confirmed_receipt_when_history_fails(monkeypatch, tmp_path):
     """History failure must not make a successful Matrix send look retryable."""
     from clients import telegram_bot as bot

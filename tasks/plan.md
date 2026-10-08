@@ -1,5 +1,62 @@
 # Astakos: Current Plan
 
+## Next routine slice: optional context notes (2026-10-08)
+
+Approved contract: `tasks/routine-context-notes-spec.md`. Keep the blocked action
+separate from an optional 30%-gated semantic comment; work/shift is not a blanket
+comment exclusion. Explicit silence, quiet hours and canonical freshness remain.
+This section extends routine work; all existing live/restore tasks remain intact.
+
+Implementation sequence, approved by the owner and implemented:
+
+1. Reproduce the blocked-routine path and confirm a reusable durable reservation
+   that records note evaluation without creating reminder pressure. Cover repeated
+   ticks/restart and confirmed transport success followed by history failure.
+   Expected scope: focused tests and the existing persistence abstraction. If
+   schema changes are necessary, stop for explicit approval instead of migrating.
+2. Implement one tool-free structured note decision with bounded, provenance-
+   wrapped shared context. Retire keyword and permanent-sentimental gates from
+   this path only. Verify no-note, work-context, invalid output and provider failure.
+   Expected scope: focused service, prompt and tests (at most five files).
+3. Connect the decision to known blocked conditions and semantic context skips
+   in the shared scheduler. Preserve normal action/confirmation flow; revalidate
+   state, occurrence, channel and silence immediately before delivery. Record
+   evaluation/delivery diagnostics without treating the note as routine feedback.
+   Expected scope: scheduler, canonical delivery helper and integration tests.
+
+Checkpoints: RED/GREEN per slice, then focused silent-skip/dated-delivery/context
+regressions, compilation and `git diff --check`. No full suite, live messages,
+real data edits, runtime changes or subagents. Final natural wording needs owner
+observation; successful offline tests do not prove live semantic quality.
+
+Risks: pressure contamination, poll-based rerolls, duplicates after history
+failure and stale inference. Guard with distinct note state, durable once-per-
+occurrence reservation, preserved transport receipt and canonical revalidation.
+No separate scheduler or new behavioral initiative is introduced.
+
+Implemented using held `note-` evaluation entries in the existing clarification
+ledger (unchanged schema), protected from same-day dependency-cache eviction.
+Chance, null/error output and uncertain transport all hold that occurrence;
+optional comments are deliberately not retried. The tool-free model receives
+canonical context plus bounded, provenance-wrapped history and Chat personality.
+Shared scheduler paths cannot fall through from a blocked note into a reminder.
+Final checks cover fresh owner history, GPS/evidence versions, completion, channel
+selection, explicit silence, quiet hours and proactive budgets. Confirmed sends
+use canonical history delivery; history failures queue repair without resending.
+Live semantic observation remains pending; the scoped PR lifecycle is tracked
+on GitHub separately from offline verification.
+Focused verification: 263 passed, one existing dependency warning; compilation
+of all five changed Python files and whitespace checks passed. The old silent-
+skip fixture now restores the original package/module reference after stubbing,
+so combined dated-scheduler regressions use the real bot rather than leaked stubs.
+PR #234 review correction: pin the captured external channel via the existing
+assistant delivery helper's optional `target_channel`; a changed selection fails
+before transport, with no fallback. Capture/recheck the all-message history rowid
+because wording references include assistant/background messages as well as user
+messages. Four real-router/temporary-history cases failed before these repairs.
+277 focused tests passed after repair, including confirmed-send history recovery
+and backward-compatible unpinned callers. Live semantic observation stays pending.
+
 ## Approved extension: daily context inference (2026-10-08)
 
 Contract: `tasks/daily-context-inference-spec.md`, approved by the owner.
