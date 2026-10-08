@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from hashlib import sha256
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -195,9 +196,47 @@ class ClarificationStore:
             if any(item["day"] == day and item["fingerprint"] == fingerprint
                    for item in state["evaluations"]):
                 return False
-            state["evaluations"] = (state["evaluations"] + [
-                {"fingerprint": fingerprint, "day": day},
-            ])[-128:]
+            if not self._append_evaluation(state, {"fingerprint": fingerprint, "day": day}, current):
+                return False
+            self._save(state)
+            return True
+
+    @staticmethod
+    def _append_evaluation(state: dict[str, Any], row: dict[str, str], current: datetime) -> bool:
+        """Keep today's note reservations under bounded dependency-cache churn."""
+        retained = [item for item in state["evaluations"]
+                    if item["fingerprint"].startswith("note-")
+                    and item["day"] >= current.date().isoformat()]
+        if len(retained) >= 128:
+            return False  # Never evict a held send to make room for another evaluation.
+        ordinary = [item for item in state["evaluations"] if item not in retained]
+        if row["fingerprint"].startswith("note-"):
+            retained.append(row)
+        else:
+            ordinary.append(row)
+        room = 128 - len(retained)
+        state["evaluations"] = (ordinary[-room:] if room else []) + retained
+        return True
+
+    def claim_context_note(self, routine_id: str, slot_at: datetime, *, now: datetime) -> bool:
+        """Reserve a note once per Athens occurrence, without reminder feedback.
+
+        The unchanged evaluation record schema holds the reservation before chance,
+        inference or transport. An interrupted/uncertain attempt is not resendable.
+        """
+        current, slot = _aware(now), _aware(slot_at)
+        if not isinstance(routine_id, str) or not routine_id.isdecimal() or int(routine_id) <= 0:
+            raise ValueError("A canonical routine identity is required")
+        if not 0 <= (slot - current).total_seconds() <= 900:
+            return False
+        day = slot.date().isoformat()
+        key = "note-" + sha256(f"{int(routine_id)}:{day}".encode()).hexdigest()
+        with self._lock():
+            state = self._load()
+            if any(item["fingerprint"] == key for item in state["evaluations"]):
+                return False
+            if not self._append_evaluation(state, {"fingerprint": key, "day": day}, current):
+                return False
             self._save(state)
             return True
 

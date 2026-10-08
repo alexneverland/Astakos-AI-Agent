@@ -4264,27 +4264,63 @@ def _get_env_context() -> str:
         return ""
 
 
-def _should_send_sentimental_context_note(
-    routine_id: int,
-    event_name: str,
-) -> bool:
-    """Return whether a skipped sentimental routine may send one warm note."""
-    from memory.routine_db import get_sentimental_info, set_routine_sentimental
-    import random
+def _maybe_send_routine_context_note(
+    candidate: "RoutineCandidate", context: dict, evidence: dict,
+    store: "ClarificationStore", reason: str, *, budget_reserved: bool = False,
+) -> str:
+    """Comment on a held action through the same canonical freshness gates."""
+    from memory.routine_context_clarification import ATHENS
+    from memory.routine_db import get_sentimental_info
+    from memory.conversation_history import get_latest_trusted_user_rowid
+    from core.messaging_channel import resolve_external_channel
+    from services.routine_context import build_runtime_routine_context, build_routine_context_evidence, project_routine_context
+    from services.routine_context_clarification_poll import PollSnapshot
+    from services.routine_context_clarification_scheduler import dispatch_context_current
+    from services.routine_context_notes import send_context_note
+    from services.external_assistant_delivery import deliver_external_assistant_text
 
-    info = get_sentimental_info(routine_id)
-    if info.get("sentimental_silenced"):
-        return False
+    def clock() -> datetime:
+        """Read one explicit local instant, also supporting the test clock."""
+        at = datetime.now()
+        return at.replace(tzinfo=ATHENS) if at.tzinfo is None else at.astimezone(ATHENS)
 
-    sentimental = info.get("sentimental")
-    if sentimental is None:
-        sentimental = _infer_sentimental(event_name, "")
-        set_routine_sentimental(routine_id, bool(sentimental))
+    try:
+        channel = _current_external_runtime_channel()
+        baseline = PollSnapshot((candidate,), context, evidence,
+                                str(get_latest_trusted_user_rowid())).fingerprint()
 
-    if not sentimental:
-        return False
+        def fresh() -> bool:
+            """Recheck silence, receipt-aware eligibility, history and GPS/state."""
+            at = clock()
+            if (channel != resolve_external_channel() or channel != _current_external_runtime_channel()
+                    or get_sentimental_info(int(candidate.id)).get("sentimental_silenced")
+                    or should_skip_proactive_for_recent_activity(quiet=True)
+                    or not dispatch_context_current((candidate,), context, store, at)):
+                return False
+            current_evidence = build_routine_context_evidence(at)
+            current = project_routine_context(build_runtime_routine_context(at), current_evidence)
+            return PollSnapshot((candidate,), current, current_evidence,
+                str(get_latest_trusted_user_rowid())).fingerprint() == baseline
 
-    return random.random() < config.SENTIMENTAL_CONTEXT_NOTE_PROBABILITY
+        outcome = send_context_note(packet={
+            "routine": {"id": candidate.id, "name": candidate.name[:500],
+                        "slot_at": candidate.slot_at.isoformat(),
+                        "conditions": list(candidate.conditions)[:5]},
+            "context": context, "reason": reason[:800], "channel": channel,
+        }, store=store, now=clock(), fresh=fresh,
+            deliver=lambda text: deliver_external_assistant_text(text, agent="Routine_Agent"),
+            queue_history_repair=enqueue_fast_task,
+            budget=(lambda: True) if budget_reserved else can_send_proactive)
+        if (outcome != "already_evaluated"
+                and _should_log_routine_skip(int(candidate.id), "routine_context_note", outcome)):
+            log_event("routines", "routine_context_note", routine_id=int(candidate.id),
+                      event=candidate.name, outcome=outcome, debug_type="proactive_decision",
+                      debug_source="scheduler", debug_effect="context_note_sent"
+                      if outcome.startswith("sent") else "context_note_skipped")
+        return outcome
+    except Exception as exc:
+        print(f"[RoutineContextNote]: failed closed: {type(exc).__name__}")
+        return "error"
 
 
 def _craft_proactive_msg(
@@ -4449,28 +4485,6 @@ def _infer_sentimental(event_name: str, memory_context: str) -> bool:
         return content.strip().upper().startswith("YES")
     except Exception as e:
         print(f"[_infer_sentimental Error]: {e}")
-        return False
-
-
-def _should_allow_sentimental_override(event_name: str, cond_result: dict) -> bool:
-    """
-    Keep sentimental overrides for family/home-like routines, but block them
-    for work/shift-driven suppressions.
-    """
-    try:
-        results = cond_result.get("results") or []
-        reason_blob = " ".join(
-            str(item.get("reason", "")) for item in results if isinstance(item, dict)
-        ).lower()
-
-        from config import SENTIMENTAL_OVERRIDE_KEYWORDS
-        
-        if any(token in reason_blob for token in ("shift_mode", "user_at_work", "partner_work_mode")):
-            return False
-
-        event_norm = _normalize_gr(event_name)
-        return any(token in event_norm for token in SENTIMENTAL_OVERRIDE_KEYWORDS)
-    except Exception:
         return False
 
 
@@ -5150,19 +5164,11 @@ def job_check_routines():
                                     debug_effect="blocked",
                                 )
                         
-                            import random
-                            # 30% chance for a Sentimental Override (approx 2 times a week for a daily routine)
-                            if random.random() < 0.30 and _should_allow_sentimental_override(event_name, cond_result):
-                                blocked_reason_text = ", ".join(str(r.get("reason", "blocked")) for r in cond_result.get("results", []) if not r.get("allowed"))
-                                override_name = f"{event_name} [CANCELLED TODAY DUE TO: {blocked_reason_text}]"
-                                if should_log:
-                                    print(f"\U0001f496 [job_check_routines]: #{r_id} '{event_name}' blocked but triggering sentimental override!")
-                                # Fall through to due_routines to let the LLM generate a [CONTEXT_SKIP]
-                                event_name = override_name
-                            else:
-                                if should_log:
-                                    print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('failed_count')} failed) — skipped")
-                                continue
+                            _maybe_send_routine_context_note(candidate, rt_context,
+                                context_evidence, clarification_store, blocked_reason)
+                            if should_log:
+                                print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('failed_count')} failed) — skipped")
+                            continue  # A note can never fall through to action/reminder delivery.
                         else:
                             log_event(
                                 "routines", 
@@ -5403,29 +5409,11 @@ def job_check_routines():
                             msg = context_skip_preview
 
                         if is_context_skip:
+                            _maybe_send_routine_context_note(due_context_candidates[0], rt_context,
+                                context_evidence, clarification_store, context_skip_preview,
+                                budget_reserved=True)
                             cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                             conn.commit()
-                            if (
-                                is_context_note
-                                and _should_send_sentimental_context_note(
-                                    r_id,
-                                    event_name,
-                                )
-                            ):
-                                _send_and_record_assistant(
-                                    msg,
-                                    agent="Routine_Agent",
-                                )
-                                log_event(
-                                    "routines",
-                                    "routine_context_note",
-                                    routine_id=r_id,
-                                    event=event_name,
-                                    preview=msg[:160],
-                                    debug_type="proactive_decision",
-                                    debug_source="scheduler",
-                                    debug_effect="context_note_sent",
-                                )
                             _clear_routine_pending_confirmation(r_id)
                             muted_until = None
                             log_event(
