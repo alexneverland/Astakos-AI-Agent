@@ -20,8 +20,8 @@
   113 related offline tests passed (one existing dependency warning); repaired
   a stale fixture loader name that had caused six setup errors in the first run.
   Compilation and whitespace checks passed; no full suite or live-data changes.
-- [ ] Latest-commit Codex result and merge remain pending; do not treat old review
-  or CI status as evidence of the new review result.
+- [x] Final Codex review of `bf5400d` completed without new findings; checked
+  inline comments and top-level result. Earlier actionable findings are fixed.
 - [x] Owner approved including partner-work-mode repair in this PR. Removed the
   word-cooccurrence fallback; the canonical semantic extractor retains explicit
   remote-work support. Real-store regressions cover all three channels.
