@@ -26,6 +26,7 @@ class FeedbackTurnResult:
 
     status: Literal["applied", "stale", "clarify", "none", "error"]
     selection: DatedRoutineSelection = DatedRoutineSelection("none")
+    routine_name: str | None = None
 
 
 class PersistedRoutineFeedbackHandler:
@@ -295,12 +296,14 @@ def process_feedback_turn(
         if selection.action == "none":
             return FeedbackTurnResult("none")
         if selection.action == "clarify":
-            return FeedbackTurnResult("clarify", selection)
+            return FeedbackTurnResult("clarify", selection,
+                                      routine_name=candidates.get(selection.routine_id))
         applied = store.record_feedback(selection.routine_id, selection.occurrence_date,
             selection.action, at=now, expected_revision=revisions[selection.routine_id],
             is_current=is_current)
         if not applied:
             return FeedbackTurnResult("stale", selection)
-        return FeedbackTurnResult("clarify" if selection.action == "defer" else "applied", selection)
+        return FeedbackTurnResult("clarify" if selection.action == "defer" else "applied",
+                                  selection, routine_name=candidates.get(selection.routine_id))
     except Exception:
         return FeedbackTurnResult("error")

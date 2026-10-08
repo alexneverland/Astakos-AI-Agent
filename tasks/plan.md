@@ -1,6 +1,27 @@
 # Astakos: Current Plan
 
-## Next narrow work: Git inspection and approved-result continuation
+## Current narrow work: routine conversation wording
+
+PR #229 is merged and its task branch deleted (2026-10-07). This next slice
+changes wording context only: the canonical dated feedback result carries its
+selected routine name as bounded, provenance-wrapped display reference outside
+the trusted action/date JSON. Normal conversation can acknowledge what was
+actually recorded in Astakos' singular voice, without inventing current location.
+Context-question generation reads up to six shared Web/Telegram/Matrix messages,
+with timestamps and bounded content, for conversational wording only. The
+separate dependency classifier and all current evidence, freshness, persistence,
+approval and scheduling guards remain unchanged. Optional history failure falls
+back to the normal evidence-only question prompt. Offline tests exercise real
+temporary history/feedback storage and mock only the provider boundary.
+Natural model wording remains owner-observed; no live state or runtime changes,
+subagents or full-suite rerun belong to this implementation. The owner authorized
+commit/PR for this slice; review and merge remain separate follow-up actions.
+PR #230 corrections also supply the canonical selected name for ambiguous-date
+clarifications (no feedback write) and limit wording history to the current
+daily shared session. Tests exclude obsolete sessions while retaining today's
+cross-channel dialogue, and require explicit stale/error context without names.
+
+## Completed implementation: Git inspection and approved-result continuation
 
 PR #228 merged on 2026-10-07 after focused verification and Antigravity CLEAN.
 Live context-answer interpretation remains naturally observable, not claimed
