@@ -19,6 +19,12 @@
   cross-module contamination. Five changed Python files compile successfully.
   No live messages, provider calls, schema migration or owner-data changes.
 - [ ] Owner-controlled natural observation remains separate from offline evidence.
+- [x] PR #234 Codex P1/P2 reproduced in both channels (four failing regressions):
+  pin note delivery through the canonical helper's optional target channel and
+  invalidate inference on any shared-history update, not only owner messages.
+  277 related offline tests passed, one existing dependency warning; compilation
+  and whitespace checks clean. Matching-channel history repair remains idempotent;
+  no full suite, live messages, configuration or owner-data changes.
 
 ## Daily context inference (approved 2026-10-08)
 

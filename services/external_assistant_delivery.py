@@ -59,9 +59,11 @@ def deliver_external_assistant_text(
     router: ExternalDeliveryRouter = external_delivery_router,
     record_message: MessageRecorder = _record_confirmed_assistant_message,
     silent: bool = False,
+    target_channel: ExternalChannel | None = None,
 ) -> DeliveryReceipt:
-    """Deliver once, then record only the confirmed selected-channel send."""
-    receipt = router.send_text(text, silent=silent)
+    """Deliver once, optionally pinning the selection, then record confirmation."""
+    receipt = (router.send_text(text, silent=silent) if target_channel is None
+               else router.send_text_to(target_channel, text, silent=silent))
     def repair() -> None:
         """Record the immutable confirmed delivery without contacting transport."""
         record_message(receipt.channel, text, agent, receipt.external_id)

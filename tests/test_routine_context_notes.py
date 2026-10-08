@@ -148,7 +148,7 @@ def scheduler_note(tmp_path, monkeypatch):
     from services import routine_context as context, routine_context_notes as notes
     from services.routine_context_clarification import RoutineCandidate
     from services.routine_context_evidence import ContextEvidence
-    from services.external_delivery import external_delivery_router, DeliveryReceipt
+    from services.external_delivery import external_delivery_router
     from core import messaging_channel
 
     def denied(*args, **kwargs):
@@ -188,19 +188,80 @@ def scheduler_note(tmp_path, monkeypatch):
     monkeypatch.setattr(context, "build_routine_context_evidence", lambda *a, **kw: state["evidence"])
     monkeypatch.setattr(context, "build_runtime_routine_context", lambda *a, **kw: runtime)
     path = str(tmp_path / "history.db")
-    latest, append = history.get_latest_trusted_user_rowid, history.append_message
-    monkeypatch.setattr(history, "get_latest_trusted_user_rowid", lambda: latest(db_path=path))
+    maximum, append = history.get_max_rowid, history.append_message
+    monkeypatch.setattr(history, "get_max_rowid", lambda: maximum(db_path=path))
     monkeypatch.setattr(history, "append_message", lambda **kw: append(db_path=path, **kw))
     monkeypatch.setattr(bot, "log_event", lambda *a, **kw: None)
     monkeypatch.setattr(notes.random, "random", lambda: 0.1)
     monkeypatch.setattr(notes, "classify_context_note", lambda _: {"message": "Η βόλτα θα περιμένει 🦞"})
     sent = []
-    monkeypatch.setattr(external_delivery_router, "send_text", lambda text, **kw:
-        sent.append(text) or DeliveryReceipt(state["channel"], "$note"))
+    class Transport:
+        def send_text(self, text, **kwargs):
+            """Fake only actual transport, retaining real pinned router behavior."""
+            sent.append(text)
+            return "$note"
+    monkeypatch.setattr(external_delivery_router, "_channel_selector", lambda: state["channel"])
+    monkeypatch.setattr(external_delivery_router, "_transports",
+                        {"matrix": Transport(), "telegram": Transport()})
     store = ClarificationStore(tmp_path / "questions.json")
     call = lambda: bot._maybe_send_routine_context_note(candidate, projected,
         state["evidence"].copy(), store, "user_out_of_home=true")
     return call, state, sent, dated, rid, store, path, notes, db, history
+
+
+@pytest.mark.parametrize("channel", ["matrix", "telegram"])
+def test_note_channel_change_after_final_check_cannot_redirect(scheduler_note, monkeypatch, channel):
+    """Selection changes at budget consumption, after the final freshness check."""
+    from clients import telegram_bot as bot
+    call, state, sent, _, _, _, path, _, _, history = scheduler_note
+    state["channel"] = channel
+    def budget():
+        state["channel"] = "telegram" if channel == "matrix" else "matrix"
+        return True
+    monkeypatch.setattr(bot, "can_send_proactive", budget)
+    assert call() == "uncertain"
+    assert not sent and history.load_messages(db_path=path) == []
+    state["channel"] = channel
+    assert call() == "already_evaluated"
+
+
+@pytest.mark.parametrize("channel", ["matrix", "telegram"])
+def test_new_assistant_message_invalidates_note_inference(scheduler_note, monkeypatch, channel):
+    """Shared history advances even when no new owner message was written."""
+    call, state, sent, _, _, _, _, notes, _, history = scheduler_note
+    state["channel"] = channel
+    def classify(_):
+        history.append_message(role="assistant", content="Already commented", channel="web",
+                               agent="Routine_Agent")
+        return {"message": "Obsolete comment"}
+    monkeypatch.setattr(notes, "classify_context_note", classify)
+    assert call() == "stale"
+    assert not sent
+
+
+@pytest.mark.parametrize("channel", ["matrix", "telegram"])
+def test_pinned_note_history_repair_keeps_one_confirmed_send(scheduler_note, monkeypatch, channel):
+    """Pinning does not lose the receipt or turn failed local recording into resend."""
+    from clients import telegram_bot as bot
+    call, state, sent, _, _, _, path, _, _, history = scheduler_note
+    state["channel"] = channel
+    repairs = []
+    monkeypatch.setattr(bot, "enqueue_fast_task", lambda repair: repairs.append(repair))
+    append = history.append_message
+    fail_once = [True]
+    def record(**kwargs):
+        if fail_once[0]:
+            fail_once[0] = False
+            raise OSError("offline history failure")
+        return append(**kwargs)
+    monkeypatch.setattr(history, "append_message", record)
+    assert call() == "sent_history_pending"
+    assert len(sent) == len(repairs) == 1
+    repairs[0]()
+    repairs[0]()
+    assert call() == "already_evaluated"
+    rows = history.load_messages(db_path=path)
+    assert len(sent) == len(rows) == 1 and rows[0]["channel"] == channel
 
 
 @pytest.mark.parametrize("channel", ["matrix", "telegram"])

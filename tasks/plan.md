@@ -49,6 +49,13 @@ Focused verification: 263 passed, one existing dependency warning; compilation
 of all five changed Python files and whitespace checks passed. The old silent-
 skip fixture now restores the original package/module reference after stubbing,
 so combined dated-scheduler regressions use the real bot rather than leaked stubs.
+PR #234 review correction: pin the captured external channel via the existing
+assistant delivery helper's optional `target_channel`; a changed selection fails
+before transport, with no fallback. Capture/recheck the all-message history rowid
+because wording references include assistant/background messages as well as user
+messages. Four real-router/temporary-history cases failed before these repairs.
+277 focused tests passed after repair, including confirmed-send history recovery
+and backward-compatible unpinned callers. Live semantic observation stays pending.
 
 ## Approved extension: daily context inference (2026-10-08)
 

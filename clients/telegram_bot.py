@@ -4271,7 +4271,7 @@ def _maybe_send_routine_context_note(
     """Comment on a held action through the same canonical freshness gates."""
     from memory.routine_context_clarification import ATHENS
     from memory.routine_db import get_sentimental_info
-    from memory.conversation_history import get_latest_trusted_user_rowid
+    from memory.conversation_history import get_max_rowid
     from core.messaging_channel import resolve_external_channel
     from services.routine_context import build_runtime_routine_context, build_routine_context_evidence, project_routine_context
     from services.routine_context_clarification_poll import PollSnapshot
@@ -4287,7 +4287,7 @@ def _maybe_send_routine_context_note(
     try:
         channel = _current_external_runtime_channel()
         baseline = PollSnapshot((candidate,), context, evidence,
-                                str(get_latest_trusted_user_rowid())).fingerprint()
+                                str(get_max_rowid())).fingerprint()
 
         def fresh() -> bool:
             """Recheck silence, receipt-aware eligibility, history and GPS/state."""
@@ -4300,7 +4300,7 @@ def _maybe_send_routine_context_note(
             current_evidence = build_routine_context_evidence(at)
             current = project_routine_context(build_runtime_routine_context(at), current_evidence)
             return PollSnapshot((candidate,), current, current_evidence,
-                str(get_latest_trusted_user_rowid())).fingerprint() == baseline
+                str(get_max_rowid())).fingerprint() == baseline
 
         outcome = send_context_note(packet={
             "routine": {"id": candidate.id, "name": candidate.name[:500],
@@ -4308,7 +4308,8 @@ def _maybe_send_routine_context_note(
                         "conditions": list(candidate.conditions)[:5]},
             "context": context, "reason": reason[:800], "channel": channel,
         }, store=store, now=clock(), fresh=fresh,
-            deliver=lambda text: deliver_external_assistant_text(text, agent="Routine_Agent"),
+            deliver=lambda text: deliver_external_assistant_text(
+                text, agent="Routine_Agent", target_channel=channel),
             queue_history_repair=enqueue_fast_task,
             budget=(lambda: True) if budget_reserved else can_send_proactive)
         if (outcome != "already_evaluated"
