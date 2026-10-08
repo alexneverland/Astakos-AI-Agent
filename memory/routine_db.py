@@ -5,7 +5,7 @@ import os
 import hashlib
 import threading
 from difflib import SequenceMatcher
-from datetime import datetime
+from datetime import date, datetime
 from typing import Callable
 
 from core.exceptions import RoutineConflictError, DBWriteError
@@ -801,9 +801,23 @@ def get_routines_for_day(day: str) -> list:
     return routines
 
 
-def get_eligible_preemptive_routines_for_day(day: str, *, now: datetime | None = None) -> list:
+def get_closed_routine_occurrence_ids(now: datetime) -> set[int]:
+    """Read the canonical dated feedback without migrating or projecting state."""
+    from memory.routine_feedback import RoutineFeedbackStore
+    return RoutineFeedbackStore(get_connection).closed_occurrence_ids(now.date())
+
+
+def get_eligible_preemptive_routines_for_day(
+    day: str, *, now: datetime | None = None, occurrence_date: date | None = None,
+) -> list:
     """Return schedulable day routines that are incomplete and not indefinitely paused."""
-    today_str = (now or datetime.now()).strftime("%Y-%m-%d")
+    current = now or datetime.now()
+    occurrence = occurrence_date or current.date()
+    if type(occurrence) is not date:
+        raise ValueError("Invalid occurrence date")
+    today_str = occurrence.isoformat()
+    from memory.routine_feedback import RoutineFeedbackStore
+    closed_ids = RoutineFeedbackStore(get_connection).closed_occurrence_ids(occurrence)
     conn = get_connection()
     cursor = conn.cursor()
     c_day = normalize_day(day)
@@ -832,7 +846,7 @@ def get_eligible_preemptive_routines_for_day(day: str, *, now: datetime | None =
             "type": row[3], "confidence": round(row[4], 2),
             "mentions": row[5], "state": row[6],
         }
-        for row in rows
+        for row in rows if row[0] not in closed_ids
     ]
 
 

@@ -12,6 +12,52 @@ from services.routine_context_clarification_poll import PollSnapshot, run_clarif
 NOW = datetime(2026, 10, 6, 10, tzinfo=ATHENS)
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+def test_grouped_midnight_question_resolves_each_occurrence_on_its_own_date(tmp_path, legacy):
+    """Yesterday's completion cannot close tomorrow's member of a shared question."""
+    from dataclasses import replace
+    store, sends, _, _, args = harness(tmp_path)
+    now = NOW.replace(hour=23, minute=50)
+    first = replace(snapshot().candidates[0], slot_at=now.replace(minute=58))
+    second = replace(first, id="2", name="Tomorrow activity",
+                     slot_at=(now + timedelta(days=1)).replace(hour=0, minute=2))
+    args.update(clock=lambda: now,
+                snapshot_loader=lambda _: replace(snapshot(), candidates=(first, second)),
+                classify=lambda _: {"routine_ids": ["1", "2"],
+                                    "flags": ["user_out_of_home"], "question": "Home now?"})
+    assert run_clarification_poll(**args) == "delivered"
+    if legacy:
+        import json
+        saved = json.loads(store.path.read_text(encoding="utf-8"))
+        del saved["requests"][0]["routine_slots"]
+        store.path.write_text(json.dumps(saved), encoding="utf-8")
+    # Both IDs have completion today, but ID 2's questioned occurrence is tomorrow.
+    args["closed_routine_ids"] = lambda slot: {1, 2} if slot.date() == now.date() else set()
+    assert run_clarification_poll(**args) == "waiting_answer"
+    assert store.snapshot()["pending"] is not None
+    args["closed_routine_ids"] = lambda slot: {1, 2}
+    assert run_clarification_poll(**args) == ("waiting_answer" if legacy else "resolved")
+    assert (store.snapshot()["pending"] is not None) is legacy
+    assert len(sends) == 1
+
+
+@pytest.mark.parametrize("slots", [{"other": "2026-10-06T10:12:00+03:00"},
+                                   {"1": "not-a-date"},
+                                   {"1": "2026-10-06T10:13:00+03:00"}])
+def test_malformed_occurrence_mapping_cannot_close_question(tmp_path, slots):
+    """Corrupt persisted dates are rejected, not used as completion evidence."""
+    import json
+    store, sends, _, _, args = harness(tmp_path)
+    assert run_clarification_poll(**args) == "delivered"
+    saved = json.loads(store.path.read_text(encoding="utf-8"))
+    saved["requests"][0]["routine_slots"] = slots
+    store.path.write_text(json.dumps(saved), encoding="utf-8")
+    before = store.path.read_bytes()
+    args["closed_routine_ids"] = lambda slot: {1}
+    assert run_clarification_poll(**args) == "error"
+    assert store.path.read_bytes() == before and len(sends) == 1
+
+
 def snapshot(marker="42", value=None, candidates=True):
     """Represent a candidate already filtered by the normal scheduler."""
     condition = {"condition_type": "context_flag", "condition_mode": "suppress_when_true",

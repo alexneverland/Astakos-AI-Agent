@@ -212,12 +212,14 @@ def prepare_question(
     if checked_at >= slot:
         return None
     sorted_flags = tuple(flag for flag in VOLATILE_FLAGS if flag in flags)
-    identity = sha256(json.dumps([history_marker, ids, sorted_flags, slot.isoformat()],
+    routine_slots = tuple((item.id, item.slot_at) for item in selected)
+    identity = sha256(json.dumps([history_marker, ids, sorted_flags,
+                                 [(rid, at.isoformat()) for rid, at in routine_slots]],
                                  ensure_ascii=False).encode("utf-8")).hexdigest()[:32]
     topic = sha256(json.dumps(sorted_flags).encode("utf-8")).hexdigest()[:32]
     return QuestionRequest(
         id=identity, topic=topic, routine_ids=tuple(ids), flags=sorted_flags,
-        slot_at=slot, question=question.strip(), channel=channel,
+        slot_at=slot, question=question.strip(), channel=channel, routine_slots=routine_slots,
     )
 
 

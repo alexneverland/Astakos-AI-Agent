@@ -147,7 +147,7 @@ def dispatch_context_current(
     for routine in routines:
         rid = int(routine.id)
         eligible = {str(row["id"]): row for row in db.get_eligible_preemptive_routines_for_day(
-            routine.slot_at.strftime("%A"), now=now)}
+            routine.slot_at.strftime("%A"), now=now, occurrence_date=routine.slot_at.date())}
         row = eligible.get(routine.id)
         if (row is None or row["time"] != routine.slot_at.strftime("%H:%M")
                 or row["event"] != routine.name):
@@ -222,7 +222,8 @@ def load_poll_snapshot(now: datetime, store: ClarificationStore, *, classify: Ca
     context = project_routine_context(build_runtime_routine_context(now), evidence)
     catalog = []
     for date in {now.date(), (now + timedelta(minutes=15)).date()}:
-        for row in db.get_eligible_preemptive_routines_for_day(date.strftime("%A"), now=now):
+        for row in db.get_eligible_preemptive_routines_for_day(
+                date.strftime("%A"), now=now, occurrence_date=date):
             try:
                 hour, minute = map(int, row["time"].split(":"))
                 slot = datetime.combine(date, datetime.min.time(), tzinfo=now.tzinfo).replace(hour=hour, minute=minute)
@@ -317,6 +318,7 @@ def run_context_clarification_job() -> None:
         from memory.conversation_history import append_message
         from services.external_delivery import external_delivery_router as router
         from services.routine_context_clarification_poll import run_clarification_poll
+        from memory.routine_db import get_closed_routine_occurrence_ids
         store = ClarificationStore(Path(BASE_DIR) / "astakos_routine_context_questions.json")
         channel = resolve_external_channel()
         # Dependency generation happens once up front, outside short ledger locks.
@@ -331,7 +333,7 @@ def run_context_clarification_job() -> None:
             sender=lambda channel, text, identity: (
                 router.send_idempotent_matrix_text(text, transaction_id=identity)
                 if channel == "matrix" else router.send_text_to(channel, text)),
-            record=append_message)
+            record=append_message, closed_routine_ids=get_closed_routine_occurrence_ids)
     except Exception:
         outcome = "error"
     finally:
