@@ -1,4 +1,4 @@
-"""Inactive shared routine-feedback orchestration; no live application imports."""
+"""Shared dated routine-feedback orchestration behind authenticated channel adapters."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,6 +7,7 @@ from typing import Callable, Literal, TYPE_CHECKING
 from collections.abc import Mapping
 from copy import deepcopy
 from datetime import timedelta
+from functools import partial
 
 from services.routine_completion_helper import (
     DatedRoutineSelection, RoutineFeedbackQuestion, RoutineFeedbackGroupQuestion, validate_dated_selection,
@@ -18,6 +19,40 @@ if TYPE_CHECKING:
     from memory.routine_feedback import RoutineFeedbackStore
     from services.matrix_routine_completion import MatrixRoutineDraftOffer
     from services.routine_completion_helper import RoutineSelection
+    from memory.routine_context_clarification import ClarificationStore
+
+
+def _context_question_store() -> ClarificationStore:
+    """Open the canonical question abstraction without changing its lifecycle."""
+    from pathlib import Path
+    from config import BASE_DIR
+    from memory.routine_context_clarification import ClarificationStore
+    return ClarificationStore(Path(BASE_DIR) / "astakos_routine_context_questions.json")
+
+
+def _feedback_conversation_reference(*, now: datetime, rowid: int, db_path: str) -> list[dict]:
+    """Keep expired questions as meaning references, never active permissions."""
+    from memory.conversation_history import load_recent_state_messages
+    rows = load_recent_state_messages(now=now, through_rowid=rowid, db_path=db_path)
+    requests = None
+    references = []
+    for row in rows:
+        item = {key: row.get(key) for key in ("timestamp", "channel", "role")}
+        item["content"] = str(row.get("content") or "")[:500]
+        if row["role"] == "assistant":
+            if requests is None:
+                requests = {q["id"]: q for q in _context_question_store().snapshot()["requests"]}
+            meta = row.get("metadata") or {}
+            question = requests.get(meta.get("routine_context_question_id"))
+            if (not question or question.get("external_id") != meta.get("external_message_id")
+                    or not question.get("sent_at") or question["question"] != row["content"]
+                    or question["channel"] != row["channel"]):
+                continue
+            item.update(routine_ids=question["routine_ids"], status=question["status"],
+                        external_id=question["external_id"],
+                        slot_at=question["slot_at"], kind="context_question_reference")
+        references.append(item)
+    return references
 
 
 @dataclass(frozen=True)
@@ -90,11 +125,28 @@ class PersistedRoutineFeedbackHandler:
                 draft = self._resolve_draft(user_text, rowid=rowid, now=now)
                 if draft is not None:
                     return draft
+            reference = _feedback_conversation_reference(now=now, rowid=rowid,
+                db_path=self._conversation_db_path)
+            selector = partial(self._selector, conversation_context=reference) if reference else self._selector
+            expired_reply = reply_event_id is not None and any(
+                item.get("kind") == "context_question_reference"
+                and item.get("status") == "expired"
+                and item.get("channel") == self._channel
+                and item.get("external_id") == reply_event_id for item in reference)
+            if expired_reply:
+                original_selector = selector
+                def select_execution(*args, **kwargs) -> DatedRoutineSelection:
+                    """An expired state question permits only explicit execution feedback."""
+                    selection = original_selector(*args, **kwargs)
+                    return (selection if isinstance(selection, DatedRoutineSelection)
+                            and selection.action in {"complete", "none", "clarify"}
+                            else DatedRoutineSelection("none"))
+                selector = select_execution
             result = process_catalog_feedback_turn(user_text, store=self._store,
-                selector=self._selector, now=now, clock=self._clock,
+                selector=selector, now=now, clock=self._clock,
                 trusted=True, user_rowid=rowid, conversation_db_path=self._conversation_db_path,
-                reply_channel=self._channel if reply_event_id is not None else None,
-                reply_event_id=reply_event_id)
+                reply_channel=self._channel if reply_event_id is not None and not expired_reply else None,
+                reply_event_id=None if expired_reply else reply_event_id)
         except Exception:
             result = FeedbackTurnResult("error")
         return build_dated_routine_feedback_context(result)
@@ -297,6 +349,14 @@ def process_feedback_turn(
             return FeedbackTurnResult("none")
         if selection.action == "clarify":
             return FeedbackTurnResult("clarify", selection,
+                                      routine_name=candidates.get(selection.routine_id))
+        if selection.action == "complete" and any(
+            row.occurrence_date == selection.occurrence_date and row.feedback == "complete"
+            for row in store.occurrences(selection.routine_id)
+        ):
+            if is_current() is not True or store.revision(selection.routine_id) != revisions[selection.routine_id]:
+                return FeedbackTurnResult("stale")
+            return FeedbackTurnResult("applied", selection,
                                       routine_name=candidates.get(selection.routine_id))
         applied = store.record_feedback(selection.routine_id, selection.occurrence_date,
             selection.action, at=now, expected_revision=revisions[selection.routine_id],

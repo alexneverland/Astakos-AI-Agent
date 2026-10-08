@@ -6,9 +6,10 @@ from typing import Callable
 from services.gemini import safe_gemini_call
 from core.utils import clean_message, extract_json_from_text
 from core.untrusted_content import external_content_source_names, format_untrusted_tool_result
-from memory.conversation_history import load_recent_trusted_user_messages
+from memory.conversation_history import load_recent_state_messages
 from memory.routine_db import get_context_state, set_context_states_if_unchanged
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from services.routine_reconciler import (
     infer_routine_reconciliation_directives,
     apply_routine_reconciliation_directives,
@@ -46,10 +47,15 @@ Available flags:
 Rules:
 - Return ONLY a JSON object.
 - Include only flags that are clearly confirmed by the message.
-- Recent same-channel user messages are supplied only to resolve an otherwise
+- Recent timestamped user messages across all channels are supplied to resolve
   unambiguous pronoun or reference in the current message. They are not current
   state by themselves: never carry a previous location or relationship forward
   unless the current message clearly says it still applies or changed.
+- Interpret completed transitions chronologically using the current report and
+  the timed history. Separate past movement, present whereabouts and future
+  intentions. A completed departure changes presence, not arrival at a destination.
+  Habit or a typical schedule alone never proves current location. Omit flags
+  when the current statement and its reference do not establish a state clearly.
 - If you are not sure enough, do not include the flag at all.
 - DO NOT deduce unstated whereabouts. For example, if the user says the kids are alone, DO NOT deduce that the partner is with the user. Only update states explicitly stated.
 - DO NOT convert future intention into a current state.
@@ -127,7 +133,7 @@ Answer:
 {{"partner_at_work": true, "partner_work_mode": "office", "partner_with_user": false, "kid1_with_partner": false, "family_at_home": false}}
 
 User Message: "{user_text}"
-Recent same-channel user context:
+Recent shared user context (historical reference, not current-state authority):
 {recent_user_context}
 AI Answer (recent/current): "{ai_text}"
 """
@@ -141,23 +147,24 @@ def _recent_user_context_hint(channel: str, limit: int = 4) -> str:
     the sole authority for whether a state is current.
     """
     try:
-        entries = load_recent_trusted_user_messages(limit=limit, channel=channel)
+        entries = load_recent_state_messages(now=datetime.now(ZoneInfo("Europe/Athens")))
     except Exception:
         return "(none)"
 
     messages = [
-        str(entry.get("content") or "").strip()
+        {"at": entry.get("timestamp"), "channel": entry.get("channel"),
+         "text": str(entry.get("content") or "").strip()[:500]}
         for entry in entries
         if (
-            entry.get("channel") == channel
-            and entry.get("role") == "user"
+            entry.get("role") == "user"
             and not external_content_source_names(entry.get("metadata"))
         )
     ]
-    messages = [message for message in messages if message][-limit:]
+    messages = [message for message in messages if message["text"]][-limit:]
     if not messages:
         return "(none)"
-    return "\n".join(f"- {message[:500]}" for message in messages)
+    return format_untrusted_tool_result("shared owner history reference",
+                                       json.dumps(messages, ensure_ascii=False))
 
 
 @dataclass(frozen=True)

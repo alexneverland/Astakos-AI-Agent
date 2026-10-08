@@ -1,5 +1,22 @@
 # Astakos: Current Tasks
 
+## Conversational completion and timed shared state (2026-10-08)
+
+- [x] Reproduce the 09:31 question / 09:45 expiry / 10:09 departure sequence:
+  missing reference produced no recorded completion despite the clear report.
+- [x] Shared timed owner history for flag extraction and dated routine selection;
+  canonical receipt-matched expired question is meaning context, not permission.
+- [x] Preserve any-time / explicit past-day completion and idempotent acknowledgement;
+  no late reminder, fabricated delivery, automatic arrival or pressure reset.
+- [x] Guard unknown reply targets, stale inference and provenance-marked references.
+- [x] 316 related offline tests passed (two existing dependency warnings);
+  UTC/local chronological-order regression failed before the final correction,
+  then 66 focused continuity/history/extractor tests passed (one warning).
+  Changed Python files compiled and diff review/whitespace checks passed.
+  These runs overlap; counts are not added. No full suite or live model test.
+- [x] Owner authorized a separate commit/PR after merging PR #232.
+- [ ] Owner-controlled live observation and review lifecycle.
+
 ## Bounded context re-questions (2026-10-08)
 
 - [x] Reproduce same-day location topic blocking a later routine and the consumed
@@ -12,7 +29,9 @@
   including the exact morning sequence, absent/expired/fresh GPS and both channels.
   Diff review and whitespace check passed; no full-suite rerun or live data writes.
 - [x] Owner authorized commit/PR for this narrow correction.
-- [ ] Review/merge and natural live observation remain separate next steps.
+- [x] PR #232 review finding addressed by aligning the spec with the approved
+  three-question policy; merged and task branch deleted (2026-10-08).
+- [ ] Natural live observation remains separate.
 
 ## Completed routines and context questions (2026-10-08)
 

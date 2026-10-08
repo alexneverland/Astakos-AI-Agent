@@ -1,6 +1,25 @@
 # Astakos: Current Plan
 
+## Conversational completion and timed shared state (2026-10-08)
+
+Reuse the dated feedback pipeline for clear execution reports at any time of day,
+including an explicitly identified past day. Response-window expiry is not an
+execution deadline. Supply bounded shared, timestamped owner history and canonical
+receipt-matched context-question references to resolve a late report without a
+second confirmation. An expired state question is never approval or a reminder
+to replay; an exact reply to it permits only semantic execution feedback, not
+skip/pause/draft actions. Unknown reply targets stay isolated. Already recorded
+completion is acknowledged without rewriting the occurrence or changing pressure.
+The flag extractor uses the same bounded shared history, user rows only; completed
+return, current location and future departure are distinguished semantically.
+History is reference, not proof of current state; no habits, phrase lists, GPS
+changes, extra question mechanism, migrations or live data repair are introduced.
+Offline tests exercise real isolated history/question/occurrence stores with only
+model/transport boundaries replaced. Live semantic accuracy remains to observe.
+
 ## Current correction: bounded context re-questions for later routines
+
+PR #232 is merged and its task branch deleted; natural observation is pending.
 
 The common question ledger permits at most three reservations per Athens day.
 A later, different routine may re-ask an overlapping unknown context flag after

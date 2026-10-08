@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from config import CONVERSATION_DB_FILE
@@ -629,6 +629,46 @@ def load_recent_trusted_user_messages(
 
     messages.reverse()
     return messages
+
+
+def load_recent_state_messages(
+    *, now: datetime, db_path: str = CONVERSATION_DB_FILE,
+    through_rowid: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return bounded, timed owner context across channels, never external state.
+
+    Context-question rows are references only; their ledger identity must still
+    be validated by the consumer. Older history cannot confirm current presence.
+    """
+    from zoneinfo import ZoneInfo
+    from core.untrusted_content import external_content_source_names
+
+    athens = ZoneInfo("Europe/Athens")
+    if now.tzinfo is None:
+        raise ValueError("State context requires an aware clock")
+    current = now.astimezone(athens)
+    rows = load_messages_since(since_date=(current-timedelta(hours=1)).date().isoformat(),
+                               limit=48, db_path=db_path)
+    result = []
+    for row in rows:
+        if through_rowid is not None and row.get("rowid", 0) >= through_rowid:
+            continue
+        if external_content_source_names(row.get("metadata")):
+            continue
+        if row.get("role") != "user" and not (
+            row.get("role") == "assistant" and row.get("agent") == "Routine_Context"
+            and (row.get("metadata") or {}).get("routine_context_question_id")
+        ):
+            continue
+        try:
+            stamp = datetime.fromisoformat(row["timestamp"])
+            stamp = stamp.replace(tzinfo=athens) if stamp.tzinfo is None else stamp.astimezone(athens)
+        except (ValueError, TypeError, KeyError):
+            continue
+        if timedelta(0) <= current.astimezone(timezone.utc)-stamp.astimezone(timezone.utc) <= timedelta(hours=1):
+            result.append({**row, "timestamp": stamp.isoformat()})
+    result.sort(key=lambda row: (datetime.fromisoformat(row["timestamp"]).timestamp(), row["rowid"]))
+    return result[-12:]
 
 
 def load_messages_since(
