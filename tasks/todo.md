@@ -15,6 +15,11 @@
   persistence do not prove the provider's future semantic tool selection.
 - PR requested by the owner; review/merge remain separate next steps.
   No live goal backfill or storage migration.
+- [x] PR #235 Codex P2 findings reproduced: creation cannot replace an existing
+  active/paused/done project; approved status/progress updates retain external
+  provenance through the canonical storage path. 168 focused checks passed;
+  expanded clean/existing-provenance and new-project cases: 18/18 passed.
+  Compilation and diff checks passed; no full-suite run or live changes.
 
 ## Optional routine context notes (2026-10-08)
 

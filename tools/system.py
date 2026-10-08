@@ -3602,9 +3602,9 @@ def save_goal_tool(
     external_content_sources_json: str = "",
 ) -> str:
     """
-    Creates a long-term goal or explicitly replaces its full definition.
-    For ordinary updates to an existing goal, use the partial status/progress/
-    milestones tools instead: omitted fields here reset to their defaults.
+    Creates a genuinely new long-term goal. Existing projects in ANY status,
+    including done, are protected from replacement. Use partial status/progress/
+    milestones tools for existing projects, even when omitted from active context.
     project: Short project name (e.g., 'ShiftMaster', 'Astakos', 'PraxisERP').
     description: What he wants to achieve (e.g., 'To finish the licensing module').
     status: 'active' (in progress) | 'paused' (shelved) | 'done' (completed).
@@ -3624,37 +3624,44 @@ def save_goal_tool(
         external_content_sources=external_content_sources_from_json(
             external_content_sources_json,
         ),
+        create_only=True,
     )
     if ok:
         return f"✅ Goal '{project}' saved ({status}, {progress}%)."
-    return f"❌ Failed to save goal '{project}'."
+    return f"❌ Goal '{project}' was not created: it may already exist (including completed goals), or storage failed. No replacement was made. Use partial goal updates for an existing project; do not claim success."
 
 
 @tool
-def update_goal_status_tool(project: str, status: str) -> str:
+def update_goal_status_tool(project: str, status: str, external_content_sources_json: str = "") -> str:
     """
     Updates the status of an existing goal.
     project: The name of the project (e.g., 'ShiftMaster').
     status: 'active' | 'paused' | 'done'
+    external_content_sources_json: Internal approval provenance. Do not set manually.
     """
     from memory.vector_store import update_goal_status
-    ok = update_goal_status(project=project, status=status)
+    from core.untrusted_content import external_content_sources_from_json
+    ok = update_goal_status(project=project, status=status,
+                            external_content_sources=external_content_sources_from_json(external_content_sources_json))
     if ok:
         return f"✅ Goal '{project}' → {status}."
     return f"❌ Goal '{project}' not found."
 
 
 @tool
-def update_goal_progress_tool(project: str, progress: int) -> str:
+def update_goal_progress_tool(project: str, progress: int, external_content_sources_json: str = "") -> str:
     """
     Updates the completion percentage of an existing goal (0-100).
     Use an explicit percentage or a known agreed milestone plan, not scores,
     measurements, elapsed time, or an arbitrary estimate from conversation.
     project: The name of the project.
     progress: An integer from 0 to 100.
+    external_content_sources_json: Internal approval provenance. Do not set manually.
     """
     from memory.vector_store import update_goal_progress
-    ok = update_goal_progress(project=project, progress=progress)
+    from core.untrusted_content import external_content_sources_from_json
+    ok = update_goal_progress(project=project, progress=progress,
+                              external_content_sources=external_content_sources_from_json(external_content_sources_json))
     if ok:
         return f"✅ Goal '{project}' progress → {progress}%."
     return f"❌ Goal '{project}' not found."

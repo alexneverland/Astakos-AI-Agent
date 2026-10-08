@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 
 @pytest.fixture
@@ -127,3 +127,63 @@ def test_read_only_diagnosis_cannot_update_goals(monkeypatch: pytest.MonkeyPatch
     """Exposing goal tools to Dev must preserve its read-only investigation boundary."""
     tools = bound_goal_tools(monkeypatch, "Dev_Agent", "matrix", diagnosis_only=True)
     assert not any(name.startswith(("save_goal", "update_goal")) for name in tools)
+
+
+@pytest.mark.parametrize("status", ["active", "paused", "done"])
+def test_creation_tool_cannot_overwrite_existing_goal_in_any_status(
+    goal_store: dict[str, Any], status: str,
+) -> None:
+    """Even a goal omitted from active context cannot be recreated with defaults."""
+    from tools.system import save_goal_tool, update_goal_status_tool
+
+    goal_store["metadata"].update(status=status, progress=100)
+    before = json.dumps(goal_store, sort_keys=True)
+    result = save_goal_tool.invoke({"project": "Kaggle", "description": "Working again"})
+    assert result.startswith("❌")
+    assert json.dumps(goal_store, sort_keys=True) == before
+    assert update_goal_status_tool.invoke({"project": "Kaggle", "status": "active"}).startswith("✅")
+    assert goal_store["metadata"]["progress"] == 100
+    assert goal_store["metadata"]["milestones"] == "Submission score 0.06"
+
+
+def test_creation_tool_still_creates_a_genuinely_new_goal(goal_store: dict[str, Any]) -> None:
+    """The protection against replacement must not block new project creation."""
+    from tools.system import save_goal_tool
+
+    assert save_goal_tool.invoke({"project": "New project", "description": "Build a prototype"}).startswith("✅")
+    assert goal_store["metadata"]["project"] == "New project"
+    assert goal_store["metadata"]["progress"] == 0
+
+
+@pytest.mark.parametrize("prior_sources", [[], ["get_news"]])
+@pytest.mark.parametrize("tool_name,changes", [
+    ("update_goal_status_tool", {"status": "paused"}),
+    ("update_goal_progress_tool", {"progress": 60}),
+])
+def test_approved_partial_update_persists_external_provenance(
+    monkeypatch: pytest.MonkeyPatch, goal_store: dict[str, Any],
+    tool_name: str, changes: dict[str, Any], prior_sources: list[str],
+) -> None:
+    """Run approval handoff and the real updater, retaining both source markers."""
+    from core.approval import approval_check_node
+    import tools.system as system
+
+    queued: list[dict[str, Any]] = []
+    monkeypatch.setattr("core.approval.save_pending", lambda name, args, *a, **k: queued.append(args))
+    monkeypatch.setattr("core.approval._notify_telegram", lambda *a, **k: None)
+    monkeypatch.setattr("core.approval._notify_selected_approval", lambda *a, **k: "telegram")
+    if prior_sources:
+        goal_store["metadata"]["untrusted_external_tool_names"] = json.dumps(prior_sources)
+    state = {"messages": [
+        HumanMessage(content="Read this source."),
+        ToolMessage(tool_call_id="source-1", name="browse_url", content="Project update."),
+        HumanMessage(content="Apply that project update."),
+        AIMessage(content="", tool_calls=[{
+            "name": tool_name, "args": {"project": "Kaggle", **changes}, "id": "update-1",
+        }]),
+    ]}
+    assert approval_check_node(state)["approval_status"] == "pending"
+    assert queued[0]["external_content_sources_json"] == '["browse_url"]'
+    assert getattr(system, tool_name).invoke(queued[0]).startswith("✅")
+    assert json.loads(goal_store["metadata"]["untrusted_external_tool_names"]) == sorted({"browse_url", *prior_sources})
+    assert goal_store["metadata"]["created_at"] == 1700000000.0

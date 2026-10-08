@@ -791,6 +791,8 @@ def approval_check_node(state):
             "manage_list",
             "save_goal_tool",
             "update_goal_milestones_tool",
+            "update_goal_status_tool",
+            "update_goal_progress_tool",
             "learn_routine",
             "recipe_expert",
             "set_local_reminder",

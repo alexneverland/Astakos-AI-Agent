@@ -14,6 +14,12 @@ boundary, unknown-project rejection, external provenance and read-only diagnosis
 Provider tool selection remains a separate owner-controlled natural observation.
 No unrelated routine/reflection changes or full-suite rerun.
 
+PR #235 review repair: resolve exact project identity across all statuses inside
+the existing storage locks. The model-facing creation tool is create-only;
+ordinary changes use partial updates, including resuming a completed goal.
+Retain the internal full-save API's backward compatibility. Status/progress
+updates carry the same approved external provenance as milestone updates.
+
 ## Next routine slice: optional context notes (2026-10-08)
 
 Approved contract: `tasks/routine-context-notes-spec.md`. Keep the blocked action

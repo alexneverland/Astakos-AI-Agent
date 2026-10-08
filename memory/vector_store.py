@@ -1650,6 +1650,11 @@ def _goal_temporal_metadata(
     return temporal
 
 
+def _lookup_goal_record(project: str) -> dict:
+    """Resolve an exact project across every status under the caller's locks."""
+    return _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+
+
 def save_goal(
     project: str,
     description: str,
@@ -1657,11 +1662,15 @@ def save_goal(
     progress: int = 0,
     milestones: str = "",
     external_content_sources: list[str] | None = None,
+    *,
+    create_only: bool = False,
 ) -> bool:
     """Save or update a goal while retaining any untrusted-source provenance."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            existing = _lookup_goal_record(project)
+            if create_only and existing["ids"]:
+                return False
             existing_metadata = None
             old_doc = None
             if existing["ids"]:
@@ -1712,11 +1721,13 @@ def save_goal(
         return False
 
 
-def update_goal_status(project: str, status: str) -> bool:
+def update_goal_status(
+    project: str, status: str, external_content_sources: list[str] | None = None,
+) -> bool:
     """Changes the status of a goal."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            existing = _lookup_goal_record(project)
             if not existing["ids"]:
                 return False
             old_meta = dict(existing["metadatas"][0])
@@ -1727,6 +1738,10 @@ def update_goal_status(project: str, status: str) -> bool:
                 old_meta, now_ts=now_ts, changed=old_meta.get("status") != status,
                 kind="status", detail=f"status: {old_meta.get('status')} → {status}",
             ))
+            merged_sources = _merged_goal_external_content_sources(old_meta, external_content_sources)
+            if merged_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+                new_meta[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(merged_sources)
             vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
             print(f"\033[92m[Goals]: '{project}' → {status}\033[0m")
             return True
@@ -1735,11 +1750,13 @@ def update_goal_status(project: str, status: str) -> bool:
         return False
 
 
-def update_goal_progress(project: str, progress: int) -> bool:
+def update_goal_progress(
+    project: str, progress: int, external_content_sources: list[str] | None = None,
+) -> bool:
     """Updates the progress percentage of a goal (0-100)."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            existing = _lookup_goal_record(project)
             if not existing["ids"]:
                 return False
             old_meta = dict(existing["metadatas"][0])
@@ -1751,6 +1768,10 @@ def update_goal_progress(project: str, progress: int) -> bool:
                 old_meta, now_ts=now_ts, changed=old_meta.get("progress") != bounded_progress,
                 kind="progress", detail=f"progress: {old_meta.get('progress')}% → {bounded_progress}%",
             ))
+            merged_sources = _merged_goal_external_content_sources(old_meta, external_content_sources)
+            if merged_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+                new_meta[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(merged_sources)
             vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
             print(f"\033[92m[Goals]: '{project}' progress → {progress}%\033[0m")
             return True
@@ -1767,7 +1788,7 @@ def update_goal_milestones(
     """Update goal milestones while retaining any external-source provenance."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            existing = _lookup_goal_record(project)
             if not existing["ids"]:
                 return False
             old_meta = dict(existing["metadatas"][0])
