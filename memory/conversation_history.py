@@ -647,28 +647,72 @@ def load_recent_state_messages(
     if now.tzinfo is None:
         raise ValueError("State context requires an aware clock")
     current = now.astimezone(athens)
-    rows = load_messages_since(since_date=(current-timedelta(hours=1)).date().isoformat(),
-                               limit=48, db_path=db_path)
+    # Stored dates belong to each source offset, not necessarily Athens. Scan
+    # adjacent dates and apply the hour/cap only after eligibility validation.
+    start_date = (current-timedelta(hours=1, days=1)).date().isoformat()
+    end_date = (current+timedelta(days=1)).date().isoformat()
+    result = []
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        cursor = conn.execute(
+            """SELECT rowid, * FROM conversation_messages
+               WHERE date BETWEEN ? AND ?
+                 AND (role='user' OR (role='assistant' AND agent='Routine_Context'))
+                 AND (? IS NULL OR rowid < ?)""",
+            (start_date, end_date, through_rowid, through_rowid),
+        )
+        for raw in cursor:
+            row = {**_row_to_message(raw), "rowid": raw["rowid"]}
+            if external_content_source_names(row.get("metadata")):
+                continue
+            if row["role"] != "user" and not row["metadata"].get("routine_context_question_id"):
+                continue
+            try:
+                stamp = datetime.fromisoformat(row["timestamp"])
+                stamp = stamp.replace(tzinfo=athens) if stamp.tzinfo is None else stamp.astimezone(athens)
+            except (ValueError, TypeError, KeyError):
+                continue
+            if timedelta(0) <= current.astimezone(timezone.utc)-stamp.astimezone(timezone.utc) <= timedelta(hours=1):
+                result.append({**row, "timestamp": stamp.isoformat()})
+                result.sort(key=lambda item: (datetime.fromisoformat(item["timestamp"]).timestamp(), item["rowid"]))
+                result = result[-12:]
+    return result
+
+
+def load_daily_state_messages(
+    *, now: datetime, db_path: str = CONVERSATION_DB_FILE,
+) -> list[dict[str, Any]]:
+    """Return complete bounded owner-day references, not inferred live facts.
+
+    Oversized days fail closed instead of silently dropping a contradictory
+    source. Callers must interpret plans semantically and keep event freshness.
+    """
+    from zoneinfo import ZoneInfo
+    from core.untrusted_content import external_content_source_names
+    from services.routine_context_evidence import _recorded_time
+
+    if now.tzinfo is None:
+        raise ValueError("Daily context requires an aware clock")
+    current = now.astimezone(ZoneInfo("Europe/Athens"))
+    rows = load_messages_since(since_date=(current-timedelta(days=1)).date().isoformat(),
+                               roles=["user"], limit=257, db_path=db_path)
+    if len(rows) >= 257:
+        raise ValueError("Daily context source window exceeds its safe bound")
     result = []
     for row in rows:
-        if through_rowid is not None and row.get("rowid", 0) >= through_rowid:
-            continue
         if external_content_source_names(row.get("metadata")):
             continue
-        if row.get("role") != "user" and not (
-            row.get("role") == "assistant" and row.get("agent") == "Routine_Context"
-            and (row.get("metadata") or {}).get("routine_context_question_id")
-        ):
+        stamp = _recorded_time(row["timestamp"], current)
+        if stamp is None:
+            raise ValueError("Daily context has an ambiguous or invalid source time")
+        if stamp.date() != current.date() or stamp.timestamp() > current.timestamp():
             continue
-        try:
-            stamp = datetime.fromisoformat(row["timestamp"])
-            stamp = stamp.replace(tzinfo=athens) if stamp.tzinfo is None else stamp.astimezone(athens)
-        except (ValueError, TypeError, KeyError):
-            continue
-        if timedelta(0) <= current.astimezone(timezone.utc)-stamp.astimezone(timezone.utc) <= timedelta(hours=1):
-            result.append({**row, "timestamp": stamp.isoformat()})
-    result.sort(key=lambda row: (datetime.fromisoformat(row["timestamp"]).timestamp(), row["rowid"]))
-    return result[-12:]
+        if len(str(row.get("content") or "")) > 4000:
+            raise ValueError("Daily context source is too large to interpret safely")
+        result.append({**row, "timestamp": stamp.isoformat()})
+    if len(result) > 128 or sum(len(row["content"]) for row in result) > 32000:
+        raise ValueError("Daily context exceeds its safe bound")
+    return sorted(result, key=lambda row: (datetime.fromisoformat(row["timestamp"]).timestamp(), row["rowid"]))
 
 
 def load_messages_since(

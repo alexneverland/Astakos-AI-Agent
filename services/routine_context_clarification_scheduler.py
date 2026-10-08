@@ -319,6 +319,7 @@ def run_context_clarification_job() -> None:
         from services.external_delivery import external_delivery_router as router
         from services.routine_context_clarification_poll import run_clarification_poll
         from memory.routine_db import get_closed_routine_occurrence_ids
+        from services.context_extractor import resolve_daily_context_before_question
         store = ClarificationStore(Path(BASE_DIR) / "astakos_routine_context_questions.json")
         channel = resolve_external_channel()
         # Dependency generation happens once up front, outside short ledger locks.
@@ -333,7 +334,12 @@ def run_context_clarification_job() -> None:
             sender=lambda channel, text, identity: (
                 router.send_idempotent_matrix_text(text, transaction_id=identity)
                 if channel == "matrix" else router.send_text_to(channel, text)),
-            record=append_message, closed_routine_ids=get_closed_routine_occurrence_ids)
+            record=append_message, closed_routine_ids=get_closed_routine_occurrence_ids,
+            resolve_context=lambda snapshot, now, fresh: resolve_daily_context_before_question(
+                tuple(flag for flag in VOLATILE_FLAGS if any(
+                    flag in candidate_unknown_flags(row, snapshot.runtime_context, snapshot.evidence, now=now)
+                    for row in snapshot.candidates if 0 < (row.slot_at-now).total_seconds() <= 900)),
+                now=now, still_current=fresh, channel=channel))
     except Exception:
         outcome = "error"
     finally:

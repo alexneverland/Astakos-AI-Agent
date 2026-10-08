@@ -11,6 +11,36 @@ from services.routine_feedback import ATHENS
 NOW = datetime(2026, 10, 8, 10, 9, 47, tzinfo=ATHENS)
 
 
+def test_recent_utc_reference_survives_athens_midnight(tmp_path):
+    """Calendar prefilter must not discard a recent instant on another date."""
+    from memory.conversation_history import append_message, load_recent_state_messages
+    path = str(tmp_path / "history.db")
+    now = datetime(2026, 1, 2, 1, 30, tzinfo=ATHENS)
+    append_message(role="user", content="recent UTC", channel="matrix",
+                   timestamp=datetime(2026, 1, 1, 23, tzinfo=timezone.utc), db_path=path)
+    assert [row["content"] for row in load_recent_state_messages(now=now, db_path=path)] == ["recent UTC"]
+
+
+def test_ineligible_rows_cannot_evict_trusted_context(tmp_path):
+    """Cap only the eligible references, not intervening assistant/tool output."""
+    from memory.conversation_history import append_message, load_recent_state_messages
+    path = str(tmp_path / "history.db")
+    question = append_message(role="assistant", agent="Routine_Context", channel="matrix",
+        content="canonical question", timestamp=NOW-timedelta(minutes=35), db_path=path,
+        metadata={"routine_context_question_id":"q1"})
+    for index in range(14):
+        append_message(role="user", content=f"owner {index}", channel="web",
+                       timestamp=NOW-timedelta(minutes=30-index), db_path=path)
+    for index in range(60):
+        append_message(role="user" if index % 2 else "assistant", channel="web",
+            content="ineligible", timestamp=NOW-timedelta(minutes=1), db_path=path,
+            metadata={"untrusted_external_tool_names":["user_provided_asset"]} if index % 2 else {})
+    rows = load_recent_state_messages(now=NOW, db_path=path)
+    assert [row["content"] for row in rows] == [f"owner {index}" for index in range(2,14)]
+    rows = load_recent_state_messages(now=NOW, db_path=path, through_rowid=question["rowid"]+1)
+    assert [row["content"] for row in rows] == ["canonical question"]
+
+
 def test_state_reference_is_shared_timed_and_excludes_stale_external_data(tmp_path):
     from memory.conversation_history import append_message, load_recent_state_messages
     path = str(tmp_path / "history.db")

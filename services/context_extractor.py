@@ -6,7 +6,7 @@ from typing import Callable
 from services.gemini import safe_gemini_call
 from core.utils import clean_message, extract_json_from_text
 from core.untrusted_content import external_content_source_names, format_untrusted_tool_result
-from memory.conversation_history import load_recent_state_messages
+from memory.conversation_history import load_recent_state_messages, load_daily_state_messages, get_max_rowid
 from memory.routine_db import get_context_state, set_context_states_if_unchanged
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -181,6 +181,9 @@ def extract_and_update_context_flags(
     clarification_context: dict | None = None,
     clarification_still_current: Callable[[], bool] | None = None,
     clarification_commit: Callable[[Callable[[], frozenset[str] | None]], frozenset[str] | None] | None = None,
+    now: datetime | None = None,
+    conversation_db_path: str | None = None,
+    daily_resolution_flags: tuple[str, ...] | None = None,
 ) -> ContextExtractionResult | None:
     """
     Calls the LLM to extract context flags based on the user's message,
@@ -197,6 +200,17 @@ def extract_and_update_context_flags(
         return empty_result
 
     try:
+        current = now or datetime.now(ZoneInfo("Europe/Athens"))
+        history_options = {"db_path": conversation_db_path or config.CONVERSATION_DB_FILE}
+        source_version = get_max_rowid(**history_options)
+        try:
+            daily_rows = load_daily_state_messages(now=current, **history_options)
+        except (ValueError, OSError):
+            if daily_resolution_flags is not None:
+                return None
+            # A bounded view failure must not disable an explicit current report.
+            # The missing day reference is never permission to infer an old plan.
+            daily_rows = []
         expected = {key: get_context_state(key) for key in
                     _CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES) | {"kid1_away_reason"}}
         prompt = _CONTEXT_EXTRACTION_PROMPT.format(
@@ -208,6 +222,22 @@ def extract_and_update_context_flags(
             recent_user_context=_recent_user_context_hint(channel),
             ai_text=ai_text,
         )
+        prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
+                            "daily_context_reference.md").read_text(encoding="utf-8")
+        prompt += "\n" + format_untrusted_tool_result("daily owner context reference", json.dumps({
+            "now": current.isoformat(),
+            "sources": [{"rowid": row["rowid"], "at": row["timestamp"],
+                         "channel": row["channel"], "text": row["content"]} for row in daily_rows],
+            "stored_context": expected,
+        }, ensure_ascii=False))
+        if daily_resolution_flags is not None:
+            from services.routine_context_evidence import VOLATILE_FLAGS
+            if (clarification or not daily_resolution_flags
+                    or not set(daily_resolution_flags) <= set(VOLATILE_FLAGS)):
+                return None
+            prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
+                                "daily_context_resolution.md").read_text(encoding="utf-8")
+            prompt += "\nAllowed flags: " + json.dumps(daily_resolution_flags)
         if clarification:
             from services.routine_context_evidence import VOLATILE_FLAGS
 
@@ -234,6 +264,11 @@ def extract_and_update_context_flags(
         payload = extract_json_from_text(cleaned)
         if payload is None:
             return empty_result
+        if daily_resolution_flags is not None:
+            return _commit_daily_resolution(payload, daily_rows, expected,
+                allowed=set(daily_resolution_flags), now=current,
+                still_current=lambda: (get_max_rowid(**history_options) == source_version
+                    and (clarification_still_current is None or clarification_still_current())))
         if clarification:
             if (not isinstance(payload, dict)
                     or set(payload) not in ({"relation", "flags"}, {"relation", "flags", "continue_conversation"})
@@ -276,7 +311,7 @@ def extract_and_update_context_flags(
         # Get current date for expiration of certain daily flags
         # Usually these states reset the next day, so we could set an expires_at to midnight,
         # but for now, we just set them. The existing rules or nightly reset will clear them.
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_str = current.date().isoformat()
             
         current_shift = payload.get("current_shift")
         if current_shift is not None:
@@ -334,6 +369,8 @@ def extract_and_update_context_flags(
 
         def persist() -> frozenset[str] | None:
             """Apply the already validated semantic state through canonical writers."""
+            if get_max_rowid(**history_options) != source_version:
+                return None
             return _persist_context_payload(payload, valid_keys, today_str, expected)
 
         applied_flags = (
@@ -371,6 +408,59 @@ def reconcile_context_message(user_text: str) -> None:
             print(f"[ContextExtractor] Applied {len(directives)} reconciler directive(s) from live message")
     except Exception as exc:
         print(f"[ContextReconciler Error]: {type(exc).__name__}")
+
+
+def _commit_daily_resolution(
+    payload: object, rows: list[dict], expected: dict, *, allowed: set[str],
+    now: datetime, still_current: Callable[[], bool],
+) -> ContextExtractionResult | None:
+    """Validate source identity/time, then reuse the canonical conditional writer."""
+    from services.routine_context_evidence import STORED_VALIDITY, _recorded_time
+    if not isinstance(payload, dict) or set(payload) != {"flags", "event_rowid", "support_rowids"}:
+        return None
+    flags, event_id, support = payload["flags"], payload["event_rowid"], payload["support_rowids"]
+    sources = {row["rowid"]: row for row in rows}
+    if (not isinstance(flags, dict) or not flags or not set(flags) <= allowed
+            or any(type(value) is not bool for value in flags.values())
+            or type(event_id) is not int or event_id not in sources
+            or not isinstance(support, list) or not support or len(support) > 12
+            or any(type(value) is not int or value not in sources for value in support)
+            or len(set(support)) != len(support) or event_id not in support):
+        return None
+    event_at = datetime.fromisoformat(sources[event_id]["timestamp"])
+    if not 0 <= now.timestamp() - event_at.timestamp() < STORED_VALIDITY.total_seconds():
+        return None
+    # Do not replace newer canonical evidence with an older interpreted event.
+    for key in flags:
+        previous = expected.get(key)
+        if previous:
+            previous_at = _recorded_time(previous.get("updated_at"), now)
+            if previous_at is None or previous_at.timestamp() >= event_at.timestamp():
+                return None
+    if not still_current():
+        return None
+    updates = {key: (str(value).lower(), event_at.date().isoformat()) for key, value in flags.items()}
+    if not set_context_states_if_unchanged(updates, expected, recorded_at=event_at):
+        return None
+    return ContextExtractionResult("related", frozenset(flags))
+
+
+def resolve_daily_context_before_question(
+    flags: tuple[str, ...], *, now: datetime, still_current: Callable[[], bool],
+    channel: str, conversation_db_path: str | None = None,
+) -> bool:
+    """Resolve unknown flags from owner-day sources without replaying conversation."""
+    path = conversation_db_path or config.CONVERSATION_DB_FILE
+    try:
+        rows = load_daily_state_messages(now=now, db_path=path)
+        if not rows:
+            return False
+        result = extract_and_update_context_flags(rows[-1]["content"], channel=channel,
+            now=now, conversation_db_path=path, daily_resolution_flags=flags,
+            clarification_still_current=still_current)
+        return isinstance(result, ContextExtractionResult) and bool(result.applied_flags)
+    except Exception:
+        return False
 
 
 def _persist_context_payload(

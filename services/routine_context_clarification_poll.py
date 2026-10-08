@@ -54,6 +54,7 @@ def run_clarification_poll(
     budget: Callable[[], bool], sender: Callable[[str, str, str], Any],
     record: Callable[..., Any],
     closed_routine_ids: Callable[[datetime], set[int]] | None = None,
+    resolve_context: Callable[[PollSnapshot, datetime, Callable[[], bool]], bool] | None = None,
 ) -> str:
     """Revalidate after model latency and reuse durable delivery/answer boundaries.
 
@@ -119,6 +120,22 @@ def run_clarification_poll(
                     sender=sender, record=record, current_time=clock)
             # Legacy/unrelated correlation never permits blind replay.
             return "delivery_uncertain"
+        unknown = set().union(*(set(candidate_unknown_flags(row, snapshot.runtime_context,
+            snapshot.evidence, now=now)) for row in snapshot.candidates
+            if 0 < (row.slot_at - now).total_seconds() <= 900))
+        resolution_key = "daily-" + sha256(json.dumps(
+            [now.date().isoformat(), fingerprint, sorted(unknown)],
+            sort_keys=True).encode()).hexdigest()
+        if (unknown and resolve_context is not None
+                and store.claim_evaluation(resolution_key, now=now)):
+            resolve_context(snapshot, now, fresh)
+            # Reload even after a failed/stale inference; neither old snapshots
+            # nor changed channels may authorize sending the original question.
+            if unavailable() or selected_channel() != channel:
+                return "deferred"
+            now = clock()
+            snapshot = snapshot_loader(now)
+            fingerprint = snapshot.fingerprint()
         question = prepare_question(candidates=snapshot.candidates,
             runtime_context=snapshot.runtime_context, evidence=snapshot.evidence,
             channel=channel, now=now, history_marker=snapshot.history_marker,

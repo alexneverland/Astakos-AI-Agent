@@ -1,5 +1,32 @@
 # Astakos: Current Plan
 
+## Approved extension: daily context inference (2026-10-08)
+
+Contract: `tasks/daily-context-inference-spec.md`, approved by the owner.
+First build a bounded, provenance-filtered Athens-day reference for the existing
+extractor, with source-version revalidation. Then reuse that extractor before
+unknown-context questions, preserving event timestamps, canonical conditional
+writes and the existing ledger evaluation budget. Verify the exact cross-channel
+Sofia-home/owner-departure lifecycle and conflicting/future/stale/racing cases.
+No separate scheduler, state store, schema migration or live-data repair.
+Implemented: owner-day sources are bounded (128 records / 32,000 characters),
+provenance-filtered and timestamped. The existing extractor consumes them with
+canonical context; source version and conditional writes reject intervening changes.
+Before a question, one ledger-budgeted resolution per evidence fingerprint can
+write only requested volatile flags backed by validated source IDs and a recent
+event. It preserves that event's timestamp and cannot replace newer stored state.
+Reloading normal eligibility then decides whether a question is still necessary.
+Oversized/unavailable day views disable inference, not explicit current reports.
+204 focused offline tests passed; live model interpretation remains unverified.
+Owner-approved adjacent fix: remove the partner-work-mode lexical fallback that
+misattributed the owner's work to a partner staying home. Preserve the existing
+semantic extractor, including explicit remote-work statements, across channels.
+The regression reproduced false persisted `remote` in Web, Matrix and Telegram.
+PR #233 review fixes: recent-hour history scans adjacent source dates and filters
+roles, provenance, event time and the rowid boundary before retaining 12 eligible
+references. Both findings failed focused regressions before repair. Combined
+offline verification passed 288 tests (one existing dependency warning).
+
 ## Conversational completion and timed shared state (2026-10-08)
 
 Reuse the dated feedback pipeline for clear execution reports at any time of day,

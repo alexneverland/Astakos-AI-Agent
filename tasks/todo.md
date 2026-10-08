@@ -1,5 +1,27 @@
 # Astakos: Current Tasks
 
+## Daily context inference (approved 2026-10-08)
+
+- [x] RED/GREEN: source-timed daily references and canonical flag persistence.
+- [x] Before-question resolution through the same extractor, with bounded
+  evaluation, source freshness and no timestamp renewal of old observations.
+- [x] Focused offline verification: 204 passed, two existing dependency warnings.
+  Removing the source-age guard made the old-event regression fail; restored it.
+  No full-suite run, live provider calls or owner-data repair.
+- [ ] Live semantic observation remains separate from offline verification.
+- [x] Reproduced both PR #233 P2 findings: UTC midnight reference loss and
+  premature history cap. Scan adjacent dates, filter eligible sources before
+  retaining the latest 12 by actual instant; preserve the rowid boundary.
+  Combined focused verification: 288 passed, one existing dependency warning.
+- [x] Prepare the scoped extension/review fixes for PR #233 and a new Codex review.
+- [ ] Latest-commit Codex result and merge remain pending; do not treat old review
+  or CI status as evidence of the new review result.
+- [x] Owner approved including partner-work-mode repair in this PR. Removed the
+  word-cooccurrence fallback; the canonical semantic extractor retains explicit
+  remote-work support. Real-store regressions cover all three channels.
+  Three original-scenario cases failed before removal; 128 focused tests passed
+  after it (one existing warning), with compilation and whitespace checks clean.
+
 ## Conversational completion and timed shared state (2026-10-08)
 
 - [x] Reproduce the 09:31 question / 09:45 expiry / 10:09 departure sequence:
