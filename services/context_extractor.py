@@ -6,7 +6,7 @@ from typing import Callable
 from services.gemini import safe_gemini_call
 from core.utils import clean_message, extract_json_from_text
 from core.untrusted_content import external_content_source_names, format_untrusted_tool_result
-from memory.conversation_history import load_recent_state_messages, load_daily_state_messages, get_max_rowid
+from memory.conversation_history import load_recent_state_messages, load_daily_state_messages, get_latest_trusted_user_rowid
 from memory.routine_db import get_context_state, set_context_states_if_unchanged
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -202,7 +202,7 @@ def extract_and_update_context_flags(
     try:
         current = now or datetime.now(ZoneInfo("Europe/Athens"))
         history_options = {"db_path": conversation_db_path or config.CONVERSATION_DB_FILE}
-        source_version = get_max_rowid(**history_options)
+        source_version = get_latest_trusted_user_rowid(**history_options)
         try:
             daily_rows = load_daily_state_messages(now=current, **history_options)
         except (ValueError, OSError):
@@ -267,7 +267,7 @@ def extract_and_update_context_flags(
         if daily_resolution_flags is not None:
             return _commit_daily_resolution(payload, daily_rows, expected,
                 allowed=set(daily_resolution_flags), now=current,
-                still_current=lambda: (get_max_rowid(**history_options) == source_version
+                still_current=lambda: (get_latest_trusted_user_rowid(**history_options) == source_version
                     and (clarification_still_current is None or clarification_still_current())))
         if clarification:
             if (not isinstance(payload, dict)
@@ -369,7 +369,7 @@ def extract_and_update_context_flags(
 
         def persist() -> frozenset[str] | None:
             """Apply the already validated semantic state through canonical writers."""
-            if get_max_rowid(**history_options) != source_version:
+            if get_latest_trusted_user_rowid(**history_options) != source_version:
                 return None
             return _persist_context_payload(payload, valid_keys, today_str, expected)
 

@@ -694,24 +694,32 @@ def load_daily_state_messages(
     if now.tzinfo is None:
         raise ValueError("Daily context requires an aware clock")
     current = now.astimezone(ZoneInfo("Europe/Athens"))
-    rows = load_messages_since(since_date=(current-timedelta(days=1)).date().isoformat(),
-                               roles=["user"], limit=257, db_path=db_path)
-    if len(rows) >= 257:
-        raise ValueError("Daily context source window exceeds its safe bound")
     result = []
-    for row in rows:
-        if external_content_source_names(row.get("metadata")):
-            continue
-        stamp = _recorded_time(row["timestamp"], current)
-        if stamp is None:
-            raise ValueError("Daily context has an ambiguous or invalid source time")
-        if stamp.date() != current.date() or stamp.timestamp() > current.timestamp():
-            continue
-        if len(str(row.get("content") or "")) > 4000:
-            raise ValueError("Daily context source is too large to interpret safely")
-        result.append({**row, "timestamp": stamp.isoformat()})
-    if len(result) > 128 or sum(len(row["content"]) for row in result) > 32000:
-        raise ValueError("Daily context exceeds its safe bound")
+    total_chars = 0
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        cursor = conn.execute(
+            """SELECT rowid, * FROM conversation_messages
+               WHERE role='user' AND date BETWEEN ? AND ?""",
+            ((current-timedelta(days=1)).date().isoformat(),
+             (current+timedelta(days=1)).date().isoformat()),
+        )
+        for raw in cursor:
+            row = {**_row_to_message(raw), "rowid": raw["rowid"]}
+            if external_content_source_names(row.get("metadata")):
+                continue
+            stamp = _recorded_time(row["timestamp"], current)
+            if stamp is None:
+                raise ValueError("Daily context has an ambiguous or invalid source time")
+            if stamp.date() != current.date() or stamp.timestamp() > current.timestamp():
+                continue
+            content_length = len(str(row.get("content") or ""))
+            if content_length > 4000:
+                raise ValueError("Daily context source is too large to interpret safely")
+            result.append({**row, "timestamp": stamp.isoformat()})
+            total_chars += content_length
+            if len(result) > 128 or total_chars > 32000:
+                raise ValueError("Daily context exceeds its safe bound")
     return sorted(result, key=lambda row: (datetime.fromisoformat(row["timestamp"]).timestamp(), row["rowid"]))
 
 

@@ -26,6 +26,11 @@ PR #233 review fixes: recent-hour history scans adjacent source dates and filter
 roles, provenance, event time and the rowid boundary before retaining 12 eligible
 references. Both findings failed focused regressions before repair. Combined
 offline verification passed 288 tests (one existing dependency warning).
+Second review: daily limits count eligible Athens-day owner sources only, using
+streamed adjacent-date candidates without an intermediate row cap. Extraction
+freshness reuses the canonical latest-trusted-user identity, so assistant-only
+or external-derived rows cannot discard an explicit report; newer owner evidence
+and canonical-state races remain blocking. Six regressions failed before repair.
 
 ## Conversational completion and timed shared state (2026-10-08)
 

@@ -10,6 +10,49 @@ from services.routine_feedback import ATHENS
 NOW = datetime(2026, 10, 8, 10, 9, 47, tzinfo=ATHENS)
 
 
+@pytest.mark.parametrize("noise", ["yesterday", "external"])
+def test_daily_bound_counts_only_eligible_athens_day_sources(tmp_path, noise):
+    """Unrelated rows must not disable an otherwise complete owner-day view."""
+    from memory import conversation_history as history
+    path = str(tmp_path / "history.db")
+    for index in range(258):
+        history.append_message(role="user", channel="web", content=f"noise {index}",
+            timestamp=NOW-timedelta(days=1) if noise == "yesterday" else NOW,
+            metadata={"untrusted_external_tool_names":["user_provided_asset"]} if noise == "external" else {},
+            db_path=path)
+    history.append_message(role="user", channel="matrix", content="today plan", timestamp=NOW, db_path=path)
+    assert [row["content"] for row in history.load_daily_state_messages(now=NOW, db_path=path)] == ["today plan"]
+
+
+@pytest.mark.parametrize("mode", ["ordinary", "resolution"])
+@pytest.mark.parametrize("noise", ["assistant", "external"])
+def test_unrelated_history_during_model_does_not_lose_owner_update(tmp_path, monkeypatch, mode, noise):
+    """Only a newer trusted owner source may invalidate source freshness."""
+    from memory import conversation_history as history, routine_db as db
+    from services import context_extractor as extractor
+    path = str(tmp_path / "history.db")
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "routines.db"))
+    db.setup_db()
+    source = history.append_message(role="user", channel="matrix", content="Έφυγα μόνος",
+                                    timestamp=NOW, db_path=path)
+    def model(_):
+        history.append_message(role="assistant" if noise == "assistant" else "user",
+            channel="web", content="unrelated notification", timestamp=NOW, db_path=path,
+            metadata={"untrusted_external_tool_names":["user_provided_asset"]} if noise == "external" else {})
+        payload = {"partner_with_user":False} if mode == "ordinary" else {
+            "flags":{"partner_with_user":False}, "event_rowid":source["rowid"],
+            "support_rowids":[source["rowid"]]}
+        return SimpleNamespace(text=json.dumps(payload))
+    monkeypatch.setattr(extractor, "safe_gemini_call", model)
+    monkeypatch.setattr(extractor, "reconcile_context_message", lambda _:None)
+    if mode == "ordinary":
+        extractor.extract_and_update_context_flags("Έφυγα μόνος", now=NOW, conversation_db_path=path)
+    else:
+        assert extractor.resolve_daily_context_before_question(("partner_with_user",), now=NOW,
+            still_current=lambda:True, channel="matrix", conversation_db_path=path)
+    assert db.get_context_state("partner_with_user")["value"] == "false"
+
+
 @pytest.mark.parametrize("channel", ["web", "matrix", "telegram"])
 @pytest.mark.parametrize("text,payload,expected_mode", [
     ("Εγώ φτάνω στη δουλειά, η Σοφία ήτανε σπίτι πριν φύγω",

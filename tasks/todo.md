@@ -14,6 +14,12 @@
   retaining the latest 12 by actual instant; preserve the rowid boundary.
   Combined focused verification: 288 passed, one existing dependency warning.
 - [x] Prepare the scoped extension/review fixes for PR #233 and a new Codex review.
+- [x] Second review findings reproduced in six cases: filter daily candidates
+  before the source bound; reuse latest trusted owner row for extraction freshness.
+  Preserve the 128-row / 32,000-character bounds and newer-owner/state rejection.
+  113 related offline tests passed (one existing dependency warning); repaired
+  a stale fixture loader name that had caused six setup errors in the first run.
+  Compilation and whitespace checks passed; no full suite or live-data changes.
 - [ ] Latest-commit Codex result and merge remain pending; do not treat old review
   or CI status as evidence of the new review result.
 - [x] Owner approved including partner-work-mode repair in this PR. Removed the
