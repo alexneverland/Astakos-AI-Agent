@@ -575,6 +575,21 @@ class RoutineFeedbackStore:
         finally:
             connection.close()
 
+    def closed_occurrence_ids(self, occurrence_date: date) -> set[int]:
+        """Read dated outcomes that cannot claim dispatch; unmigrated stores stay legacy."""
+        if type(occurrence_date) is not date:
+            raise ValueError("Invalid occurrence date")
+        connection = self.connection_factory()
+        try:
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='routine_occurrences'").fetchone() is None:
+                return set()
+            return {row[0] for row in connection.execute(
+                """SELECT routine_id FROM routine_occurrences WHERE occurrence_date=?
+                AND feedback IS NOT NULL AND feedback!='acknowledge'""",
+                (occurrence_date.isoformat(),)).fetchall()}
+        finally:
+            connection.close()
+
     def debug_snapshot(self, routine_ids: list[int], *, now: datetime) -> dict[int, dict]:
         """Inspect recorded/derived state consistently without projection or migration.
 

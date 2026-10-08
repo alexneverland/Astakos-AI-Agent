@@ -10,6 +10,58 @@ from services.routine_context_evidence import ContextEvidence
 NOW = datetime(2026, 10, 6, 10, tzinfo=ATHENS)
 
 
+@pytest.mark.parametrize("feedback", ["complete", "skip_today", "defer", "acknowledge"])
+def test_dated_feedback_filters_context_questions_before_generation(environment, feedback):
+    """An already cleaned rabbit needs no location question for that day's slot."""
+    from memory.routine_feedback import RoutineFeedbackStore
+    worker, db, rid, _, sends, _, _, root = environment
+    ledger = RoutineFeedbackStore(db.get_connection)
+    ledger.initialize()
+    ledger.record_feedback(rid, NOW.date(), feedback, at=NOW - timedelta(minutes=25))
+    candidates = worker.load_poll_snapshot(NOW, ClarificationStore(root / "state.json")).candidates
+    assert bool(candidates) is (feedback == "acknowledge")
+    worker.run_context_clarification_job()
+    assert bool(sends) is (feedback == "acknowledge")
+
+
+@pytest.mark.parametrize("other_day", [False, True])
+def test_completed_routine_closes_only_its_current_question_even_during_activity(environment, monkeypatch, other_day):
+    """Completion retires an obsolete question, without inventing location evidence."""
+    from memory.routine_feedback import RoutineFeedbackStore
+    worker, db, rid, state, sends, _, _, root = environment
+    ledger = RoutineFeedbackStore(db.get_connection)
+    ledger.initialize()
+    worker.run_context_clarification_job()
+    questions = ClarificationStore(root / "astakos_routine_context_questions.json")
+    assert questions.snapshot()["pending"] is not None
+    at = NOW - timedelta(days=1) if other_day else NOW + timedelta(seconds=1)
+    ledger.record_feedback(rid, at.date(), "complete", at=at)
+    state["now"] = NOW + timedelta(minutes=1)
+    monkeypatch.setattr(worker, "clarification_unavailable", lambda: "recent_activity")
+    worker.run_context_clarification_job()
+    assert (questions.snapshot()["pending"] is not None) is other_day
+    assert len(sends) == 1
+    assert state["evidence"]["user_out_of_home"].effective_value is None
+
+
+def test_completion_during_question_generation_prevents_stale_delivery(environment, monkeypatch):
+    """A different channel can finish the routine while the wording model is busy."""
+    from memory.routine_feedback import RoutineFeedbackStore
+    worker, db, rid, _, sends, _, _, root = environment
+    ledger = RoutineFeedbackStore(db.get_connection)
+    ledger.initialize()
+
+    def classify(packet, **kwargs):
+        """Simulate a committed owner completion at the inference boundary."""
+        ledger.record_feedback(rid, NOW.date(), "complete", at=NOW)
+        return {"routine_ids": [str(rid)], "flags": ["user_out_of_home"], "question": "Home now?"}
+
+    monkeypatch.setattr(worker, "classify_packet", classify)
+    worker.run_context_clarification_job()
+    assert not sends
+    assert ClarificationStore(root / "astakos_routine_context_questions.json").snapshot()["pending"] is None
+
+
 @pytest.mark.parametrize("installed", [
     "_dated_routine_feedback_tick", "_dated_single_routine_sender",
     "_dated_deferred_routine_sender", "_dated_batch_routine_sender",

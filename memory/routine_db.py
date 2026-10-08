@@ -801,9 +801,17 @@ def get_routines_for_day(day: str) -> list:
     return routines
 
 
+def get_closed_routine_occurrence_ids(now: datetime) -> set[int]:
+    """Read the canonical dated feedback without migrating or projecting state."""
+    from memory.routine_feedback import RoutineFeedbackStore
+    return RoutineFeedbackStore(get_connection).closed_occurrence_ids(now.date())
+
+
 def get_eligible_preemptive_routines_for_day(day: str, *, now: datetime | None = None) -> list:
     """Return schedulable day routines that are incomplete and not indefinitely paused."""
-    today_str = (now or datetime.now()).strftime("%Y-%m-%d")
+    current = now or datetime.now()
+    today_str = current.strftime("%Y-%m-%d")
+    closed_ids = get_closed_routine_occurrence_ids(current)
     conn = get_connection()
     cursor = conn.cursor()
     c_day = normalize_day(day)
@@ -832,7 +840,7 @@ def get_eligible_preemptive_routines_for_day(day: str, *, now: datetime | None =
             "type": row[3], "confidence": round(row[4], 2),
             "mentions": row[5], "state": row[6],
         }
-        for row in rows
+        for row in rows if row[0] not in closed_ids
     ]
 
 

@@ -317,6 +317,7 @@ def run_context_clarification_job() -> None:
         from memory.conversation_history import append_message
         from services.external_delivery import external_delivery_router as router
         from services.routine_context_clarification_poll import run_clarification_poll
+        from memory.routine_db import get_closed_routine_occurrence_ids
         store = ClarificationStore(Path(BASE_DIR) / "astakos_routine_context_questions.json")
         channel = resolve_external_channel()
         # Dependency generation happens once up front, outside short ledger locks.
@@ -331,7 +332,7 @@ def run_context_clarification_job() -> None:
             sender=lambda channel, text, identity: (
                 router.send_idempotent_matrix_text(text, transaction_id=identity)
                 if channel == "matrix" else router.send_text_to(channel, text)),
-            record=append_message)
+            record=append_message, closed_routine_ids=get_closed_routine_occurrence_ids)
     except Exception:
         outcome = "error"
     finally:

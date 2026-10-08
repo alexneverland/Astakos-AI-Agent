@@ -1,5 +1,19 @@
 # Astakos: Current Tasks
 
+## Completed routines and context questions (2026-10-08)
+
+- [x] Reproduce today's early completion still producing a location question:
+  the dated ledger recorded completion, but candidate selection used only legacy
+  `last_triggered`. Regression tests use isolated real routine/question stores.
+- [x] Filter candidates by canonical dated outcomes; acknowledgement and legacy
+  databases remain eligible. Retire delivered questions when every associated
+  routine is closed for its slot date, even during recent conversation activity.
+- [x] Focused verification and local diff review: 293 tests passed, including
+  completion during inference, other-date isolation and acknowledgement eligibility.
+  No full-suite rerun, live database writes, migrations or cooldown/confidence reset.
+- [x] Owner authorized commit/PR for this correction.
+- [ ] Review/merge separately; naturally observe the next early completion.
+
 ## Routine conversation wording (2026-10-07)
 
 - [x] PR #229 merged; its task branch deleted. Terminal-result continuation
@@ -17,7 +31,7 @@
 - [x] PR #230 review corrections: retain the canonical name for routine-specific
   date clarifications without recording feedback; restrict wording dialogue to
   the current daily session across channels; require stale/error context in tests.
-- [ ] Review and merge the wording PR separately after inspection.
+- [x] PR #230 reviewed and merged; its task branch deleted (2026-10-08).
 
 ## Dated routine feedback — implementation and approved reset completed
 

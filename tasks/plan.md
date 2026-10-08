@@ -1,6 +1,20 @@
 # Astakos: Current Plan
 
-## Current narrow work: routine conversation wording
+## Current narrow correction: completed routines need no context question
+
+The dated occurrence ledger is authoritative for today's completion. The shared
+candidate reader excludes closed dated outcomes without changing legacy fields
+or pressure. A confirmed delivered question is resolved locally when all its
+associated routines have closed outcomes on the question's slot date; normal
+activity gates still prevent new proactive messages. Other dates and unresolved
+routines are not treated as completed. Existing fingerprint revalidation prevents
+completion during wording inference from producing a stale question. Focused
+offline tests exercise real temporary storage; no owner database writes,
+migrations, runtime controls, phrase lists or full-suite run are in scope.
+PR #230 is merged and its task branch deleted; natural wording observation remains
+separate from this eligibility defect.
+
+## Completed implementation: routine conversation wording
 
 PR #229 is merged and its task branch deleted (2026-10-07). This next slice
 changes wording context only: the canonical dated feedback result carries its

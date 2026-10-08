@@ -51,6 +51,7 @@ def run_clarification_poll(
     unavailable: Callable[[], bool | str], classify: Callable[[dict[str, Any]], Any],
     budget: Callable[[], bool], sender: Callable[[str, str, str], Any],
     record: Callable[..., Any],
+    closed_routine_ids: Callable[[datetime], set[int]] | None = None,
 ) -> str:
     """Revalidate after model latency and reuse durable delivery/answer boundaries.
 
@@ -69,6 +70,14 @@ def run_clarification_poll(
                     budget=budget, sender=sender, record=record, current_time=clock)
                 if outcome != "recorded":
                     return "delivery_uncertain"
+        pending = store.snapshot()["pending"]
+        if pending is not None and pending["status"] == "sent" and closed_routine_ids is not None:
+            # Retiring an obsolete question is local bookkeeping, not a new
+            # proactive message: recent activity must not delay it until expiry.
+            closed = closed_routine_ids(datetime.fromisoformat(pending["slot_at"]))
+            if (all(int(rid) in closed for rid in pending["routine_ids"])
+                    and store.close(pending["id"], outcome="resolved", now=now)):
+                return "resolved"
         store.expire(now=now)
         reason = unavailable()
         if reason:
