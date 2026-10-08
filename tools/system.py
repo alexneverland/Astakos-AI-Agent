@@ -3602,7 +3602,9 @@ def save_goal_tool(
     external_content_sources_json: str = "",
 ) -> str:
     """
-    Saves or updates a long-term goal for {config.USER_NAME}.
+    Creates a long-term goal or explicitly replaces its full definition.
+    For ordinary updates to an existing goal, use the partial status/progress/
+    milestones tools instead: omitted fields here reset to their defaults.
     project: Short project name (e.g., 'ShiftMaster', 'Astakos', 'PraxisERP').
     description: What he wants to achieve (e.g., 'To finish the licensing module').
     status: 'active' (in progress) | 'paused' (shelved) | 'done' (completed).
@@ -3645,7 +3647,9 @@ def update_goal_status_tool(project: str, status: str) -> str:
 @tool
 def update_goal_progress_tool(project: str, progress: int) -> str:
     """
-    Updates the progress percentage of an existing goal (0-100).
+    Updates the completion percentage of an existing goal (0-100).
+    Use an explicit percentage or a known agreed milestone plan, not scores,
+    measurements, elapsed time, or an arbitrary estimate from conversation.
     project: The name of the project.
     progress: An integer from 0 to 100.
     """
@@ -3663,7 +3667,9 @@ def update_goal_milestones_tool(
     external_content_sources_json: str = "",
 ) -> str:
     """
-    Updates the milestones of an existing goal.
+    Replaces the milestones of an existing goal and refreshes its activity time.
+    Include previous relevant milestones alongside new user-reported results or
+    verified completed steps. Records scores without changing completion percent.
     project: The name of the project.
     milestones: The new milestones (in string format, e.g., '1) UI, 2) DB').
     """

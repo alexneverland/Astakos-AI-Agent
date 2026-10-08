@@ -1,5 +1,21 @@
 # Astakos: Current Tasks
 
+## Conversational project updates (2026-10-08)
+
+- [x] Reproduce missing goal-update bindings in Chat and Dev across Web,
+  Matrix and Telegram; eight failing cases before the repair.
+- [x] Expose existing goal tools in both agents; record reported activity or
+  verified joint work using partial updates, not a full goal reset. Scores
+  remain milestones, not completion percentages. Read-only diagnosis is unchanged.
+- [x] Focused goal/security checks: 221 passed, two existing dependency warnings.
+  Agent bindings, persisted milestones/timestamps, unknown-project rejection,
+  external provenance and read-only diagnosis verified offline. Compilation
+  and whitespace/diff review passed; no full-suite run or live-data changes.
+- [ ] Observe a natural project update/follow-up reply; offline bindings and
+  persistence do not prove the provider's future semantic tool selection.
+- PR requested by the owner; review/merge remain separate next steps.
+  No live goal backfill or storage migration.
+
 ## Optional routine context notes (2026-10-08)
 
 - [x] Owner-approved scope: one 30% gate; work/shift may allow a relevant comment,
