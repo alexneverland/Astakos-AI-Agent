@@ -15,7 +15,7 @@ def test_extraction_receives_source_dates_for_relative_time(monkeypatch):
     captured = []
 
     def invoke(_model, messages):
-        captured.append(messages[0].content)
+        captured.append(messages)
         return SimpleNamespace(content="[null, null]")
 
     monkeypatch.setitem(sys.modules, "core.brain", SimpleNamespace(llm=object(), safe_llm_invoke=invoke))
@@ -23,9 +23,9 @@ def test_extraction_receives_source_dates_for_relative_time(monkeypatch):
         {"content": "Χθες ήπια μια μπύρα", "date": "2026-09-30", "time": "23:50"},
         {"content": "Χθες ήπια μια μπύρα", "date": "2026-10-02", "time": "00:10"},
     ]) == [None, None]
-    payload = json.loads(captured[0].split("Messages:\n", 1)[1])
+    payload = json.loads(captured[0][-1].content)["messages"]
     assert [item["source_date"] for item in payload] == ["2026-09-30", "2026-10-02"]
-    assert "relative dates" in captured[0]
+    assert "relative dates" in captured[0][0].content
 
 
 def test_intake_combines_all_channels_without_recounting_sources(tmp_path):

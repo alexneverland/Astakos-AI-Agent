@@ -1,5 +1,24 @@
 # Astakos: Current Plan
 
+## General behavioral identity repair (2026-10-08)
+
+Owner-approved contract: `tasks/behavioral-entity-identity-spec.md`. Extend the
+existing behavioral work only; preserve all other unfinished observation tasks.
+1. RED/GREEN canonical extraction references: bounded prior shared owner context
+   and fallible prior observations, semantic item/behavior selection, deterministic
+   index validation, real temporary persistence and cross-channel aggregation.
+2. RED/GREEN specific-action grouping: do not merge different behaviors sharing
+   a broad action kind. Retain broader initiative topic suppression and verify
+   evidence/reply/initiative regressions. No old-event repair or schema change.
+Verification: focused pytest, compilation and diff check, no full-suite run.
+Live model interpretation is a separate owner-controlled observation.
+Implemented: shared extraction now selects validated prior item and specific
+behavior references in its existing single model call. Named patterns include
+specific event type; the broader pre-existing initiative topic hash is preserved.
+Oversized context is skipped rather than truncated. 175 related offline tests
+passed (one existing dependency warning), with compilation and diff checks clean.
+No live observations, schema, preferences or initiative delivery state were changed.
+
 ## Narrow goal-update repair (2026-10-08)
 
 Reuse the canonical goal tools and temporal metadata, without a new scheduler,

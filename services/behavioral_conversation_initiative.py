@@ -19,7 +19,10 @@ _logger = logging.getLogger(__name__)
 
 def _topic(packet: dict[str, Any]) -> str:
     """Reuse detector identity rather than inventing a second grouping policy."""
-    key = _event_pattern_key(dict(packet, record_state="confirmed", event_date=packet["first_date"]))
+    key = _event_pattern_key(
+        dict(packet, record_state="confirmed", event_date=packet["first_date"]),
+        include_behavior=False,
+    )
     if key is None:
         raise ValueError("Invalid behavioral topic")
     return sha256(json.dumps(key).encode()).hexdigest()

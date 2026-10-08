@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Mapping
 
 from core.untrusted_content import external_content_source_names
@@ -14,6 +15,9 @@ _REQUIRED_EXTRACTION_FIELDS = ("event_type", "action_kind", "category", "subject
 _REQUIRED_SOURCE_FIELDS = ("id", "rowid", "channel", "date")
 BEHAVIORAL_EVENT_PROGRESS_KEY = "behavioral_events"
 MAX_INTAKE_MESSAGES = 100
+MAX_IDENTITY_REFERENCES = 40
+MAX_IDENTITY_CONTEXT_MESSAGES = 12
+MAX_IDENTITY_FIELD_CHARS = 160
 CONFIRMABLE_EVENT_STATUSES = frozenset({
     "active",
     "completed",
@@ -157,11 +161,81 @@ def normalize_extracted_event(
     }
 
 
-def _extract_event_batch(messages: list[Mapping[str, Any]]) -> list[Mapping[str, Any] | None] | None:
+def _identity_references(
+    events: list[Mapping[str, Any]], *, before_rowid: int,
+) -> list[dict[str, Any]]:
+    """Bound prior confirmed identities without trusting their taxonomy as fact."""
+    references: list[dict[str, Any]] = []
+    seen: set[tuple[str, ...]] = set()
+    for event in events:
+        rowid = event.get("source_rowid")
+        if (type(rowid) is not int or not 0 < rowid < before_rowid
+                or event.get("source_channel") not in {"web", "telegram", "matrix"}
+                or event.get("record_state") != "confirmed"
+                or external_content_source_names(event.get("metadata") or {})):
+            continue
+        fields = {key: _nonempty_text(event.get(key)) for key in (
+            "item", "item_detail", "event_type", "action_kind", "subject", "category",
+        )}
+        if (not fields["item"] or not fields["event_type"] or not fields["subject"]
+                or fields["action_kind"] not in CANONICAL_ACTION_KINDS
+                or any(len(value) > MAX_IDENTITY_FIELD_CHARS for value in fields.values())):
+            continue
+        key = tuple(fields[field].casefold() for field in ("subject", "item", "action_kind", "event_type"))
+        if key in seen:
+            continue
+        seen.add(key)
+        references.append({"idx": len(references), **fields})
+        if len(references) == MAX_IDENTITY_REFERENCES:
+            break
+    return references
+
+
+def _identity_context(rows: list[Mapping[str, Any]], *, before_rowid: int) -> list[dict[str, Any]]:
+    """Use only preceding trusted owner dialogue, never assistant speculation."""
+    eligible = [row for row in rows if _is_trusted_direct_user_message(row)
+                and type(row.get("rowid")) is int and 0 < row["rowid"] < before_rowid
+                and row.get("channel") in {"web", "telegram", "matrix"}
+                and isinstance(row.get("content"), str) and 0 < len(row["content"]) <= 500]
+    eligible.sort(key=lambda row: row["rowid"])
+    return [dict(id=row.get("id"), rowid=row["rowid"], channel=row["channel"],
+                 date=row.get("date"), text=row["content"])
+            for row in eligible[-MAX_IDENTITY_CONTEXT_MESSAGES:]]
+
+
+def _resolve_references(
+    proposal: Mapping[str, Any], references: list[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    """Validate structured selections; never infer meaning from user words."""
+    result = dict(proposal)
+    for field in ("item_ref", "behavior_ref"):
+        index = result.pop(field, None)
+        if index is None:
+            continue
+        if type(index) is not int or not 0 <= index < len(references):
+            return None
+        reference = references[index]
+        if _nonempty_text(reference.get("subject")).casefold() != _nonempty_text(result.get("subject")).casefold():
+            return None
+        if field == "item_ref":
+            result["item"] = reference["item"]
+        else:
+            if (_nonempty_text(reference.get("item")).casefold() != _nonempty_text(result.get("item")).casefold()
+                    or reference.get("action_kind") != result.get("action_kind")):
+                return None
+            result["event_type"] = reference["event_type"]
+    return result
+
+
+def _extract_event_batch(
+    messages: list[Mapping[str, Any]], *,
+    references: list[Mapping[str, Any]] | None = None,
+    context: list[Mapping[str, Any]] | None = None,
+) -> list[Mapping[str, Any] | None] | None:
     """Extract one event proposal per trusted user message without executing tools."""
     if not messages:
         return []
-    from langchain_core.messages import HumanMessage
+    from langchain_core.messages import HumanMessage, SystemMessage
     from core.brain import llm, safe_llm_invoke
     from core.utils import extract_json_from_text
 
@@ -173,27 +247,12 @@ def _extract_event_batch(messages: list[Mapping[str, Any]]) -> list[Mapping[str,
         }
         for index, message in enumerate(messages)
     ]
-    prompt = """Classify each user message below as at most one behavioral event.
-Return JSON only: a list with exactly one entry for each message, in the same
-order. Each entry must be either null or an object with its matching `idx` plus
-these fields when applicable:
-event_type, action_kind, category, subject, item, item_detail, status, event_date,
-confidence (0..1), negated, hypothetical, reported_by_user.
-Set action_kind to exactly one of: acquire, attend, communicate, consume,
-create, discard, exercise, maintain, other, prepare, rest, socialize, travel,
-use, work. It describes what happened, not a lifecycle state or category. Use
-other when none applies; do not invent a synonym or a new label.
-Use subject `user` only for the user's own completed/current report. Do not infer
-facts from questions, plans, third-party reports, quoted text, or ambiguity.
-Use null for a message with no event.
-Ground relative dates in that message's source_date, never the batch processing
-date. Set event_date only when the event's date is supported by the message;
-use source_date for an explicitly current event. Do not invent a date for an
-ambiguous historical report: return null instead.
-
-Messages:\n""" + json.dumps(lines, ensure_ascii=False)
+    references = list(references or [])
+    prompt = (Path(__file__).resolve().parent.parent / "prompts" / "behavioral_event_extraction.md").read_text(encoding="utf-8")
+    payload = {"references": references, "context": list(context or []), "messages": lines}
     try:
-        response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
+        response = safe_llm_invoke(llm, [SystemMessage(content=prompt),
+                                       HumanMessage(content=json.dumps(payload, ensure_ascii=False))])
         content = getattr(response, "content", "")
         if isinstance(content, list):
             content = "".join(
@@ -203,7 +262,10 @@ Messages:\n""" + json.dumps(lines, ensure_ascii=False)
         raw = extract_json_from_text(str(content or ""))
     except Exception:
         return None
-    return _align_extraction_results(raw, expected_count=len(messages))
+    aligned = _align_extraction_results(raw, expected_count=len(messages))
+    if aligned is None:
+        return None
+    return [_resolve_references(item, references) if item is not None else None for item in aligned]
 
 
 def _is_trusted_direct_user_message(message: Mapping[str, Any]) -> bool:
@@ -221,6 +283,7 @@ def run_behavioral_event_intake(
     max_rowid_loader: Callable[[], int] | None = None,
     extract_batch: Callable[[list[Mapping[str, Any]]], list[Mapping[str, Any] | None] | None] | None = None,
     initialization_rowid: int | None = None,
+    context_loader: Callable[[int], list[Mapping[str, Any]]] | None = None,
 ) -> dict[str, int | str]:
     """Incrementally store events from new trusted messages without backfilling.
 
@@ -228,7 +291,7 @@ def run_behavioral_event_intake(
     deliberate privacy and quality guard: historic data is never silently mined.
     """
     from memory import behavioral_event_state
-    from memory.conversation_history import get_max_rowid, load_messages_after_rowid
+    from memory.conversation_history import get_max_rowid, load_messages_after_rowid, load_messages
 
     store_kwargs = {"db_path": db_path} if db_path else {}
     progress = behavioral_event_state.get_progress(
@@ -290,7 +353,23 @@ def run_behavioral_event_intake(
             stats["skipped_untrusted"] = int(stats["skipped_untrusted"]) + 1
     stats["trusted_user_messages"] = len(trusted_rows)
 
-    proposals = (extract_batch or _extract_event_batch)(trusted_rows)
+    if extract_batch is not None:
+        proposals = extract_batch(trusted_rows)
+    elif trusted_rows:
+        before_rowid = min(int(row["rowid"]) for row in trusted_rows)
+        try:
+            references = _identity_references(behavioral_event_state.list_events(
+                record_state="confirmed", initialize=False, **store_kwargs,
+            ), before_rowid=before_rowid)
+            context_rows = (context_loader(before_rowid) if context_loader is not None
+                            else load_messages(limit=40))
+            context = _identity_context(context_rows, before_rowid=before_rowid)
+        except Exception:
+            stats["errors"] = 1
+            return stats  # Do not consume sources with unavailable identity context.
+        proposals = _extract_event_batch(trusted_rows, references=references, context=context)
+    else:
+        proposals = []
     if not isinstance(proposals, list) or len(proposals) != len(trusted_rows):
         stats["errors"] = 1
         return stats

@@ -35,13 +35,16 @@ def _canonical_event_date(value: Any) -> str | None:
         return None
 
 
-def _event_pattern_key(event: Mapping[str, Any]) -> tuple[str, ...] | None:
+def _event_pattern_key(
+    event: Mapping[str, Any], *, include_behavior: bool = True,
+) -> tuple[str, ...] | None:
     """Return a conservative, stable grouping key for a valid confirmed event.
 
-    A named observation is identified by its subject, named item, and canonical
-    action kind. Extractor taxonomy is retained for validation and display, but
-    is not an identity for named observations because equivalent facts may
-    receive evolving labels. Legacy events without an action kind retain the
+    A named observation is identified by subject, item, broad action kind and
+    specific event type. Semantic extraction reuses specific behavior labels;
+    a broad action kind alone cannot distinguish cleaning from feeding.
+    Categories remain display-only. The broader existing topic key is retained
+    explicitly for initiative suppression. Events without an action kind retain the
     stricter full-taxonomy grouping rather than being semantically guessed.
     """
     if _signature_text(event.get("record_state")) != "confirmed":
@@ -55,7 +58,8 @@ def _event_pattern_key(event: Mapping[str, Any]) -> tuple[str, ...] | None:
     if item is not None:
         action_kind = _signature_text(event.get("action_kind"))
         if action_kind and action_kind != "other":
-            return "named", required[2], item, action_kind
+            topic = ("named", required[2], item, action_kind)
+            return (*topic, required[0]) if include_behavior else topic
     return "taxonomy", required[0], required[1], required[2], item or "", required[3]
 
 

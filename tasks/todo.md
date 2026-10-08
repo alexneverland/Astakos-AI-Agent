@@ -1,5 +1,22 @@
 # Astakos: Current Tasks
 
+## General behavioral identity repair (2026-10-08)
+
+- [x] Reproduce semantic identity resolution through extraction, temporary storage
+  and evidence across Web, Telegram and Matrix; cover a pet and a non-pet case.
+- [x] Reuse bounded prior references and trusted owner context; validate model
+  selections without phrase lists or copying historical truth/date/status.
+- [x] Separate specific behaviors within broad action kinds; preserve initiative
+  topic cooldown and cover different entities, ambiguity and untrusted context.
+- [x] Focused offline verification, compilation and diff review; no full suite,
+  historical reclassification, schema/runtime changes or live provider calls.
+  Thirteen focused RED failures preceded implementation; final related run:
+  175 passed, one existing dependency warning. Compilation and whitespace checks
+  passed. An in-memory mutation proved why boolean reference indices must fail;
+  production source was not temporarily weakened. The untouched 111 historical
+  observations now yield three specific patterns instead of four broad ones.
+- [ ] Owner-controlled natural semantic observation after implementation.
+
 ## Conversational project updates (2026-10-08)
 
 - [x] Reproduce missing goal-update bindings in Chat and Dev across Web,
