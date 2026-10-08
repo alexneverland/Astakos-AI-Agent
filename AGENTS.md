@@ -16,6 +16,7 @@ astakos/
 ```
 
 ## Key Files
+- `tasks/handoff.md` - Dated new-session orientation; verify its Git snapshot before relying on it. Read only the task-relevant specs, not the entire historical task archive.
 - `core/agents.py` - LangGraph nodes, tools binding, and supervisor definition
 - `main.py` - CLI Entry point
 - `run_telegram.py` - Telegram Bot Entry point

@@ -1,8 +1,8 @@
 # Spec: Behavioral entity identity repair
 
 Status: implemented and offline verified after owner approval, including general
-identity/action disambiguation, not a pet-specific exception. Live semantic
-observation and the separate PR lifecycle remain pending.
+identity/action disambiguation, not a pet-specific exception. PR #236 merged
+on 2026-10-08; its task branch was deleted. Live semantic observation remains pending.
 
 ## Objective and acceptance criteria
 
