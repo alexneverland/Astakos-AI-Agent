@@ -1,5 +1,19 @@
 # Astakos: Current Tasks
 
+## Bounded context re-questions (2026-10-08)
+
+- [x] Reproduce same-day location topic blocking a later routine and the consumed
+  model-attempt trap on a too-early poll (six failing offline cases before repair).
+- [x] Shared ledger: three questions/day, 30-minute overlapping-flag spacing,
+  no repeat for the same routine/day, one pending question, explicit refusal kept.
+- [x] Preflight the same policy before semantic wording; final reservation stays
+  atomic. Existing GPS/context validity and ordinary dispatch gates are untouched.
+- [x] 217 focused offline tests passed (one existing Google dependency warning),
+  including the exact morning sequence, absent/expired/fresh GPS and both channels.
+  Diff review and whitespace check passed; no full-suite rerun or live data writes.
+- [x] Owner authorized commit/PR for this narrow correction.
+- [ ] Review/merge and natural live observation remain separate next steps.
+
 ## Completed routines and context questions (2026-10-08)
 
 - [x] Reproduce today's early completion still producing a location question:
@@ -18,7 +32,8 @@
   groups are not auto-closed from guessed dates.
   Both midnight regressions failed before the fix; 162 focused tests passed
   afterward, including malformed mappings and legacy-group safety.
-- [ ] Review/merge separately; naturally observe the next early completion.
+- [x] PR #231 reviewed clean at 96693f1, merged; task branch deleted.
+- [ ] Naturally observe the next early completion.
 
 ## Routine conversation wording (2026-10-07)
 
@@ -214,7 +229,7 @@ Detailed acceptance, dependencies, file scope and verification for every CQ task
 are in [plan.md](plan.md). Preserve all unrelated pending verification below.
 
 - [x] Owner approval of the ordered implementation plan before code changes.
-- [x] CQ1: Atomic dedicated ledger, one pending, two/day, expiry/refusal/restart
+- [x] CQ1: Atomic dedicated ledger, one pending, bounded daily reservations, expiry/refusal/restart
   and corruption/concurrency safety; failing-then-passing temporary-storage tests.
 - [x] CQ2: Consequential eligible dependency selection, minimal semantic question,
   stale-generation recheck and cache; no keyword interpretation patches.

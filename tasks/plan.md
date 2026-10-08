@@ -1,5 +1,21 @@
 # Astakos: Current Plan
 
+## Current correction: bounded context re-questions for later routines
+
+The common question ledger permits at most three reservations per Athens day.
+A later, different routine may re-ask an overlapping unknown context flag after
+30 minutes since the previous send (or reservation when no send is recorded).
+An explicit declined flag stays suppressed for the rest of that day. Pending
+questions, duplicate identities and a routine already questioned that day still
+block another reservation; grouped flags cannot bypass the spacing guard.
+The same canonical policy is read before question classification and rechecked
+atomically at reservation, so a too-early poll does not consume the only semantic
+attempt for an unchanged upcoming routine. Fresh evidence prevents questions;
+missing/stale GPS never implies home or work. GPS validity, mobile share duration,
+routine schedules, runtime controls and live owner state are unchanged.
+Offline acceptance includes rabbit 08:00:38 -> market 09:00 at 08:56:22,
+expired/fresh GPS, Matrix/Telegram, spacing retry, refusal, restart and daily cap.
+
 ## Current narrow correction: completed routines need no context question
 
 The dated occurrence ledger is authoritative for today's completion. The shared
@@ -391,8 +407,9 @@ Existing incomplete live-verification entries remain unchanged.
 ### CQ1: Persist one question lifecycle safely
 
 Build typed, versioned ledger transitions through a dedicated memory abstraction.
-Acceptance: one pending request and two/day reservations survive restart and
-concurrent callers; refusal/expiry retain the unanswered topic for that day;
+Acceptance: one pending request and three/day reservations survive restart and
+concurrent callers; refusal suppresses the flag that day, while expiry permits a
+different routine to re-ask after the shared 30-minute spacing guard;
 corrupt state fails closed without overwriting it. No real ledger is created.
 Files: memory/routine_context_clarification.py and new
 tests/test_routine_context_clarification_state.py (small).

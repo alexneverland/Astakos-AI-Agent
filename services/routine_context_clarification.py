@@ -145,6 +145,7 @@ def prepare_question(
     still_current: Callable[[], bool],
     current_time: Callable[[], datetime] | None = None,
     evaluation_claim: Callable[..., bool] | None = None,
+    question_allowed: Callable[..., bool] | None = None,
 ) -> QuestionRequest | None:
     """Ask a tool-free model to phrase one validated, still-relevant question."""
     if channel not in {"matrix", "telegram"} or now.tzinfo is None:
@@ -157,7 +158,7 @@ def prepare_question(
         if not 0 < remaining <= 15 * 60:
             continue
         flags = candidate_unknown_flags(candidate, runtime_context, evidence, now=now)
-        if flags:
+        if flags and (question_allowed is None or question_allowed((candidate.id,), flags, now=now)):
             eligible.append((candidate, flags))
     if not eligible:
         return None

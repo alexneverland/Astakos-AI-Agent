@@ -69,10 +69,15 @@ creation, semantic history cleanup, provider/config changes or raw database acce
 ## Question content and limits
 
 - At most one pending context question globally, across processes/channels.
-- At most two successfully delivered questions per Athens calendar day.
+- At most three context-question reservations per Athens calendar day, as
+  approved by the owner on 2026-10-08 for later routines needing fresh location.
+  Failed/expired reservations still count; this is not three retries per topic.
   A send attempt with unknown delivery consumes a conservative reservation until
   reconciled; it must not enable another attempt merely because its receipt failed.
-- No repeated unanswered topic that day. A validated structured dependency set
+- Overlapping flags may be asked again for a different routine after at least
+  30 minutes from the previous delivery (or reservation if never delivered).
+  Never repeat the same routine that day; an explicit refusal blocks overlapping
+  flags for the rest of that day. A validated structured dependency set
   and bounded routine IDs identify the context request; semantic subject/theme
   grouping may only choose from the supplied state dimensions, not create IDs.
 - Coalesce related candidate routines into one question. Ask for the minimum
@@ -207,7 +212,8 @@ nonexistent check or claim a command above has run. No full-suite rerun by defau
    state, pre-send failure, uncertain send, and receipt/history failures cannot
    reset budget or blindly duplicate a question. Exercise persisted state, not
    only mocked observations.
-5. Quiet/mute/activity/budget gates and two/day/one-pending/topic limits hold.
+5. Quiet/mute/activity/budget gates and three-reservations/day, one-pending,
+   30-minute overlapping-flag spacing and same-routine/refusal limits hold.
    Frozen clock tests prove deadline behavior; authenticated Debug is truthful.
 
 ## Boundaries and status

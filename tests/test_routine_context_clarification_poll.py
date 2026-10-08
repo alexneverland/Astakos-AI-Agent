@@ -86,6 +86,70 @@ def harness(tmp_path):
         record=lambda **row: records.append(row))
 
 
+@pytest.mark.parametrize("channel", ["matrix", "telegram"])
+def test_later_market_reasks_after_spacing_without_poisoning_model_claim(tmp_path, channel):
+    """A too-early poll must not consume the unchanged candidate's semantic attempt."""
+    from dataclasses import replace
+    from services.routine_context_evidence import evaluate_stored_evidence
+    store, sends, _, _, args = harness(tmp_path)
+    first = NOW.replace(hour=8)
+    clock = {"now": first}
+    rabbit = replace(snapshot().candidates[0], id="96", name="Rabbit cleaning",
+                     slot_at=first.replace(minute=15))
+    market = replace(rabbit, id="1", name="Market shopping", slot_at=first.replace(minute=35))
+    # A previously stored home observation is stale; no current GPS exists.
+    evidence = evaluate_stored_evidence(
+        {"value": "false", "updated_at": "2026-10-06T01:22:00", "expires_at": "2026-10-06"},
+        now=first)
+    current = {"candidate": rabbit}
+    model_calls = []
+    def classify(packet):
+        model_calls.append(packet)
+        return {"routine_ids": [current["candidate"].id], "flags": ["user_out_of_home"],
+                "question": "Home now?"}
+    args.update(clock=lambda: clock["now"], selected_channel=lambda: channel,
+                snapshot_loader=lambda _: replace(snapshot(), candidates=(current["candidate"],),
+                    evidence={"user_out_of_home": evidence}), classify=classify)
+    assert run_clarification_poll(**args) == "delivered"
+    clock["now"] = first.replace(minute=29)
+    current["candidate"] = market
+    assert run_clarification_poll(**args) in {"held", "deferred"}
+    assert len(model_calls) == 1
+    clock["now"] = first.replace(minute=30)
+    assert run_clarification_poll(**args) == "delivered"
+    assert len(sends) == len(model_calls) == 2
+    assert store.snapshot()["pending"]["routine_ids"] == ["1"]
+
+
+@pytest.mark.parametrize("fresh_gps", [False, True])
+def test_rabbit_at_eight_does_not_block_market_at_nine_when_gps_stops(tmp_path, fresh_gps):
+    """Reproduce the owner's timestamps; an expired GPS share cannot imply home."""
+    from dataclasses import replace
+    from services.routine_context_evidence import evaluate_context_evidence
+    store, sends, _, _, args = harness(tmp_path)
+    first = NOW.replace(hour=8, second=38)
+    rabbit = replace(snapshot().candidates[0], id="96", slot_at=first.replace(minute=15, second=0))
+    args.update(clock=lambda: first,
+                snapshot_loader=lambda _: replace(snapshot(), candidates=(rabbit,)),
+                classify=lambda _: {"routine_ids": ["96"], "flags": ["user_out_of_home"],
+                                    "question": "Home for the rabbit?"})
+    assert run_clarification_poll(**args) == "delivered"
+    later = first.replace(minute=56, second=22)
+    point_at = later if fresh_gps else later - timedelta(hours=8)
+    evidence = evaluate_context_evidence({},
+        {"lat": 1.0, "lon": 1.0, "timestamp": point_at.timestamp()},
+        now=later, location_resolver=lambda *_: True)
+    market = replace(rabbit, id="1", name="Market shopping",
+                     slot_at=later.replace(hour=9, minute=0, second=0))
+    args.update(clock=lambda: later,
+                snapshot_loader=lambda _: replace(snapshot(), candidates=(market,), evidence=evidence),
+                classify=lambda _: {"routine_ids": ["1"], "flags": ["user_out_of_home"],
+                                    "question": "Home before the market?"})
+    assert run_clarification_poll(**args) == ("not_due" if fresh_gps else "delivered")
+    assert len(sends) == (1 if fresh_gps else 2)
+    assert store.snapshot()["requests"][0]["status"] == "expired"
+
+
 def test_poll_delivers_once_then_waits_without_model_or_budget(tmp_path):
     store, sends, records, budgets, args = harness(tmp_path)
     assert run_clarification_poll(**args) == "delivered"

@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -15,6 +15,8 @@ from filelock import FileLock
 
 
 ATHENS = ZoneInfo("Europe/Athens")
+MAX_DAILY_CONTEXT_QUESTIONS = 3
+CONTEXT_REASK_INTERVAL = timedelta(minutes=30)
 FINAL_STATES = frozenset({"resolved", "declined", "expired"})
 VALID_STATES = FINAL_STATES | {"reserved", "sending", "sent"}
 
@@ -240,6 +242,34 @@ class ClarificationStore:
                 self._save(state)
         return changed
 
+    @staticmethod
+    def _ask_allowed(state: dict[str, Any], routine_ids: tuple[str, ...],
+                     flags: tuple[str, ...], current: datetime) -> bool:
+        """Bound repeat questions by shared facts, routine identity and local day."""
+        todays = [row for row in state["requests"]
+                  if _stored_time(row["created_at"]).date() == current.date()]
+        if (len(todays) >= MAX_DAILY_CONTEXT_QUESTIONS
+                or any(row["status"] not in FINAL_STATES
+                       and current < _stored_time(row["slot_at"])
+                       for row in state["requests"])):
+            return False
+        for row in todays:
+            if set(routine_ids).intersection(row["routine_ids"]):
+                return False
+            if set(flags).intersection(row["flags"]):
+                reference = _stored_time(row["sent_at"] or row["created_at"])
+                if (row["status"] == "declined"
+                        or current - reference < CONTEXT_REASK_INTERVAL):
+                    return False
+        return True
+
+    def can_ask(self, routine_ids: tuple[str, ...], flags: tuple[str, ...],
+                *, now: datetime) -> bool:
+        """Read the reservation policy before spending a semantic model attempt."""
+        current = _aware(now)
+        with self._lock():
+            return self._ask_allowed(self._load(), routine_ids, flags, current)
+
     def reserve(self, question: QuestionRequest, *, now: datetime) -> bool:
         """Claim one question if its slot, topic and daily budget allow it."""
         current = _aware(now)
@@ -250,12 +280,7 @@ class ClarificationStore:
             state = self._load()
             if self._expire_pending(state, current):
                 self._save(state)
-            today = current.date().isoformat()
-            todays = [row for row in state["requests"]
-                      if _stored_time(row["created_at"]).date().isoformat() == today]
-            if (any(row["status"] not in FINAL_STATES for row in state["requests"])
-                    or len(todays) >= 2
-                    or any(row["topic"] == question.topic for row in todays)
+            if (not self._ask_allowed(state, question.routine_ids, question.flags, current)
                     or any(row["id"] == question.id for row in state["requests"])):
                 return False
             state["requests"] = state["requests"][-63:]
