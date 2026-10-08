@@ -1,5 +1,25 @@
 # Astakos: Current Plan
 
+## Narrow goal-update repair (2026-10-08)
+
+Reuse the canonical goal tools and temporal metadata, without a new scheduler,
+classifier pipeline, schema change or live-data backfill. Both Chat and Dev must
+be able to record trusted reported project activity and verified joint work.
+Resolve the project semantically from current conversation/goal context, ask if
+ambiguous, and prefer partial updates for existing goals. A result/score belongs
+in milestones; completion percentage needs explicit evidence or an agreed plan.
+Preserve existing creation time, description, status and untouched progress.
+Verify bindings in all three channels, actual persistence at an offline storage
+boundary, unknown-project rejection, external provenance and read-only diagnosis.
+Provider tool selection remains a separate owner-controlled natural observation.
+No unrelated routine/reflection changes or full-suite rerun.
+
+PR #235 review repair: resolve exact project identity across all statuses inside
+the existing storage locks. The model-facing creation tool is create-only;
+ordinary changes use partial updates, including resuming a completed goal.
+Retain the internal full-save API's backward compatibility. Status/progress
+updates carry the same approved external provenance as milestone updates.
+
 ## Next routine slice: optional context notes (2026-10-08)
 
 Approved contract: `tasks/routine-context-notes-spec.md`. Keep the blocked action

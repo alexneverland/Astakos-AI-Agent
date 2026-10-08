@@ -113,7 +113,8 @@ from tools.system import (
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool, register_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, create_file_tool, run_terminal_command, generate_image_tool, post_to_linkedin, get_current_location, get_fit_summary,
-    save_goal_tool, update_goal_status_tool, tool_stats, system_doctor, memory_review,
+    save_goal_tool, update_goal_status_tool, update_goal_progress_tool,
+    update_goal_milestones_tool, tool_stats, system_doctor, memory_review,
 )
 from tools.web import (
     get_news, get_weather_forecast,
@@ -505,7 +506,7 @@ def dev_agent_node(state):
         execute_local_pipeline, control_spotify, control_vacuum,
         get_navigation_info, recipe_expert, log_meal,
         generate_image_tool, search_flights, run_terminal_command, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup,
-        save_goal_tool, update_goal_status_tool,
+        save_goal_tool, update_goal_status_tool, update_goal_progress_tool, update_goal_milestones_tool,
         duckduckgo_search,
         # Project tools — code navigation & editing
         grant_project_access, list_project_files, read_project_file,
@@ -653,6 +654,7 @@ def chat_agent_node(state: AgentState):
 
     static_chat_tools = [
         get_current_location, control_spotify,
+        save_goal_tool, update_goal_status_tool, update_goal_progress_tool, update_goal_milestones_tool,
         search_memory, save_to_memory, delete_from_memory, retrieve_photo, retrieve_document, duckduckgo_search,
         recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, search_supermarket_prices,
         read_local_file, generate_image_tool, get_fit_summary,
