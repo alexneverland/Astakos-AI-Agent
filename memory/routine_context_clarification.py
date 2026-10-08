@@ -31,6 +31,7 @@ class QuestionRequest:
     question: str
     channel: str
     correlation: str | None = None
+    routine_slots: tuple[tuple[str, datetime], ...] = ()
 
 
 def _aware(moment: datetime) -> datetime:
@@ -107,7 +108,7 @@ class ClarificationStore:
                         "channel", "created_at", "status", "external_id", "sent_at",
                         "closed_at", "history_recorded"}
             if (not isinstance(row, dict) or not required <= set(row)
-                    or set(row) - required - {"correlation", "dispatch_pending"}):
+                    or set(row) - required - {"correlation", "dispatch_pending", "routine_slots"}):
                 raise ValueError("Invalid clarification request")
             if "dispatch_pending" in row and (
                     type(row["dispatch_pending"]) is not bool
@@ -135,6 +136,12 @@ class ClarificationStore:
             created = _stored_time(row["created_at"])
             if slot <= created:
                 raise ValueError("Invalid clarification deadline")
+            if "routine_slots" in row:
+                slots = row["routine_slots"]
+                if (not isinstance(slots, dict) or set(slots) != set(row["routine_ids"])
+                        or any(_stored_time(value) <= created for value in slots.values())
+                        or min(_stored_time(value) for value in slots.values()) != slot):
+                    raise ValueError("Invalid clarification routine slots")
             for field in ("sent_at", "closed_at"):
                 if row[field] is not None:
                     _stored_time(row[field])
@@ -261,6 +268,11 @@ class ClarificationStore:
                 "closed_at": None, "history_recorded": False,
                 "correlation": question.correlation,
             })
+            if question.routine_slots:
+                if len(dict(question.routine_slots)) != len(question.routine_slots):
+                    raise ValueError("Duplicate clarification routine slots")
+                state["requests"][-1]["routine_slots"] = {
+                    rid: _aware(at).isoformat() for rid, at in question.routine_slots}
             self._save(state)
             return True
 

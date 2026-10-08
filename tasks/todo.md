@@ -12,6 +12,12 @@
   completion during inference, other-date isolation and acknowledgement eligibility.
   No full-suite rerun, live database writes, migrations or cooldown/confidence reset.
 - [x] Owner authorized commit/PR for this correction.
+- [x] PR #231 review findings reproduced: query closures by the candidate's
+  concrete occurrence date; persist each grouped routine's own slot and use it
+  for closure. Legacy single questions retain their known date; ambiguous old
+  groups are not auto-closed from guessed dates.
+  Both midnight regressions failed before the fix; 162 focused tests passed
+  afterward, including malformed mappings and legacy-group safety.
 - [ ] Review/merge separately; naturally observe the next early completion.
 
 ## Routine conversation wording (2026-10-07)

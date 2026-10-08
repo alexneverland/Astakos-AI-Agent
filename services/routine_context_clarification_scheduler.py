@@ -147,7 +147,7 @@ def dispatch_context_current(
     for routine in routines:
         rid = int(routine.id)
         eligible = {str(row["id"]): row for row in db.get_eligible_preemptive_routines_for_day(
-            routine.slot_at.strftime("%A"), now=now)}
+            routine.slot_at.strftime("%A"), now=now, occurrence_date=routine.slot_at.date())}
         row = eligible.get(routine.id)
         if (row is None or row["time"] != routine.slot_at.strftime("%H:%M")
                 or row["event"] != routine.name):
@@ -222,7 +222,8 @@ def load_poll_snapshot(now: datetime, store: ClarificationStore, *, classify: Ca
     context = project_routine_context(build_runtime_routine_context(now), evidence)
     catalog = []
     for date in {now.date(), (now + timedelta(minutes=15)).date()}:
-        for row in db.get_eligible_preemptive_routines_for_day(date.strftime("%A"), now=now):
+        for row in db.get_eligible_preemptive_routines_for_day(
+                date.strftime("%A"), now=now, occurrence_date=date):
             try:
                 hour, minute = map(int, row["time"].split(":"))
                 slot = datetime.combine(date, datetime.min.time(), tzinfo=now.tzinfo).replace(hour=hour, minute=minute)

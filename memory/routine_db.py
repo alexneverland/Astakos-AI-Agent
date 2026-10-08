@@ -5,7 +5,7 @@ import os
 import hashlib
 import threading
 from difflib import SequenceMatcher
-from datetime import datetime
+from datetime import date, datetime
 from typing import Callable
 
 from core.exceptions import RoutineConflictError, DBWriteError
@@ -807,11 +807,17 @@ def get_closed_routine_occurrence_ids(now: datetime) -> set[int]:
     return RoutineFeedbackStore(get_connection).closed_occurrence_ids(now.date())
 
 
-def get_eligible_preemptive_routines_for_day(day: str, *, now: datetime | None = None) -> list:
+def get_eligible_preemptive_routines_for_day(
+    day: str, *, now: datetime | None = None, occurrence_date: date | None = None,
+) -> list:
     """Return schedulable day routines that are incomplete and not indefinitely paused."""
     current = now or datetime.now()
-    today_str = current.strftime("%Y-%m-%d")
-    closed_ids = get_closed_routine_occurrence_ids(current)
+    occurrence = occurrence_date or current.date()
+    if type(occurrence) is not date:
+        raise ValueError("Invalid occurrence date")
+    today_str = occurrence.isoformat()
+    from memory.routine_feedback import RoutineFeedbackStore
+    closed_ids = RoutineFeedbackStore(get_connection).closed_occurrence_ids(occurrence)
     conn = get_connection()
     cursor = conn.cursor()
     c_day = normalize_day(day)

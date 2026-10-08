@@ -10,6 +10,20 @@ from services.routine_context_evidence import ContextEvidence
 NOW = datetime(2026, 10, 6, 10, tzinfo=ATHENS)
 
 
+def test_today_completion_keeps_tomorrows_midnight_candidate(environment):
+    """A daily routine has independent occurrences on either side of midnight."""
+    from memory.routine_feedback import RoutineFeedbackStore
+    worker, db, rid, state, _, _, _, root = environment
+    state["now"] = NOW.replace(hour=23, minute=50)
+    db.update_routine_db(rid, new_time="00:02")
+    ledger = RoutineFeedbackStore(db.get_connection)
+    ledger.initialize()
+    ledger.record_feedback(rid, NOW.date(), "complete", at=state["now"])
+    candidates = worker.load_poll_snapshot(state["now"], ClarificationStore(root / "state.json")).candidates
+    assert len(candidates) == 1
+    assert candidates[0].slot_at.date() == (NOW + timedelta(days=1)).date()
+
+
 @pytest.mark.parametrize("feedback", ["complete", "skip_today", "defer", "acknowledge"])
 def test_dated_feedback_filters_context_questions_before_generation(environment, feedback):
     """An already cleaned rabbit needs no location question for that day's slot."""

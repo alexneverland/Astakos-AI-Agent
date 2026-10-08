@@ -41,7 +41,9 @@ def _request(row: Mapping[str, Any]) -> QuestionRequest:
     return QuestionRequest(id=row["id"], topic=row["topic"],
         routine_ids=tuple(row["routine_ids"]), flags=tuple(row["flags"]),
         slot_at=datetime.fromisoformat(row["slot_at"]),
-        question=row["question"], channel=row["channel"], correlation=row.get("correlation"))
+        question=row["question"], channel=row["channel"], correlation=row.get("correlation"),
+        routine_slots=tuple((rid, datetime.fromisoformat(at))
+                            for rid, at in row.get("routine_slots", {}).items()))
 
 
 def run_clarification_poll(
@@ -74,8 +76,13 @@ def run_clarification_poll(
         if pending is not None and pending["status"] == "sent" and closed_routine_ids is not None:
             # Retiring an obsolete question is local bookkeeping, not a new
             # proactive message: recent activity must not delay it until expiry.
-            closed = closed_routine_ids(datetime.fromisoformat(pending["slot_at"]))
-            if (all(int(rid) in closed for rid in pending["routine_ids"])
+            # Legacy single-routine questions have an unambiguous slot. Older
+            # groups lack individual dates: retain them rather than guess.
+            slots = pending.get("routine_slots", {
+                pending["routine_ids"][0]: pending["slot_at"]
+            } if len(pending["routine_ids"]) == 1 else {})
+            if (slots and all(int(rid) in closed_routine_ids(datetime.fromisoformat(at))
+                              for rid, at in slots.items())
                     and store.close(pending["id"], outcome="resolved", now=now)):
                 return "resolved"
         store.expire(now=now)

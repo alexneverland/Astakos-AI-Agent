@@ -5,7 +5,7 @@
 The dated occurrence ledger is authoritative for today's completion. The shared
 candidate reader excludes closed dated outcomes without changing legacy fields
 or pressure. A confirmed delivered question is resolved locally when all its
-associated routines have closed outcomes on the question's slot date; normal
+associated routines have closed outcomes on their individual occurrence dates; normal
 activity gates still prevent new proactive messages. Other dates and unresolved
 routines are not treated as completed. Existing fingerprint revalidation prevents
 completion during wording inference from producing a stale question. Focused
@@ -13,6 +13,10 @@ offline tests exercise real temporary storage; no owner database writes,
 migrations, runtime controls, phrase lists or full-suite run are in scope.
 PR #230 is merged and its task branch deleted; natural wording observation remains
 separate from this eligibility defect.
+The shared candidate reader accepts an explicit occurrence date for midnight
+lookahead. New grouped questions persist a validated routine-to-slot mapping;
+old single questions have a known slot, while old groups without that mapping
+retain the normal evidence/answer/expiry lifecycle instead of guessing dates.
 
 ## Completed implementation: routine conversation wording
 
