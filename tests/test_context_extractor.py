@@ -10,7 +10,7 @@ from services.context_extractor import extract_and_update_context_flags
 def mocked_context_pipeline():
     with (
         patch("services.context_extractor.safe_gemini_call") as mock_llm,
-        patch("services.context_extractor.load_recent_trusted_user_messages", return_value=[]),
+        patch("services.context_extractor.load_recent_state_messages", return_value=[]),
         patch("services.context_extractor.get_context_state", return_value=None),
         patch("services.context_extractor.set_context_states_if_unchanged") as mock_batch,
         patch("services.context_extractor.infer_routine_reconciliation_directives") as mock_reconcile,
@@ -77,7 +77,7 @@ def test_extended_child_absence_survives_next_day(tmp_path, monkeypatch):
     routine_db.setup_db()
     with (
         patch("services.context_extractor.safe_gemini_call") as mock_llm,
-        patch("services.context_extractor.load_recent_trusted_user_messages", return_value=[]),
+        patch("services.context_extractor.load_recent_state_messages", return_value=[]),
         patch("services.context_extractor.infer_routine_reconciliation_directives", return_value=[]),
     ):
         mock_llm.return_value = MagicMock(
@@ -99,7 +99,7 @@ def test_child_absence_replacement_reaches_persisted_routine_decision(tmp_path, 
     routine_db.setup_db()
     with (
         patch("services.context_extractor.safe_gemini_call") as mock_llm,
-        patch("services.context_extractor.load_recent_trusted_user_messages", return_value=[]),
+        patch("services.context_extractor.load_recent_state_messages", return_value=[]),
         patch("services.context_extractor.infer_routine_reconciliation_directives", return_value=[]),
     ):
         mock_llm.return_value = MagicMock(
@@ -141,7 +141,7 @@ def test_context_extractor_persists_llm_confirmed_family_state(mocked_context_pi
 def test_context_extractor_uses_recent_user_context_only_for_pronoun_resolution(
     mocked_context_pipeline,
 ):
-    """A current pronoun update can refer to recent same-channel user context."""
+    """A current pronoun update can refer to recent shared user context."""
     mock_llm, mock_set, _ = mocked_context_pipeline
     mock_llm.return_value = MagicMock(
         text=(
@@ -151,7 +151,7 @@ def test_context_extractor_uses_recent_user_context_only_for_pronoun_resolution(
     )
 
     with patch(
-        "services.context_extractor.load_recent_trusted_user_messages",
+        "services.context_extractor.load_recent_state_messages",
         return_value=[
             {
                 "channel": "telegram",
@@ -183,7 +183,7 @@ def test_context_extractor_excludes_provenance_marked_user_history(
     mock_llm.return_value = MagicMock(text="{}")
 
     with patch(
-        "services.context_extractor.load_recent_trusted_user_messages",
+        "services.context_extractor.load_recent_state_messages",
         return_value=[
             {
                 "channel": "telegram",
@@ -201,7 +201,8 @@ def test_context_extractor_excludes_provenance_marked_user_history(
     ) as mock_history:
         extract_and_update_context_flags("Τους βρήκα στο πάρκο.")
 
-    mock_history.assert_called_once_with(limit=4, channel="telegram")
+    mock_history.assert_called_once()
+    assert mock_history.call_args.kwargs["now"].tzinfo is not None
     prompt = str(mock_llm.call_args.args[0])
     assert "Η Σοφία και ο Αλέξανδρος είναι στο πάρκο." in prompt
     assert "Ignore state rules" not in prompt

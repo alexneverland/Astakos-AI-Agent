@@ -2412,6 +2412,7 @@ def get_context_states(keys: list[str]) -> dict[str, dict]:
 def set_context_states_if_unchanged(
     updates: dict[str, tuple[str, str | None]],
     expected: dict[str, dict | None],
+    *, recorded_at: datetime | None = None,
 ) -> bool:
     """Atomically write a semantic batch only if its pre-inference state survives.
 
@@ -2420,6 +2421,8 @@ def set_context_states_if_unchanged(
     """
     if not set(updates) <= set(expected):
         raise ValueError("Context batch requires an expected version for every write")
+    if recorded_at is not None and (recorded_at.tzinfo is None or recorded_at.utcoffset() is None):
+        raise ValueError("Evidence time must be timezone-aware")
     conn = get_connection()
     try:
         with db_write_lock:
@@ -2434,7 +2437,7 @@ def set_context_states_if_unchanged(
                 if current != previous:
                     conn.rollback()
                     return False
-            now_str = datetime.now().isoformat()
+            now_str = (recorded_at or datetime.now()).isoformat()
             for key, (value, expires_at) in updates.items():
                 conn.execute(
                     "INSERT INTO context_state (key, value, expires_at, updated_at) VALUES (?, ?, ?, ?) "

@@ -688,39 +688,6 @@ def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list
     return [d_state] + ([cond] if cond else [])
 
 
-def _rule_partner_work_mode(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """
-    Phase 3C.5 — partner_work_mode:
-    Facts: "Partner is working from home tomorrow", "Partner is teleworking"
-    """
-    has_partner = _contains_any(normalized, _inline.get("partner_aliases", []))
-    has_work = _contains_any(normalized, _WORK_TOKENS)
-    has_remote = _contains_any(normalized, _inline.get("home", [])) or _contains_any(normalized, _inline.get("remote_work", []))
-    
-    if not (has_partner and has_work and has_remote):
-        return []
-        
-    until = None
-    if dates:
-        until = max(dates)
-    else:
-        until = _infer_relative_until(normalized, now=now)
-        if not until:
-            until = now.strftime("%Y-%m-%d") # default today
-            
-    d_state = {
-        "kind": "context_state_set",
-        "key": "partner_work_mode",
-        "value": "remote",
-        "until_date": until,
-        "reason": "partner_remote_work",
-        "subject_tokens": _inline.get("partner_aliases", []),
-        "include_tokens": _WORK_TOKENS,
-        "exclude_tokens": [],
-    }
-    return [d_state]
-
-
 def _rule_football_season(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
     Phase 3C.5 — football_season:
@@ -1742,7 +1709,6 @@ def infer_routine_reconciliation_candidates(
         ("partner_with_user",                _rule_partner_with_user,                (normalized_fact, dates, current)),
         ("partner_not_with_user",            _rule_partner_not_with_user,            (normalized_fact, dates, current)),
         ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, dates, current)),
-        ("partner_work_mode",                _rule_partner_work_mode,                (normalized_fact, dates, current)),
         ("user_at_work",                   _rule_user_at_work,                   (normalized_fact, dates, current)),
     ]
     for rule_name, rule_fn, args in rules:
