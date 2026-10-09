@@ -232,10 +232,10 @@ def _approval_result_text(result: object | None) -> str | None:
     return f"⚠️ `{tool_name}` could not be executed ({status or 'failed'})."
 
 
-def _record_web_approval_result(result: object | None, text: str | None) -> None:
+def _record_web_approval_result(result: object | None, text: str | None) -> bool | None:
     """Record outcomes in originating Web/Matrix history, once per Matrix call."""
     if result is None or not text:
-        return
+        return False
     channel = getattr(result, "origin_channel", "")
     terminal = (getattr(result, "tool_name", "") == "run_terminal_command"
                 and getattr(result, "status", "") == "executed")
@@ -256,9 +256,13 @@ def _record_web_approval_result(result: object | None, text: str | None) -> None
             append_message(role="assistant", content=text, channel="matrix", agent="approval_check",
                 metadata=metadata,
                 message_id=message_id)
+            if getattr(result, "retain_reminder_outcome", False):
+                from core.approval import complete_matrix_reminder_outcome
+                complete_matrix_reminder_outcome(call_id)
+            return True
         except Exception as exc:
             print(f"[Matrix Approval]: Result history failed ({type(exc).__name__})")
-        return
+        return False
     if channel != "web":
         return
     try:
@@ -271,6 +275,35 @@ def _record_web_approval_result(result: object | None, text: str | None) -> None
             append_to_chat_history("assistant", text, agent="Web_Agent")
     except Exception as exc:
         print(f"[Matrix Approval]: Result history failed ({type(exc).__name__})")
+
+
+def _recover_matrix_reminder_history() -> int:
+    """Retry only canonical history writes from completed on-disk reminder receipts."""
+    from core.approval import list_recorded_matrix_reminder_outcomes
+    from core.untrusted_content import external_content_sources_from_json
+    from services.matrix_approval import ApprovalReactionResult
+
+    completed = 0
+    for item in list_recorded_matrix_reminder_outcomes():
+        args = item.get("tool_args", {})
+        result = ApprovalReactionResult(status="executed", tool_name="set_local_reminder",
+            origin_channel="matrix", execution_result=item.get("execution_result"),
+            tool_call_id=item["tool_call_id"], reminder_task=args.get("task", ""),
+            external_content_sources=tuple(external_content_sources_from_json(
+                args.get("external_content_sources_json", ""))), retain_reminder_outcome=True)
+        if _record_web_approval_result(result, _approval_result_text(result)):
+            completed += 1
+    return completed
+
+
+async def _retry_matrix_reminder_history() -> None:
+    """Recover on startup and periodically, without executing tools or sending messages."""
+    while True:
+        try:
+            await asyncio.to_thread(_recover_matrix_reminder_history)
+        except Exception as exc:
+            print(f"[Matrix Approval]: History recovery deferred ({type(exc).__name__})")
+        await asyncio.sleep(30)
 
 
 def verify_configured_owner_devices(
@@ -463,6 +496,7 @@ async def run_matrix() -> None:
         shared_runtime.shutdown_event.set()
         client.stop_sync_forever()
 
+    history_retry = asyncio.create_task(_retry_matrix_reminder_history())
     try:
         with _graceful_shutdown_signals(
             loop=loop,
@@ -471,6 +505,11 @@ async def run_matrix() -> None:
         ):
             await transport.run()
     finally:
+        history_retry.cancel()
+        try:
+            await history_retry
+        except asyncio.CancelledError:
+            pass
         external_delivery_router.unregister("matrix")
         await _archive_matrix_session_with_notifications(
             send_text=send_room_text,

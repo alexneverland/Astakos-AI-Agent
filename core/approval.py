@@ -444,10 +444,32 @@ def find_pending_by_delivery(
     return None
 
 
-def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
+def list_recorded_matrix_reminder_outcomes() -> list[dict]:
+    """Read completed reminder receipts awaiting history; never return executions."""
+    with _pending_lock():
+        return [dict(item) for item in _load_pending_raw().values()
+            if item.get("status") == "executed"
+            and item.get("retain_reminder_outcome") is True
+            and item.get("tool_name") == "set_local_reminder"
+            and item.get("channel") == "matrix"]
+
+
+def complete_matrix_reminder_outcome(tool_call_id: str) -> None:
+    """Remove only a completed reminder receipt after canonical history succeeds."""
+    with _pending_lock():
+        pending = _load_pending_raw()
+        item = pending.get(tool_call_id)
+        if item and item.get("status") == "executed" and item.get("retain_reminder_outcome") is True:
+            del pending[tool_call_id]
+            _save_pending_unlocked(pending)
+
+
+def execute_approved_pending(tool_call_id: str, tools: list, *, retain_reminder_outcome: bool = False) -> dict:
     """
     Executes a pending action that has been approved by the UI/Telegram.
-    The pending action is removed only after a successful tool.invoke().
+    Matrix reminder feedback retains a completed receipt until history succeeds.
+    A durable pre-invoke claim prevents replay after concurrent approval or an
+    interruption with an uncertain result. Other tools keep their existing path.
     """
     item = get_pending(tool_call_id)
     if not item:
@@ -480,6 +502,18 @@ def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
     if tool_name == "run_terminal_command":
         invoke_args["already_approved"] = True
 
+    retain = (retain_reminder_outcome and tool_name == "set_local_reminder"
+              and item.get("channel") == "matrix")
+    if retain:
+        with _pending_lock():
+            pending = _load_pending_raw()
+            _expire_stale_pending_unlocked(pending)
+            current = pending.get(tool_call_id)
+            if not current or current.get("status") != "pending" or current != item:
+                return {"ok": False, "status": "not_pending", "tool": tool_name}
+            current.update(status="executing", retain_reminder_outcome=True)
+            _save_pending_unlocked(pending)
+
     try:
         result = tool.invoke(invoke_args)
     except Exception as e:
@@ -490,12 +524,23 @@ def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
             "error": str(e),
         }
 
-    pop_pending(tool_call_id)
+    if retain:
+        with _pending_lock():
+            pending = _load_pending_raw()
+            receipt = pending.get(tool_call_id)
+            if not receipt or receipt.get("status") != "executing":
+                raise RuntimeError("Reminder execution receipt was lost")
+            receipt.update(status="executed", execution_result=result,
+                executed_at=datetime.now().isoformat(timespec="seconds"))
+            _save_pending_unlocked(pending)
+    else:
+        pop_pending(tool_call_id)
     return {
         "ok": True,
         "status": "executed",
         "tool": tool_name,
         "result": result,
+        "retain_reminder_outcome": retain,
         "reminder_task": invoke_args.get("task", "") if tool_name == "set_local_reminder" else "",
         "continuation_context": item.get("continuation_context"),
         "channel": item.get("channel", "telegram"),

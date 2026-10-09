@@ -72,6 +72,9 @@ for current code, runtime evidence or a new task's approval. Refresh when state 
   contract, offline persistence/security tests and reproduced baseline GPS and
   context-test failures. Owner subsequently authorized the scoped PR. No release
   containing this repair or live model/delivery verification yet.
+  PR #242 is open. Its Sourcery history-loss finding was reproduced and repaired
+  with durable reminder outcomes and history-only recovery; 245 focused tests
+  passed. Uncertain interrupted execution is blocked, never automatically rerun.
 
 - #238 context/routine continuity: `services/context_extractor.py`,
   `prompts/context_state_transition.md`, `memory/routine_feedback.py` and

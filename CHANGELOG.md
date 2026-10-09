@@ -16,6 +16,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Matrix confirmations after reminder approval include the actual tool result
   and task, preserve returned errors, and persist the outcome with its original
   external-source provenance.
+- Matrix-origin approved reminders retain completed results until history writes
+  succeed, with startup/periodic history recovery and protection against repeating
+  an interrupted execution.
 
 ## [v2.8.0] — 2026-10-09
 

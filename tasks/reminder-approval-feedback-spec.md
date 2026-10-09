@@ -76,3 +76,25 @@ remain separate instructions.
   run: 230 passed and the independently reproduced old context-test failure;
   legacy reminder run: 26 passed and the two independently reproduced GPS/cleanup
   failures. These old failures were not suppressed or changed in this slice.
+
+## PR #242 review repair
+
+Sourcery's history-write failure was reproduced before repair. Matrix-origin
+approved reminders now atomically claim execution in the existing approval store,
+then retain the actual completed result there until canonical history succeeds.
+Startup/30-second recovery retries only history, without tools, providers or sends.
+Stable history identity handles interruption after history commit but before
+receipt removal. Completed receipts are not subject to pending approval expiry.
+
+An interruption during tool invocation or before the result receipt commits cannot
+establish whether execution completed. Its durable `executing` claim remains
+non-actionable and is never automatically rerun. Recovery does not invent success
+or perform a live data repair; resolving uncertain executions requires inspection.
+Other tools and origins keep their existing execution/persistence behavior.
+
+Verification after this review repair: **245 passed**, two existing dependency
+warnings. The added recovery tests use the real reminder tool and temporary
+canonical history/store files. They cover failed history writes, lost in-memory
+responses, concurrent/uncertain execution, receipt cleanup failure, expiry and
+pending-file failures, plus startup/periodic retry. No real Matrix delivery is
+performed by these tests or by history recovery.

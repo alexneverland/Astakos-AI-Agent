@@ -190,6 +190,10 @@ schedule depends on external content, is ambiguous, or cannot be validated,
 approval remains required. Fresh external tool results retain their safety gate.
 After an approved reminder runs, Matrix shows its actual result and task and
 records the outcome in the originating history; a tool error remains visible.
+For Matrix-origin approved reminders, a completed result remains in the approval
+store until history succeeds; startup and periodic recovery retry the history
+write without executing or sending again. An interrupted execution with an unknown
+result stays blocked for inspection instead of being automatically rerun.
 
 The wizard's diagnostics show whether chat, semantic memory, and optional Google Workspace integrations are ready. A missing embeddings provider does not stop basic chat and tools, but long-term semantic recall remains unavailable until it is configured.
 
