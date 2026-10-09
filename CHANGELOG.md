@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Matrix, Web and Telegram terminal execution logs mirror the shared trace recorder with correlated
+  graph steps, tool calls/results, phase timings, unresolved calls and final replies
+  or failures. Previews retain credential redaction and size limits.
+
 - Canonical named GPS places alongside configured home/work, with fresh-point
   saving and radius matching. Matrix turns record agent/tool/result/timing/error
   evidence through the shared Web trace store, with concurrent process-safe writes
@@ -21,6 +25,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   when OwnTracks is configured. Includes private provisioning and setup instructions.
 
 ### Fixed
+
+- Web and Telegram graph traces complete and persist on exceptions and empty
+  responses, including Telegram photo failures and pending approval intercepts.
+  Telegram retains streamed tool evidence before a graph failure; closed terminal
+  streams cannot abort a turn through the trace console sink.
 
 - Execution trace previews redact private-key and passphrase fields and PEM key
   blocks. Text redaction avoids polynomial regex backtracking on long input.

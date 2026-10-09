@@ -1613,6 +1613,9 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
     final_ai_response = ""
     handling_agent    = "Chat_Agent"
+    _trace = None
+    trace_response = None
+    trace_error = None
 
     try:
         # ── Explicit canonical fail-closed containment check for photo_path ──
@@ -1935,7 +1938,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 provenance_messages_for_reply,
                 external_tool_names,
             )
-            _trace.finalize(response=client_ai)
+            trace_response = client_ai
             
             assistant_history_kwargs = {
                 "agent": handling_agent,
@@ -1973,8 +1976,6 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                     enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")
             _trace.mark_phase("background_enqueue_ms", int((perf_counter() - t_bg_0) * 1000))
 
-            _trace.save()
-
         return JSONResponse({
             "agent":    handling_agent,
             "response": client_ai if final_ai_response else clean_ai,
@@ -1983,6 +1984,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         })
 
     except Exception as e:
+        trace_error = type(e).__name__
         import traceback
         traceback.print_exc()
         err = str(e).lower()
@@ -1992,6 +1994,11 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 status_code=503,
             )
         return JSONResponse({"error": _api_internal_error("chat")}, status_code=500)
+    finally:
+        if _trace is not None:
+            _trace.finalize(response=trace_response,
+                error=trace_error or ("NoResponse" if not trace_response else None))
+            _trace.save()
 
 @server.post("/voice")
 async def process_web_voice(file: UploadFile = File(...), _=Depends(require_token)):

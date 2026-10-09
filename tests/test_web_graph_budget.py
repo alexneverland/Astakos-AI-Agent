@@ -98,3 +98,35 @@ def test_web_gps_provenance_matches_shared_collector(monkeypatch: pytest.MonkeyP
     result = server._run_web_graph_stream_sync([], 12, trace)
     assert result["external_tool_names"] == []
     assert external_tool_names_from_events(events) == set()
+
+
+def test_web_stream_logs_tools_through_real_recorder(monkeypatch, capsys):
+    """Web's normal stream collector emits safe terminal evidence by default."""
+    import json
+    from api import server
+    from memory.execution_trace import ExecutionTrace, load_traces
+    events = [
+        {"Home_Agent": {"messages": [AIMessage(content="", tool_calls=[{
+            "name": "get_current_location", "id": "offline-gps",
+            "args": {"token": "offline-call-secret"}}])]}},
+        {"tools": {"messages": [ToolMessage(content='{"place":"Park","password":"offline-result-secret"}',
+            name="get_current_location", tool_call_id="offline-gps")]}},
+        {"Home_Agent": {"messages": [AIMessage(content="At the park.")]}},
+    ]
+    graph = MagicMock()
+    graph.stream.return_value = events
+    monkeypatch.setattr(server, "graph", graph)
+    trace = ExecutionTrace("web", "Where am I?")
+    result = server._run_web_graph_stream_sync([], 12, trace)
+    trace.finalize(response=result["final_ai_response"])
+    trace.save()
+    output = capsys.readouterr().out
+    rows = [json.loads(line.removeprefix("[WebTrace]: "))
+        for line in output.splitlines() if line.startswith("[WebTrace]: ")]
+    assert any(row["event"] == "tool_called" and row["tool"] == "get_current_location" for row in rows)
+    assert any(row["event"] == "tool_result" and "Park" in row["result"] for row in rows)
+    assert rows[-1]["response"] == "At the park."
+    assert len({row["correlation_id"] for row in rows}) == 1
+    assert "offline-call-secret" not in output
+    assert "offline-result-secret" not in output
+    assert load_traces()[0]["response"] == "At the park."
