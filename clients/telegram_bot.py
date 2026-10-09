@@ -6040,6 +6040,7 @@ def _build_external_scheduler() -> AstakosScheduler:
     from services.web_mirror_delivery import drain_web_mirrors
     from services.pending_approval_delivery import drain_queued_matrix_approvals
     from services.behavioral_initiative_scheduler import schedule_behavioral_initiative
+    from services.owntracks import drain_owntracks
 
     def queue_behavioral_initiative() -> None:
         """Keep model work off the shared scheduler's single thread."""
@@ -6051,7 +6052,13 @@ def _build_external_scheduler() -> AstakosScheduler:
         if _external_background_runtime_channel in {"telegram", "matrix"}:
             drain_web_mirrors(_external_background_runtime_channel)
 
+    def drain_selected_owntracks() -> None:
+        """Process owner GPS through this process's active external transport."""
+        if _external_background_runtime_channel in {"telegram", "matrix"}:
+            drain_owntracks(channel=_external_background_runtime_channel)
+
     scheduler = AstakosScheduler()
+    scheduler.register(drain_selected_owntracks, interval_seconds=5, name="owntracks_location", verbose=False)
     scheduler.register(drain_selected_web_mirrors, interval_seconds=10, name="web_mirror", verbose=False)
     scheduler.register(
         drain_queued_matrix_approvals,

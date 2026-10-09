@@ -3,6 +3,21 @@
 Snapshot: 2026-10-09, PR #240 merged and v2.8.0 release preparation authorized. This is orientation, not a substitute
 for current code, runtime evidence or a new task's approval. Refresh when state changes.
 
+Latest checkpoint 2026-10-09: #242 merged as `1c5b508`; its branch was deleted.
+Owner then approved OwnTracks background GPS over the existing private Tailscale
+network. Local implementation is on `codex/owntracks-location`; no PR yet.
+See `owntracks-location-spec.md` and `docs/owntracks-location.md`.
+Thirty new offline tests pass; combined checks passed 121 with three reproduced
+baseline failures. Phone import and a real OwnTracks fix were verified at
+18:55:48 local time: the durable queue drained and canonical GPS retained the
+same observation timestamp. Screen-off continuity remains to observe.
+Owner explicitly authorized host activation afterward:
+dedicated credentials were created privately and the `/owntracks/` Serve mount
+was added, retaining Matrix `/` -> 8008. HTTPS checks: unauthorized 401, wrong
+device 403, authenticated non-location report 200 [], admin subpath 404, Matrix
+versions 200. No test coordinates were sent to live GPS. Do not expose the whole Web API through its local-auth
+exemptions, change Matrix's root mount, or treat OwnTracks pings as fresh fixes.
+
 ## Start here
 
 1. Read root `AGENTS.md`, then this short handoff.

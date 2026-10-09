@@ -118,10 +118,16 @@ Backup schedules, Matrix server deployment, Element recovery keys and local E5
 model installation remain explicit operator steps; use the linked instructions.
 
 Home/work coordinates define known places; they do not turn on phone tracking.
-GPS context arrives only when the owner shares location through the active
+GPS context normally arrives when the owner shares location through the active
 Telegram or Matrix app. Allow location access on the phone when using that
 feature; client support for location/live updates varies. A static point is not
 continuous tracking, and GPS never proves partner/child presence.
+
+For background Android GPS without renewing Element live sharing, the source
+supports optional [OwnTracks over private Tailscale HTTPS](docs/owntracks-location.md).
+Follow that guide after the Wizard: provision a separate GPS credential, add only
+the dedicated Serve mount and import the private phone configuration. This
+Unreleased integration is not included in the published v2.8.0 image.
 
 For Google Places, enable the Places API for the supplied key and apply suitable
 key restrictions. For Spotify, create a developer app, enter its client ID/secret,
