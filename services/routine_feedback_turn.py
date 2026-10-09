@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from datetime import timedelta
 from functools import partial
+from inspect import signature
 
 from services.routine_completion_helper import (
     DatedRoutineSelection, RoutineFeedbackQuestion, RoutineFeedbackGroupQuestion, validate_dated_selection,
@@ -306,8 +307,15 @@ def process_catalog_feedback_turn(
             return store.feedback_candidate_revisions() == {
                 item.routine_id: item.revision for item in snapshot}
 
-        selector = partial(selector, candidate_evidence={
-            item.routine_id: item.identity_evidence for item in snapshot})
+        evidence = {item.routine_id: item.identity_evidence for item in snapshot}
+        try:
+            signature(selector).bind_partial(candidate_evidence=evidence)
+        except (TypeError, ValueError):
+            # Preserve fixed-signature injected consumers without retrying errors
+            # raised inside a selector after inference has already started.
+            pass
+        else:
+            selector = partial(selector, candidate_evidence=evidence)
         return process_stored_feedback_turn(user_text,
             {item.routine_id: item.name for item in snapshot},
             {item.routine_id: item.allowed_dates for item in snapshot},

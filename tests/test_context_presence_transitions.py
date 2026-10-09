@@ -204,3 +204,52 @@ def test_no_state_change_preserves_existing_routine_request_handling(
                                                conversation_db_path=path)
     assert requests == [text]
     assert db.get_context_state("partner_with_user") == previous
+
+
+@pytest.mark.parametrize("shape", ["empty", "flat"])
+def test_old_turn_cannot_borrow_latest_source(transition_store, monkeypatch, shape) -> None:
+    """An already-saved newer turn cannot authorize old text or routine directives."""
+    history, db, extractor, path, _ = transition_store
+    history.append_message(role="user", channel="web", content="Τώρα είμαστε μαζί σπίτι",
+                           timestamp=EVENT_AT, db_path=path)
+    previous = db.get_context_state("partner_with_user")
+    requests = []
+    monkeypatch.setattr(extractor, "reconcile_context_message", requests.append)
+    payload = ({"flags": {}, "event_rowid": None, "support_rowids": []}
+               if shape == "empty" else {"partner_with_user": False})
+    monkeypatch.setattr(extractor, "safe_gemini_call",
+                        lambda _: SimpleNamespace(text=json.dumps(payload)))
+    extractor.extract_and_update_context_flags("Αύριο άλλαξε τη ρουτίνα μου", channel="matrix",
+        now=EVENT_AT, conversation_db_path=path)
+    assert requests == []
+    assert db.get_context_state("partner_with_user") == previous
+
+
+def test_flat_output_with_current_source_cannot_replace_newer_state(transition_store, monkeypatch) -> None:
+    """A saved report requires source timestamps even if inference returns old JSON."""
+    history, db, extractor, path, _ = transition_store
+    history.append_message(role="user", channel="matrix", content=DEPARTURE,
+                           timestamp=EVENT_AT, db_path=path)
+    previous = db.get_context_state("partner_with_user")
+    db.set_context_states_if_unchanged({"partner_with_user": ("true", "2026-10-09")},
+        {"partner_with_user": previous}, recorded_at=EVENT_AT + timedelta(seconds=1))
+    previous = db.get_context_state("partner_with_user")
+    monkeypatch.setattr(extractor, "safe_gemini_call",
+                        lambda _: SimpleNamespace(text='{"partner_with_user":false}'))
+    extractor.extract_and_update_context_flags(DEPARTURE, channel="matrix",
+        now=EVENT_AT + timedelta(seconds=30), conversation_db_path=path)
+    assert db.get_context_state("partner_with_user") == previous
+
+
+def test_latest_matching_event_still_requires_fresh_timestamp(transition_store, monkeypatch) -> None:
+    """The latest row ID passes, but its three-hour-old source cannot clear presence."""
+    history, db, extractor, path, shared = transition_store
+    event = history.append_message(role="user", channel="matrix", content=DEPARTURE,
+                                   timestamp=EVENT_AT, db_path=path)
+    previous = db.get_context_state("partner_with_user")
+    monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=json.dumps({
+        "flags": {"partner_with_user": False}, "event_rowid": event["rowid"],
+        "support_rowids": [shared["rowid"], event["rowid"]]})))
+    extractor.extract_and_update_context_flags(DEPARTURE, channel="matrix",
+        now=EVENT_AT + timedelta(hours=3), conversation_db_path=path)
+    assert db.get_context_state("partner_with_user") == previous

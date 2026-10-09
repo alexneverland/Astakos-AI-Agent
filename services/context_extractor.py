@@ -279,10 +279,19 @@ def extract_and_update_context_flags(
                 still_current=lambda: (get_latest_trusted_user_rowid(**history_options) == source_version
                     and (clarification_still_current is None or clarification_still_current())))
         source_event_at = None
+        current_source = next((row for row in daily_rows
+                               if row["rowid"] == source_version), None)
+        if not clarification and current_source is not None:
+            if current_source["content"] != user_text:
+                return None
+            if not isinstance(payload, dict) or "flags" not in payload:
+                # Saved reports must never fall back to processing-time writes.
+                return None
         if not clarification and isinstance(payload, dict) and "flags" in payload:
             if payload == {"flags": {}, "event_rowid": None, "support_rowids": []}:
                 # No live-state inference must not swallow durable routine requests.
-                if get_latest_trusted_user_rowid(**history_options) == source_version:
+                if (current_source is not None and current_source["content"] == user_text
+                        and get_latest_trusted_user_rowid(**history_options) == source_version):
                     reconcile_context_message(user_text)
                 return None
             # Source IDs validate provenance, never the meaning of a state change.

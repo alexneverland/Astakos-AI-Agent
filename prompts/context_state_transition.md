@@ -28,6 +28,9 @@ current companion information wins over typical assumptions about work/travel.
 When current trusted source rows are available, return exactly:
 {"flags": {}, "event_rowid": null, "support_rowids": []}
 Put all grounded updates in flags, using the supplied boolean/enum types.
+The earlier flat examples illustrate the contents of flags only. When the
+current source exists, wrap those contents in this envelope; flat output is
+rejected and cannot write state using the processing timestamp.
 event_rowid must be the latest trusted owner row corresponding to User Message.
 support_rowids must include that event and the relevant earlier owner sources
 used to resolve its meaning. Use the current event's actual timestamp, not model

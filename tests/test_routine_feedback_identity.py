@@ -46,6 +46,8 @@ def test_shift_departure_identity_uses_recorded_engagement(store, tmp_path, monk
 
     def provider(prompt):
         """Return scenario output only after checking authoritative evidence delivery."""
+        assert "A recorded acknowledgement can connect" in prompt
+        assert "If competing\nidentities remain plausible, clarify" in prompt
         payload = json.loads(prompt.split("INPUT:\n", 1)[1].split("\n\nChoose", 1)[0])
         candidates = {item["routine_id"]: item for item in payload["candidates"]}
         evidence = candidates[11]["identity_evidence"]
@@ -57,6 +59,12 @@ def test_shift_departure_identity_uses_recorded_engagement(store, tmp_path, monk
         assert occurrence["question_text"] == "Ώρα για αναχώρηση για τη βάρδια!"
         assert candidates[6]["identity_evidence"]["occurrences"] == []
         assert payload["pending_question"] is None  # Expired, but still identity evidence.
+        engaged = [rid for rid, candidate in candidates.items()
+                   if any(row["occurrence_date"] == now.date().isoformat()
+                          and row["delivered_at"] is not None
+                          and row["feedback"] == "acknowledge"
+                          for row in candidate["identity_evidence"]["occurrences"])]
+        assert len(engaged) == 1
         if scenario == "race":
             store.record_feedback(6, now.date(), "acknowledge", at=now)
         if scenario == "new_candidate":
@@ -65,7 +73,9 @@ def test_shift_departure_identity_uses_recorded_engagement(store, tmp_path, monk
                                    ("Αναχώρηση για άλλη δουλειά",))
         action = "clarify" if scenario == "ambiguous" else (
             "acknowledge" if scenario == "preparation" else "complete")
-        rid = None if scenario == "ambiguous" else (6 if scenario == "explicit_other" else 11)
+        rid = (None if scenario == "ambiguous" else
+               next(rid for rid in candidates if rid not in engaged)
+               if scenario == "explicit_other" else engaged[0])
         return SimpleNamespace(text=json.dumps({"action": action, "routine_id": rid,
             "occurrence_date": None if action == "clarify" else now.date().isoformat()}))
 
@@ -85,3 +95,24 @@ def test_shift_departure_identity_uses_recorded_engagement(store, tmp_path, monk
         assert morning[0].delivered_at is None
     else:
         assert morning == []
+
+
+def test_previous_selector_keyword_contract_remains_supported(store, tmp_path) -> None:
+    """A fixed-signature offline consumer can still commit canonical feedback."""
+    from memory.conversation_history import append_message
+    from services.routine_completion_helper import DatedRoutineSelection
+    from services.routine_feedback_turn import process_catalog_feedback_turn
+    now = datetime(2026, 10, 9, 10, tzinfo=ZoneInfo("Europe/Athens"))
+    path = str(tmp_path / "history.db")
+    text = "Το ολοκλήρωσα σήμερα"
+    saved = append_message(role="user", channel="web", content=text, timestamp=now, db_path=path)
+
+    def selector(user_text, candidates, dates, *, now, trusted, pending_question):
+        """Use the supported pre-evidence signature without accepting extra keywords."""
+        return DatedRoutineSelection("complete", 11, now.date())
+
+    result = process_catalog_feedback_turn(text, store=store, selector=selector,
+        now=now, clock=lambda: now, trusted=True, user_rowid=saved["rowid"],
+        conversation_db_path=path)
+    assert result.status == "applied"
+    assert store.occurrences(11)[0].feedback == "complete"

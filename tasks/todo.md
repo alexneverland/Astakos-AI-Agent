@@ -14,6 +14,18 @@
 - [ ] Separately authorized correction of today's mistaken morning completion.
 - [ ] Git/PR lifecycle authorized on 2026-10-09, including reading review comments.
 
+PR #238 review repair: four RED failures reproduced stale/unsaved text borrowing
+the latest source, flat output overwriting newer context and fixed-signature
+selector incompatibility. Saved ordinary reports now require the grounded
+envelope; empty results reconcile only matching current text. Evidence injection
+checks the callable signature without retrying inference. Tests now cover a latest
+matching row with a stale timestamp and derive implicit routine identity from
+recorded engagement while requiring the continuity instruction. Two in-memory
+mutations were caught by final persisted-outcome assertions. Final combined run:
+475 passed, two dependency warnings; compilation and whitespace checks passed.
+Live model interpretation remains unproven by mocked inference. No live ledger
+correction or watchdog change was performed.
+
 ## General related-state reassessment (2026-10-09)
 
 - [x] Ground ordinary semantic updates in current trusted source IDs/times and
