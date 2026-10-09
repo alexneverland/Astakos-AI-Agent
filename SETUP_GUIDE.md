@@ -8,6 +8,11 @@ This guide covers **v2.8.0** (2026-10-09), including the guided Wizard and nativ
 Office provisioning. Optional services still require the explicit setup below.
 See [release verification and upgrade notes](docs/release-readiness.md).
 
+Use this guide with the v2.8.0 source/tag or verified release artifacts. Until
+its publishing workflow and GitHub release complete, `latest` may still deliver
+v2.7.0; confirm the [v2.8.0 release](https://github.com/alexneverland/Astakos-AI-Agent/releases/tag/v2.8.0)
+is available before using the release downloads.
+
 > **What you need:** Docker Desktop, one supported AI provider, and about 10 minutes for the first setup.
 
 ---

@@ -28,6 +28,12 @@ checkpoint; source `main` may later contain newer changes. See [release notes](C
 [data backups](docs/daily-data-backup.md) and the
 [v2.8.0 verification and upgrade notes](docs/release-readiness.md).
 
+Release availability is separate from this documentation checkpoint. Until the
+v2.8.0 tag's publishing workflow succeeds and its GitHub release is published,
+`latest` downloads/images may still provide v2.7.0. Check the
+[v2.8.0 release](https://github.com/alexneverland/Astakos-AI-Agent/releases/tag/v2.8.0)
+before following this version's setup instructions.
+
 ## Recommended: Docker with Automatic Updates
 
 The release deployment uses the official GHCR image and Watchtower. Watchtower checks for a newer image every five minutes, replaces only the application container, and preserves the Astakos data volume.
