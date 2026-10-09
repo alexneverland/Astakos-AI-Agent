@@ -105,7 +105,10 @@ routine catalogue. **Advanced Prompts** edits the existing prompt files. Locatio
 pairs must both be filled or both blank; latitude/longitude ranges and positive
 radii are validated before writes. Leave locations blank when unknown. The backup
 field accepts a folder ID, not a URL; saving it does not create a scheduled task.
-Office status confirms executable presence, not a live functionality test.
+Office status verifies the native executable's pinned size and SHA-256 for the
+current platform. It does not run a live functionality test. Clearing a supplied
+optional non-secret field removes its saved value; omitted fields and masked
+secrets retain their saved values.
 Backup schedules, Matrix server deployment, Element recovery keys and local E5
 model installation remain explicit operator steps; use the linked instructions.
 

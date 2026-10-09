@@ -68,9 +68,41 @@ def test_verified_install_is_atomic_and_repeatable(tmp_path: Path, monkeypatch: 
 
 def test_docker_fallback_is_invocation_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A mounted source can invoke the bundle, while provisioning still targets its root."""
-    from services.officecli_installation import officecli_binary_path
-    original = Path.is_file
-    bundled = Path("/opt/astakos-tools/officecli")
-    monkeypatch.setattr(Path, "is_file", lambda path: path == bundled or original(path))
-    assert officecli_binary_path(tmp_path, system="Linux") == bundled
-    assert officecli_binary_path(tmp_path, system="Linux", allow_bundled=False) == tmp_path / "vendor/officecli/officecli"
+    from services import officecli_installation as installer
+    payload = b"verified bundle"
+    bundled = tmp_path / "image-tool"
+    bundled.write_bytes(payload)
+    monkeypatch.setattr(installer, "BUNDLED_BINARY_PATH", bundled)
+    monkeypatch.setattr(installer, "select_asset", lambda **kwargs:
+                        installer.OfficeAsset("fixture", len(payload), sha256(payload).hexdigest()))
+    assert installer.officecli_binary_path(tmp_path, system="Linux") == bundled
+    assert installer.officecli_binary_path(tmp_path, system="Linux", allow_bundled=False) == tmp_path / "vendor/officecli/officecli"
+
+
+def test_invalid_local_binary_uses_verified_docker_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same-size wrong bytes cannot override a verified native image executable."""
+    from services import officecli_installation as installer
+    payload = b"verified native"
+    asset = installer.OfficeAsset("fixture", len(payload), sha256(payload).hexdigest())
+    monkeypatch.setattr(installer, "select_asset", lambda **kwargs: asset)
+    bundled = tmp_path / "bundled-officecli"
+    bundled.write_bytes(payload)
+    monkeypatch.setattr(installer, "BUNDLED_BINARY_PATH", bundled, raising=False)
+    local = installer.officecli_binary_path(tmp_path, system="Linux", allow_bundled=False)
+    local.parent.mkdir(parents=True)
+    local.write_bytes(b"x" * len(payload))
+    assert installer.officecli_binary_path(tmp_path, system="Linux") == bundled
+
+
+def test_invalid_binary_is_never_selected_for_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing/incorrect artifacts remain unavailable instead of executable candidates."""
+    from services import officecli_installation as installer
+    asset = installer.OfficeAsset("fixture", 8, sha256(b"expected").hexdigest())
+    monkeypatch.setattr(installer, "select_asset", lambda **kwargs: asset)
+    monkeypatch.setattr(installer, "BUNDLED_BINARY_PATH", tmp_path / "absent", raising=False)
+    local = installer.officecli_binary_path(tmp_path, system="Linux", allow_bundled=False)
+    local.parent.mkdir(parents=True)
+    local.write_bytes(b"wrong123")
+    assert installer.verified_officecli_path(tmp_path, system="Linux") is None
+    local.write_bytes(b"expected")
+    assert installer.verified_officecli_path(tmp_path, system="Linux") == local

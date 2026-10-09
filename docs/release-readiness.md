@@ -57,6 +57,18 @@ incompatible API removal has been identified.
 - Application-level data recovery and replacement-host/Element recovery remain
   separate observations. Backup capture/upload/extraction is not complete recovery.
 
+## PR #240 review verification
+
+PR #240 review follow-up: native Office selection and Wizard status now verify
+the current platform's pinned size/SHA-256, including fallback from an invalid
+local binary to the verified Linux bundle. Explicitly clearing optional
+non-secret guided fields removes stale saved/raw values; omitted settings and
+masked secrets remain preserved. The offline styling fixture matches an exact URL.
+The regression run passed 110 focused Wizard/provider/Office tests (two existing
+dependency warnings). A rebuilt Linux AMD64 release image passed all four isolated
+container tests, including invalid-local fallback and real Office/OpenXML checks.
+No release publication or live owner-data changes were performed.
+
 ## Publishing sequence after explicit authorization
 
 1. Merge the scoped readiness/documentation changes through the PR process.

@@ -23,7 +23,8 @@ def _adapter(root: Path, run: Callable[..., SimpleNamespace]) -> dict[str, Any]:
         "os": os, "Path": Path, "shlex": shlex,
         "subprocess": SimpleNamespace(run=run), "BASE_DIR": str(root),
         "t": lambda key, **kwargs: f"{key}: {kwargs}",
-        "officecli_binary_path": lambda root: Path(root) / "vendor/officecli/officecli.exe",
+        "officecli_binary_path": lambda root, **kwargs: Path(root) / "vendor/officecli/officecli.exe",
+        "verified_officecli_path": lambda root: Path(root) / "vendor/officecli/officecli.exe",
     }
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), "exec"), namespace)
     return namespace
@@ -86,4 +87,22 @@ def test_native_binary_is_used_on_linux(tmp_path: Path) -> None:
 
     namespace = _adapter(tmp_path, run)
     namespace["officecli_binary_path"] = lambda root: binary
+    namespace["verified_officecli_path"] = lambda root: binary
     assert "msg_success" in namespace["run_officecli"]("create sample.docx")
+
+
+def test_unverified_binary_cannot_reach_subprocess(tmp_path: Path) -> None:
+    """The real native verifier prevents execution of a damaged local artifact."""
+    from services.officecli_installation import verified_officecli_path, officecli_binary_path
+    binary = officecli_binary_path(tmp_path, allow_bundled=False)
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"damaged executable")
+
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
+        """Fail loudly if a rejected executable crosses the process boundary."""
+        pytest.fail("Unverified artifact reached subprocess")
+
+    namespace = _adapter(tmp_path, forbidden)
+    namespace["verified_officecli_path"] = verified_officecli_path
+    namespace["officecli_binary_path"] = officecli_binary_path
+    assert "msg_not_found" in namespace["run_officecli"]("create sample.docx")

@@ -119,9 +119,14 @@ assert (root / 'locales/en.json').is_file()
 assert not (root / 'vendor/officecli/officecli.exe').exists()
 result = subprocess.run([str(root / 'vendor/officecli/officecli'), '--version'], capture_output=True, text=True, check=True)
 assert '1.0.154' in result.stdout
-from services.officecli_installation import officecli_binary_path
+from services.officecli_installation import officecli_binary_path, verified_officecli_path
 assert officecli_binary_path('/tmp/empty-source-mount').is_file()
 assert str(officecli_binary_path('/tmp/empty-source-mount')) == '/opt/astakos-tools/officecli'
+invalid_root = Path('/tmp/invalid-source-mount')
+invalid_local = invalid_root / 'vendor/officecli/officecli'
+invalid_local.parent.mkdir(parents=True)
+invalid_local.write_bytes(b'invalid-local-binary')
+assert str(verified_officecli_path(invalid_root)) == '/opt/astakos-tools/officecli'
 print('clean-image-ok')
 ''')
     assert "clean-image-ok" in output

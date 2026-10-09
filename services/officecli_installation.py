@@ -9,6 +9,7 @@ from urllib.request import urlopen
 
 
 VERSION = "1.0.154"
+BUNDLED_BINARY_PATH = Path("/opt/astakos-tools/officecli")
 
 
 @dataclass(frozen=True)
@@ -47,9 +48,8 @@ def officecli_binary_path(root: str | Path, *, system: str | None = None,
     selected_system = system or platform.system()
     name = "officecli.exe" if selected_system == "Windows" else "officecli"
     local = Path(root) / "vendor" / "officecli" / name
-    bundled = Path("/opt/astakos-tools/officecli")
-    if allow_bundled and selected_system == "Linux" and not local.is_file() and bundled.is_file():
-        return bundled
+    if allow_bundled:
+        return verified_officecli_path(root, system=selected_system) or local
     return local
 
 
@@ -59,6 +59,25 @@ def _verified(path: Path, asset: OfficeAsset) -> bool:
         return False
     with path.open("rb") as source:
         return hashlib.file_digest(source, "sha256").hexdigest() == asset.sha256
+
+
+def verified_officecli_path(root: str | Path, *, system: str | None = None) -> Path | None:
+    """Select only a checksum-verified artifact for the current native architecture."""
+    selected_system = system or platform.system()
+    try:
+        asset = select_asset(system=selected_system)
+    except ValueError:
+        return None
+    candidates = [officecli_binary_path(root, system=selected_system, allow_bundled=False)]
+    if selected_system == "Linux":
+        candidates.append(BUNDLED_BINARY_PATH)
+    for candidate in candidates:
+        try:
+            if _verified(candidate, asset):
+                return candidate
+        except OSError:
+            continue
+    return None
 
 
 def install_officecli(root: str | Path, *, system: str | None = None,

@@ -1,6 +1,6 @@
 # Astakos: new-session handoff
 
-Snapshot: 2026-10-09, after merging PR #238; local documentation and fresh-install readiness work. This is orientation, not a substitute
+Snapshot: 2026-10-09, PR #240 fresh-install readiness and authorized review fixes. This is orientation, not a substitute
 for current code, runtime evidence or a new task's approval. Refresh when state changes.
 
 ## Start here
@@ -15,8 +15,9 @@ for current code, runtime evidence or a new task's approval. Refresh when state 
 
 - Repository: `alexneverland/Astakos-AI-Agent`, workspace `C:\astakos_v2`.
 - Local `main` and `origin/main`: `4d40b1082f808a6a89a7baae32d7c93d185e5ef2`.
-- Working tree was clean before this documentation refresh; current edits cover documentation, normal setup, Wizard settings, native Office
-  provisioning, packaging and isolated tests.
+- PR #240 is open on `codex/fresh-install-readiness`; base work was published at
+  `9290cef2b52943b0d05a3fc6b1308d3725f3f707`. Verify the current head and working tree.
+  Owner authorized fixing its two Codex findings and one CodeQL test finding.
 - PR #238 merged; `codex/context-routine-continuity` deleted locally/remotely.
 - Before publishing this task, the 2026-10-09 listing contained only Dependabot PRs;
   #4-19 and #239 are separate, not approved dependency upgrades.
@@ -115,6 +116,12 @@ Fresh-install work: 320 focused storage/Office tests and 80 Wizard/provider case
 passed. Linux AMD64 source/release builds, offline API import and real native Office
 fixtures passed. Release refresh preservation is verified on synthetic stores.
 No live owner database, credentials, provider or scheduled backup was changed.
-This task is being published through `codex/fresh-install-readiness`; verify its
-current PR/commit status in GitHub. VERSION remains 2.7.0; release publication is separate.
+PR #240 review repairs: canonical native size/SHA-256 verification controls Wizard
+status and execution, invalid local binaries allow verified Docker fallback, and
+explicit empty optional non-secret fields remove stale saved/raw values. Exact
+styling-CDN URL matching replaces the test's substring match. 110 focused
+Wizard/provider/Office cases and four rebuilt Linux release container tests passed.
+Verify its current PR/commit status in GitHub. Stop after updating the PR; no new
+review request, merge or branch deletion was authorized. VERSION remains 2.7.0;
+release publication is separate.
 See `fresh-install-readiness-spec.md` and `docs/release-readiness.md`.

@@ -88,3 +88,16 @@ cases passed. Native Linux AMD64 Office created/edited DOCX/XLSX/PPTX fixtures;
 OpenXML validation passed. Source/release builds and offline API import passed. Real
 rsync preservation failed against HEAD's overwritten context schema, then passed
 with the new entrypoint. No live owner data, credentials or transports were used.
+
+## PR #240 review follow-up
+
+The owner authorized the verified findings on 2026-10-09. Wizard readiness and
+adapter execution must use the same platform-specific size/SHA-256 validation;
+an invalid local binary must not hide a valid Linux bundled fallback. Explicitly
+empty optional non-secret guided fields remove saved values, including stale raw
+form values. Omitted fields and masked secrets remain preserved. The offline
+browser fixture must match the styling CDN by exact URL.
+
+Four regression cases failed before repair; the nearby omitted-field case passed.
+After repair, 110 focused Wizard/provider/Office cases passed with two existing
+dependency deprecation warnings. All fixtures remained offline and temporary.

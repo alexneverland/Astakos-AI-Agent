@@ -14,6 +14,7 @@ def wizard(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ModuleType:
     from api import setup_wizard
     from core import diagnostics
     monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "telegram")
+    monkeypatch.setattr(setup_wizard, "BASE_DIR", str(tmp_path))
     for attribute, name in {
         "ENV_FILE": ".env", "SETTINGS_FILE": "settings.json", "PERSONA_FILE": "persona.md",
         "INTENTS_FILE": "intents.json", "ROUTINES_FILE": "routines.json", "PROMPTS_DIR": "prompts",
@@ -97,6 +98,54 @@ def test_integration_newline_rejected_before_write(wizard: ModuleType, tmp_path:
     assert not (tmp_path / ".env").exists()
 
 
+def test_explicit_empty_guided_fields_remove_stale_raw_values(wizard: ModuleType, tmp_path: Path) -> None:
+    """Explicit clearing wins over both old storage and the loaded raw editor."""
+    initial = {"vacuum_ip": "192.0.2.1", "spotify_redirect_uri": "http://127.0.0.1:8888/callback",
+               "project_id": "fixture-project", "vertex_location": "global", "github_token": "fixture-secret"}
+    asyncio.run(wizard.save_setup(wizard.SetupPayload(basic=initial, advanced={}, prompts={})))
+    stale_raw = (tmp_path / ".env").read_text()
+    basic = {field: "" for field in initial if field != "github_token"}
+    basic.update(env=stale_raw, github_token="********")
+    asyncio.run(wizard.save_setup(wizard.SetupPayload(basic=basic, advanced={}, prompts={})))
+    saved = wizard._parse_env_text((tmp_path / ".env").read_text())
+    for key in ("VACUUM_IP", "SPOTIPY_REDIRECT_URI", "PROJECT_ID", "LOCATION"):
+        assert key not in saved
+    assert saved["GITHUB_TOKEN"] == "fixture-secret"
+
+
+def test_omitted_guided_fields_preserve_existing_values(wizard: ModuleType, tmp_path: Path) -> None:
+    """A partial update cannot clear settings the caller did not submit."""
+    (tmp_path / ".env").write_text("VACUUM_IP=192.0.2.1\nLOCATION=global\n")
+    asyncio.run(wizard.save_setup(wizard.SetupPayload(basic={"github_token": "fixture"}, advanced={}, prompts={})))
+    saved = wizard._parse_env_text((tmp_path / ".env").read_text())
+    assert saved["VACUUM_IP"] == "192.0.2.1"
+    assert saved["LOCATION"] == "global"
+
+
+def test_wizard_does_not_advertise_unverified_office(wizard: ModuleType, tmp_path: Path) -> None:
+    """An ignored invalid executable cannot be labelled as the pinned release."""
+    from services.officecli_installation import officecli_binary_path
+    binary = officecli_binary_path(tmp_path, allow_bundled=False)
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"wrong executable")
+    status = wizard._office_setup_status()
+    assert status["present"] is False
+    assert status["version"] is None
+
+
+def test_wizard_reports_only_verified_office_version(wizard: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Presence and version reflect the same verified artifact used by execution."""
+    from hashlib import sha256
+    from services import officecli_installation as installer
+    payload = b"verified tool"
+    monkeypatch.setattr(installer, "select_asset", lambda **kwargs:
+                        installer.OfficeAsset("fixture", len(payload), sha256(payload).hexdigest()))
+    binary = installer.officecli_binary_path(tmp_path, allow_bundled=False)
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(payload)
+    assert wizard._office_setup_status() == {"present": True, "version": installer.VERSION}
+
+
 def test_guided_settings_in_offline_browser(tmp_path: Path) -> None:
     """Exercise verified form interactions and capture the exact submitted payload."""
     playwright = pytest.importorskip("playwright.sync_api")
@@ -118,7 +167,7 @@ def test_guided_settings_in_offline_browser(tmp_path: Path) -> None:
                 url = route.request.url
                 if url == "http://setup.test/":
                     route.fulfill(content_type="text/html", body=html)
-                elif "cdn.tailwindcss.com" in url:
+                elif url in {"https://cdn.tailwindcss.com", "https://cdn.tailwindcss.com/"}:
                     route.fulfill(content_type="application/javascript", body="")
                 elif url.endswith("/api/raw_files"):
                     route.fulfill(json=raw)

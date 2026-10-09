@@ -97,8 +97,9 @@ def _validate_guided_settings(settings: dict) -> None:
 
 def _office_setup_status() -> dict[str, object]:
     """Report local provisioning without executing a binary or contacting upstream."""
-    from services.officecli_installation import VERSION, officecli_binary_path
-    return {"present": officecli_binary_path(BASE_DIR).is_file(), "version": VERSION}
+    from services.officecli_installation import VERSION, verified_officecli_path
+    verified = verified_officecli_path(BASE_DIR) is not None
+    return {"present": verified, "version": VERSION if verified else None}
 
 _MATRIX_ENV_FIELDS = {
     "matrix_homeserver_url": "MATRIX_HOMESERVER_URL",
@@ -537,6 +538,9 @@ async def save_setup(payload: SetupPayload):
                     _set_secret(key, value)
                 elif value:
                     env_map[key] = value
+                else:
+                    # Explicit guided clearing overrides old and raw-editor values.
+                    env_map.pop(key, None)
 
             if basic.get("llm_provider"):
                 env_map["LLM_PROVIDER"] = basic["llm_provider"]

@@ -833,8 +833,8 @@
                 document.getElementById('developer_name').value = s.developer_name || '';
                 const office = data.installation?.officecli;
                 document.getElementById('officecli_setup_status').textContent = office?.present
-                    ? `Native executable found (pinned installer version ${office.version}).`
-                    : 'Office tool not found. Complete the manual install step below for Office files.';
+                    ? `Verified native Office CLI ${office.version}.`
+                    : 'Office tool not found or not verified. Complete the manual install step below for Office files.';
                 if(s.user_name) document.getElementById('user_name').value = s.user_name;
                 if(s.bot_name) document.getElementById('bot_name').value = s.bot_name;
                 document.getElementById('voice_wake_name').value = s.voice_wake_name || s.bot_name || 'Astakos';
