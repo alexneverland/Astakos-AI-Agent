@@ -282,7 +282,7 @@ class TestJobCheckReminders:
         with (
             patch.object(cfg, "STATE_DB", db_path),
             patch.object(bot, "is_reminders_paused", return_value=paused),
-            patch.object(bot, "is_duplicate_notification", return_value=duplicate),
+            patch("memory.event_log.reserve_notification", return_value=None if duplicate else 10000.0),
             patch.object(bot, "_send_and_record_assistant",
                          side_effect=lambda m, **kwargs: sent.append(m) or "fixture-event"),
             patch.object(bot, "log_event"),
@@ -317,7 +317,7 @@ class TestJobCheckReminders:
         assert _row_status(db_path, "Πάρε ψωμί") == "pending"
 
     def test_duplicate_notification_skipped_and_left_pending(self):
-        # is_duplicate_notification=True → continue, not UPDATE.
+        # A blocked reservation means no send and no completion.
         sent, db_path = self._run(
             [{"task": "Πλύσιμο αυτοκινήτου", "time": PAST_TIME}], duplicate=True
         )

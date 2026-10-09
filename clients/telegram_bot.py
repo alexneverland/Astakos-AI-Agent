@@ -3877,6 +3877,7 @@ def job_check_reminders():
     if is_reminders_paused():
         return
     import sqlite3
+    from memory.event_log import reserve_notification, release_notification_reservation
     from config import STATE_DB
     if not os.path.exists(STATE_DB):
         return
@@ -3892,9 +3893,11 @@ def job_check_reminders():
         due = cursor.fetchall()
         for rid, task in due:
             msg = f"🔔 REMINDER: {task}"
-            if is_duplicate_notification(msg, cooldown_seconds=60):
+            reserved_at = reserve_notification(msg, cooldown_seconds=60)
+            if reserved_at is None:
                 continue
             if _send_and_record_assistant(msg, agent="Routine_Agent") is None:
+                release_notification_reservation(msg, reserved_at)
                 continue
             log_event("reminders", "sent", task=task)
             cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))

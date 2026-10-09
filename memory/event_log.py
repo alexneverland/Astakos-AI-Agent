@@ -231,15 +231,15 @@ def is_duplicate_routine(routine_id: int, cooldown_hours: float) -> bool:
     except Exception as e:
         print(f"[event_log]: is_duplicate_routine error: {e}")
         return False  # Graceful fallback — we allow sending
-def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDOWN_DEFAULT) -> bool:
-    """
-    Returns True if the same message was sent recently (within cooldown).
-    Usage: if is_duplicate_notification(msg): return
+def _notification_hash(message: str) -> str:
+    """Keep notification identity canonical across reservation and release."""
+    return hashlib.md5(message.strip().encode("utf-8")).hexdigest()[:10]
 
-    Automatically clears old entries (>1 hour).
-    """
+
+def reserve_notification(message: str, cooldown_seconds: int = DEDUP_COOLDOWN_DEFAULT) -> float | None:
+    """Atomically reserve a notification; return its timestamp or None if blocked."""
     import time
-    msg_hash = hashlib.md5(message.strip().encode("utf-8")).hexdigest()[:10]
+    msg_hash = _notification_hash(message)
     now      = time.time()
 
     with _dedup_lock:
@@ -251,10 +251,23 @@ def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDO
         if msg_hash in _dedup_cache:
             elapsed = now - _dedup_cache[msg_hash]
             if elapsed < cooldown_seconds:
-                return True  # duplicate
+                return None  # duplicate
 
         _dedup_cache[msg_hash] = now
-        return False
+        return now
+
+
+def release_notification_reservation(message: str, reserved_at: float) -> None:
+    """Release only the caller's failed reservation, preserving any newer claim."""
+    msg_hash = _notification_hash(message)
+    with _dedup_lock:
+        if _dedup_cache.get(msg_hash) == reserved_at:
+            _dedup_cache.pop(msg_hash, None)
+
+
+def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDOWN_DEFAULT) -> bool:
+    """Reserve a notification and report whether its cooldown already blocks it."""
+    return reserve_notification(message, cooldown_seconds) is None
 
 # ────────────────────────────────────────────────────────────────
 # REPLAY TIMELINE

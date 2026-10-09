@@ -12,13 +12,17 @@ def test_timed_reminder_retries_failed_send_and_completes_only_once(tmp_path, mo
     import config
     from clients import telegram_bot as bot
     from memory import conversation_history
+    from memory import event_log
+    import time
     from services.external_delivery import external_delivery_router, DeliveryReceipt
 
     db = str(tmp_path / "state.db")
     _make_reminders_db(db, [{"task": "fixture reminder", "time": PAST_TIME}])
     monkeypatch.setattr(config, "STATE_DB", db)
     monkeypatch.setattr(bot, "is_reminders_paused", lambda: False)
-    monkeypatch.setattr(bot, "is_duplicate_notification", lambda *a, **k: False)
+    monkeypatch.setattr(event_log, "_dedup_cache", {})
+    clock = [10000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
     events, history, sends = [], [], []
     monkeypatch.setattr(bot, "log_event", lambda *a, **k: events.append(a))
     monkeypatch.setattr(bot, "_append_to_analytics_log", lambda *a, **k: history.append(a))
@@ -34,10 +38,12 @@ def test_timed_reminder_retries_failed_send_and_completes_only_once(tmp_path, mo
         sends.append(text)
         return DeliveryReceipt(channel, "fixture-event")
     monkeypatch.setattr(external_delivery_router, "send_text", confirmed)
+    clock[0] += 20
     bot.job_check_reminders()
     bot.job_check_reminders()
     assert _row_status(db, "fixture reminder") == "done"
     assert len(sends) == len(events) == len(history) == 1
+    assert event_log.is_duplicate_notification("🔔 REMINDER: fixture reminder", 60)
 
 
 def test_location_reminder_does_not_complete_when_assistant_wrapper_returns_no_receipt(tmp_path, monkeypatch):
@@ -91,3 +97,21 @@ def test_location_memory_closes_connections_even_on_error(tmp_path, monkeypatch,
         memory.finish_location_reminder(db_path=db, reminder_id=1)
         assert _row_status(db, "fixture") == "done"
     assert connections and all(conn.closed for conn in connections)
+
+
+def test_failed_reservation_release_preserves_a_newer_claim(monkeypatch):
+    """Late failure must not erase another caller's newer cooldown reservation."""
+    import time
+    from memory import event_log
+    monkeypatch.setattr(event_log, "_dedup_cache", {})
+    clock = [10000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    first = event_log.reserve_notification("fixture", 60)
+    assert first == 10000.0
+    assert event_log.reserve_notification("fixture", 60) is None
+    clock[0] += 61
+    second = event_log.reserve_notification("fixture", 60)
+    event_log.release_notification_reservation("fixture", first)
+    assert event_log.is_duplicate_notification("fixture", 60)
+    event_log.release_notification_reservation("fixture", second)
+    assert not event_log.is_duplicate_notification("fixture", 60)

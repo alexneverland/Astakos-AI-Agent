@@ -34,3 +34,15 @@ temporary stores; transport adapters are mocked, with no real outbound messages.
 No reminder history was backfilled and no previously completed owner reminder
 was manually reset. Existing assistant-history repair behavior is retained:
 confirmed delivery remains confirmed even when recording is queued for repair.
+
+## PR #244 dedup review repair
+
+The real dedup cache reserved the message before attempting transport, delaying
+retry for 60 seconds after failure. Replacing the mocked dedup in both channel
+regressions reproduced this at the next 20-second tick. Canonical reservation
+and conditional release now remove only the failed attempt's claim; successful
+delivery retains the cooldown and a late release preserves a newer claim.
+Existing `is_duplicate_notification` behavior remains compatible for other users.
+
+Final check: 116 passed across the previous reminder/location/transport checks
+plus event-log/missed-routine tests, with one existing dependency warning.
