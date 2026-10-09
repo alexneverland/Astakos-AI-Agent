@@ -23,6 +23,7 @@ def _adapter(root: Path, run: Callable[..., SimpleNamespace]) -> dict[str, Any]:
         "os": os, "Path": Path, "shlex": shlex,
         "subprocess": SimpleNamespace(run=run), "BASE_DIR": str(root),
         "t": lambda key, **kwargs: f"{key}: {kwargs}",
+        "officecli_binary_path": lambda root: Path(root) / "vendor/officecli/officecli.exe",
     }
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), "exec"), namespace)
     return namespace
@@ -70,3 +71,19 @@ def test_missing_binary_is_local_error(tmp_path: Path) -> None:
         pytest.fail("Missing binary reached subprocess")
 
     assert "msg_not_found" in _adapter(tmp_path, forbidden)["run_officecli"]("create sample.docx")
+
+
+def test_native_binary_is_used_on_linux(tmp_path: Path) -> None:
+    """A provisioned Linux checkout must not look for the Windows executable."""
+    binary = tmp_path / "vendor/officecli/officecli"
+    binary.parent.mkdir(parents=True)
+    binary.touch()
+
+    def run(argv: list[str], **kwargs: Any) -> SimpleNamespace:
+        """Confirm the chosen executable without starting any real process."""
+        assert argv[0] == str(binary)
+        return SimpleNamespace(returncode=0, stdout="fixture", stderr="")
+
+    namespace = _adapter(tmp_path, run)
+    namespace["officecli_binary_path"] = lambda root: binary
+    assert "msg_success" in namespace["run_officecli"]("create sample.docx")

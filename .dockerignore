@@ -70,3 +70,28 @@ astakos_skills/messenger_profile/
 # MacOS
 .DS_Store
 .hn_briefing_sent
+# Native tools are provisioned for the image's target platform during build.
+vendor/officecli/*.exe
+vendor/officecli/officecli
+vendor/officecli/.officecli-install-*/
+
+# Only versioned source JSON belongs in a distributable image.
+**/*.json
+**/*.jsonl
+**/*.ndjson
+!astakos_context_schema.json
+!astakos_nlp.json
+!core/capability_registry.json
+!core/intents_*.json
+!locales/*.json
+!vendor/agent-skills/*.json
+!vendor/agent-skills/**/*.json
+!data/routine_tokens.json
+backups/
+.cache/
+*.lock
+.daily-backup-*
+.matrix-backup-*
+.behavioral-*
+.pytest_temp*/
+bootstrap_*.log

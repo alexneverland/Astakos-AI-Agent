@@ -25,8 +25,25 @@ fi
 
 # Refresh application code from the immutable image while preserving user data.
 # Release users should treat /app as managed runtime storage, not as a source checkout.
+# The registered context schema is seeded once; owner-added flags survive upgrades.
+if [ ! -e /app/astakos_context_schema.json ]; then
+  cp /opt/astakos/astakos_context_schema.json /app/astakos_context_schema.json
+fi
+
 rsync -a --delete \
+  --include '/astakos_nlp.json' \
+  --include '/core/capability_registry.json' \
+  --include '/core/intents_*.json' \
+  --include '/locales/*.json' \
+  --include '/vendor/agent-skills/***' \
+  --include '/data/routine_tokens.json' \
+  --exclude '*.json' \
+  --exclude '*.jsonl' \
+  --exclude '*.ndjson' \
+  --exclude '*.lock' \
   --exclude '.env' \
+  --include '.env.example' \
+  --exclude '.env.*' \
   --exclude '*.db' \
   --exclude '*.db-*' \
   --exclude '*.sqlite' \
@@ -40,6 +57,14 @@ rsync -a --delete \
   --exclude 'tmp/' \
   --exclude '_cleaner_backups/' \
   --exclude 'credentials/' \
+  --exclude 'backups/' \
+  --exclude 'matrix_store/' \
+  --exclude 'matrix_media/' \
+  --exclude 'local_only/' \
+  --exclude 'astakos_skills/messenger_profile/' \
+  --exclude '.daily-backup-*' \
+  --exclude '.matrix-backup-*' \
+  --exclude '.behavioral-*' \
   --exclude 'workspace_oauth/' \
   --exclude 'credentials*.json' \
   --exclude 'token*.json' \
