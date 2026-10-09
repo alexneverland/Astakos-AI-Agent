@@ -19,6 +19,8 @@ import json
 import time
 import uuid
 import threading
+import re
+from filelock import FileLock
 from datetime import datetime
 
 _TRACES_DIR = os.path.join(os.path.dirname(__file__), "..", "logs", "traces")
@@ -30,7 +32,31 @@ _MAX_MSG = 200   # max chars for user/response preview
 
 def _truncate(val, maxlen: int = _MAX_STR) -> str:
     s = str(val) if not isinstance(val, str) else val
+    s = _redact_preview(s)
     return s[:maxlen] + ("…" if len(s) > maxlen else "")
+
+
+def _redact_preview(value: str) -> str:
+    """Redact credential-shaped fields before truncating diagnostic previews."""
+    def redact(data: object) -> object:
+        """Walk structured previews without copying credential values."""
+        if isinstance(data, dict):
+            return {key: ("[REDACTED]" if re.search(
+                r"token$|password|secret|api.?key|authorization|credentials", str(key), re.I)
+                else redact(item)) for key, item in data.items()}
+        if isinstance(data, list):
+            return [redact(item) for item in data]
+        return data
+    try:
+        decoded = json.loads(value)
+        if isinstance(decoded, (dict, list)):
+            value = json.dumps(redact(decoded), ensure_ascii=False)
+    except (ValueError, TypeError):
+        pass
+    value = re.sub(r"(?i)\bBearer\s+[^\s\"'<>]+", "Bearer [REDACTED]", value)
+    return re.sub(
+        r'''(?i)([\w-]*(?:token|password|secret|api[_ -]?key|authorization|credentials)[\w-]*["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;}<]+)''',
+        lambda match: match[1] + '"[REDACTED]"', value)
 
 
 class ExecutionTrace:
@@ -52,6 +78,7 @@ class ExecutionTrace:
         self.start_ts       = time.monotonic()
         self.timestamp      = datetime.now().isoformat(timespec="seconds")
         self.channel        = channel
+        self.correlation_id: str | None = None
         self.user_message   = _truncate(user_message, _MAX_MSG)
         self.agent          = None          # last agent node
         self.tool_calls     = []            # list of dicts
@@ -167,6 +194,11 @@ class ExecutionTrace:
                 self.loop_guard = True
         if error:
             self.error = _truncate(str(error), 200)
+        for pending in self._pending.values():
+            self.tool_calls.append({"tool": pending["tool"], "args": pending["args"],
+                "result": "No tool result recorded", "status": "unresolved",
+                "duration_ms": int((time.monotonic()-pending["t0"]) * 1000), "error": False})
+        self._pending.clear()
         self.duration_ms = int((time.monotonic() - self.start_ts) * 1000)
 
     def save(self):
@@ -181,6 +213,7 @@ class ExecutionTrace:
                 "trace_id":    self.trace_id,
                 "timestamp":   self.timestamp,
                 "channel":     self.channel,
+                "correlation_id": self.correlation_id,
                 "agent":       self.agent,
                 "user_message": self.user_message,
                 "tool_calls":  self.tool_calls,
@@ -191,7 +224,7 @@ class ExecutionTrace:
                 "phase_timings": self.phase_timings,
             }
 
-            with _write_lock:
+            with _write_lock, FileLock(log_file + ".lock", timeout=5):
                 entries = []
                 if os.path.exists(log_file):
                     try:
