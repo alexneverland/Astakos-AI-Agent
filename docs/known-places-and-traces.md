@@ -36,7 +36,7 @@ Contrary newer evidence, changed expiry, invalid sources and newer owner reports
 continue to prevent an older interpretation from overwriting current state.
 Assistant acknowledgements are not proof that a flag was written.
 
-## Matrix and Web traces
+## Matrix, Web and Telegram traces
 
 Matrix graph turns use the shared ExecutionTrace recorder. Day files in
 `logs/traces/YYYY-MM-DD.json` include channel, agent, tool argument/result previews,
@@ -45,6 +45,20 @@ is the correlation ID, and `owner_rowid` links ordinary turns to persisted owner
 history. `graph_used=0` distinguishes an intercepted command/context/draft response
 from graph execution. Failed calls without a recorded result are `unresolved`;
 they are not proof that an external operation failed or succeeded.
+
+The shared recorder also mirrors turn evidence to the terminal with flushed
+`[MatrixTrace]:`, `[WebTrace]:` or `[TelegramTrace]:`
+JSON lines: `turn_started`, `phase`, `graph_step`, `tool_called`, `tool_result`,
+`tool_unresolved` and `turn_finished`. Each line carries the channel, trace ID,
+correlation ID and elapsed milliseconds, so interleaved turns can be followed.
+Matrix uses its event ID; Web and Telegram use the trace ID when no external
+correlation ID is supplied. Logging is on by default for these channels;
+offline callers can explicitly pass `console=False` to retain only stored traces.
+Tool arguments/results and final replies use the same bounded, credential-redacted
+previews as the stored traces. A failed terminal write does not interrupt a turn.
+These lines appear in each worker's console/container output; the durable
+record remains the shared day trace file. They describe observable execution,
+not private model reasoning or transport delivery confirmation.
 
 The existing `/debug/traces` view can read both channels. Thread and process locks
 serialize Web/Matrix appends to the same day file. Credential-shaped fields and

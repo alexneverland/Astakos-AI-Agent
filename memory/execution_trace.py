@@ -143,12 +143,14 @@ class ExecutionTrace:
         trace.save()
     """
 
-    def __init__(self, channel: str, user_message: str):
+    def __init__(self, channel: str, user_message: str, *,
+                 console: bool = True, correlation_id: str | None = None) -> None:
         self.trace_id       = str(uuid.uuid4())[:8]
         self.start_ts       = time.monotonic()
         self.timestamp      = datetime.now().isoformat(timespec="seconds")
         self.channel        = channel
-        self.correlation_id: str | None = None
+        self.correlation_id = correlation_id or self.trace_id
+        self._console = console and channel in {"matrix", "web", "telegram"}
         self.user_message   = _truncate(user_message, _MAX_MSG)
         self.agent          = None          # last agent node
         self.tool_calls     = []            # list of dicts
@@ -158,12 +160,31 @@ class ExecutionTrace:
         self.phase_timings  = {}            # extra per-turn timing breakdown
         self._phase_timing_counts: dict[str, int] = {}
         self._pending: dict = {}            # tool_call_id → {name, args, t0}
+        self._log_console("turn_started", user_message=self.user_message)
+
+    def _log_console(self, event: str, **fields: object) -> None:
+        """Mirror bounded, redacted evidence without interrupting a turn on I/O failure."""
+        if not self._console:
+            return
+        record = {
+            "event": event, "channel": self.channel, "trace_id": self.trace_id,
+            "correlation_id": _truncate(self.correlation_id) if self.correlation_id else None,
+            "elapsed_ms": int((time.monotonic() - self.start_ts) * 1000),
+            **{key: _truncate(value) if isinstance(value, str) else value
+               for key, value in fields.items()},
+        }
+        try:
+            print(f"[{self.channel.title()}Trace]: " + json.dumps(record, ensure_ascii=False), flush=True)
+        except (OSError, UnicodeError):
+            # A closed/unsupported terminal must not change execution or persistence.
+            pass
 
     # ── Stream event processor ───────────────────────────────────
 
     def process_event(self, event: dict):
         """Called for each event of graph.stream()."""
         for node, data in event.items():
+            self._log_console("graph_step", node=node)
             if node == "tool_loop_block":
                 self.loop_guard = True
             if data is None:
@@ -203,6 +224,8 @@ class ExecutionTrace:
                     "args":       _truncate(json.dumps(args, ensure_ascii=False)),
                     "t0":         time.monotonic(),
                 }
+                self._log_console("tool_called", node=node, tool=name,
+                    tool_call_id=tid, args=self._pending[tid]["args"])
 
         # ToolMessage → match with pending and record result
         if getattr(msg, "type", None) == "tool" or msg.__class__.__name__ == "ToolMessage":
@@ -228,12 +251,14 @@ class ExecutionTrace:
                 "duration_ms": duration_ms,
                 "error":       result_str.startswith("❌") or "Error" in result_str[:80],
             })
+            self._log_console("tool_result", tool_call_id=tid, **self.tool_calls[-1])
 
     def _record_phase_timing(self, key: str, value: int) -> None:
         """Retain individual samples when an agent phase repeats in one turn."""
         previous = self.phase_timings.get(key)
         count = self._phase_timing_counts.get(key, 0) + 1
         self._phase_timing_counts[key] = count
+        self._log_console("phase", phase=key, value=value)
 
         if previous is not None and key.endswith("_ms"):
             stem = key[:-3]
@@ -255,6 +280,7 @@ class ExecutionTrace:
             self.phase_timings[name] = int(duration_ms)
         except Exception:
             self.phase_timings[name] = duration_ms
+        self._log_console("phase", phase=name, value=self.phase_timings[name])
 
     def finalize(self, response: str | None = None, error: str | None = None):
         """Closes the trace with a final response and error."""
@@ -268,8 +294,12 @@ class ExecutionTrace:
             self.tool_calls.append({"tool": pending["tool"], "args": pending["args"],
                 "result": "No tool result recorded", "status": "unresolved",
                 "duration_ms": int((time.monotonic()-pending["t0"]) * 1000), "error": False})
+            self._log_console("tool_unresolved", **self.tool_calls[-1])
         self._pending.clear()
         self.duration_ms = int((time.monotonic() - self.start_ts) * 1000)
+        self._log_console("turn_finished", response=self.response, error=self.error,
+            agent=self.agent, duration_ms=self.duration_ms, loop_guard=self.loop_guard,
+            tool_count=len(self.tool_calls))
 
     def save(self):
         """Saves to logs/traces/YYYY-MM-DD.json (thread-safe append)."""

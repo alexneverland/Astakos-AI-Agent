@@ -189,8 +189,8 @@ class MatrixTurnService:
         ensure_asset_prompt_type: str | None = None,
     ) -> str | MatrixReply:
         """Record one isolated execution trace, including intercepts and failures."""
-        trace = ExecutionTrace(channel="matrix", user_message=user_text)
-        trace.correlation_id = event_id
+        trace = ExecutionTrace(channel="matrix", user_message=user_text,
+            console=True, correlation_id=event_id)
         trace.mark_phase("graph_used", 0)
         try:
             reply = self._run_traced_sync(user_text, event_id, user_metadata_extra,

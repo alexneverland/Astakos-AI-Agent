@@ -163,3 +163,115 @@ def test_redaction_retains_public_keys_and_ordinary_text():
     from memory.execution_trace import _redact_preview
     value = '{"public_key":"synthetic-public-value","place":"Park","lat":40.6449}'
     assert json.loads(_redact_preview(value)) == json.loads(value)
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_matrix_terminal_shows_correlated_execution_without_credentials(tmp_path, capsys, fail):
+    """Actual Matrix turn output explains calls, results and failed pending calls."""
+    from services.matrix_turn import MatrixTurnService
+    service = MatrixTurnService(graph=TracedGraph(fail),
+        conversation_db_path=str(tmp_path / "history.db"), select_tool_channel=lambda _: None)
+    if fail:
+        with pytest.raises(RuntimeError):
+            service._run_sync("Διάβασε το στίγμα", "$console-turn")
+    else:
+        service._run_sync("Διάβασε το στίγμα", "$console-turn")
+    output = capsys.readouterr().out
+    rows = [json.loads(line.partition("[MatrixTrace]: ")[2])
+        for line in output.splitlines() if line.startswith("[MatrixTrace]: ")]
+    assert rows, "Matrix terminal currently omits its execution evidence"
+    assert all(row["correlation_id"] == "$console-turn" for row in rows)
+    assert len({row["trace_id"] for row in rows}) == 1
+    assert rows[0]["event"] == "turn_started"
+    assert rows[-1]["event"] == "turn_finished"
+    assert any(row["event"] == "graph_step" and row["node"] == "Home_Agent" for row in rows)
+    assert any(row["event"] == "tool_called" and row["tool"] == "get_current_location" for row in rows)
+    assert "private-test-token" not in output
+    assert "private-result-key" not in output
+    if fail:
+        assert any(row["event"] == "tool_unresolved" for row in rows)
+        assert rows[-1]["error"] == "RuntimeError"
+    else:
+        assert any(row["event"] == "tool_result" and "40.6449" in row["result"] for row in rows)
+        assert rows[-1]["response"] == "Βλέπω το στίγμα σου."
+
+
+def test_intercept_terminal_explains_no_graph_run(tmp_path, capsys):
+    """A local command must not look like a graph or tool execution."""
+    from services.matrix_turn import MatrixTurnService
+    service = MatrixTurnService(graph=TracedGraph(),
+        conversation_db_path=str(tmp_path / "history.db"), command_handler=lambda _: "ready")
+    service._run_sync("/status", "$intercept-console")
+    rows = [json.loads(line.partition("[MatrixTrace]: ")[2])
+        for line in capsys.readouterr().out.splitlines() if line.startswith("[MatrixTrace]: ")]
+    assert rows
+    assert any(row["event"] == "phase" and row["phase"] == "graph_used" and row["value"] == 0 for row in rows)
+    assert not any(row["event"] in {"graph_step", "tool_called"} for row in rows)
+
+
+def test_terminal_previews_are_bounded_redacted_and_single_line(capsys):
+    """Credentials and multiline tool data remain safe in the new sink."""
+    from memory.execution_trace import ExecutionTrace
+    trace = ExecutionTrace("matrix", 'private_key="console-secret"',
+        console=True, correlation_id="$safe-console")
+    trace.process_event({"Home_Agent": {"messages": [AIMessage(content="", tool_calls=[{
+        "id": "safe-call", "name": "read_local_file",
+        "args": {"password": "console-secret", "text": "x" * 2000}}])]}})
+    trace.process_event({"tools": {"messages": [ToolMessage(tool_call_id="safe-call",
+        content='-----BEGIN PRIVATE KEY-----\nconsole-secret\n-----END PRIVATE KEY-----\n' + "y" * 2000)]}})
+    trace.finalize(response='passphrase="console-secret"\n' + "z" * 2000)
+    output = capsys.readouterr().out
+    assert "console-secret" not in output
+    rows = [json.loads(line.partition("[MatrixTrace]: ")[2]) for line in output.splitlines()]
+    assert all(len(row.get(key, "") or "") <= 301 for row in rows
+        for key in ("args", "result", "response", "user_message"))
+    trace.save()
+
+
+def test_closed_terminal_does_not_break_matrix_reply_or_saved_trace(tmp_path, monkeypatch):
+    """The diagnostic sink must not become a new runtime failure boundary."""
+    from services.matrix_turn import MatrixTurnService
+    from memory.execution_trace import load_traces
+    def closed_terminal(*args, **kwargs):
+        raise BrokenPipeError("synthetic closed terminal")
+    monkeypatch.setattr("builtins.print", closed_terminal)
+    service = MatrixTurnService(graph=TracedGraph(),
+        conversation_db_path=str(tmp_path / "history.db"), select_tool_channel=lambda _: None)
+    assert service._run_sync("Διάβασε το στίγμα", "$closed-console") == "Βλέπω το στίγμα σου."
+    assert load_traces()[0]["response"] == "Βλέπω το στίγμα σου."
+
+
+def test_console_output_can_be_disabled_explicitly(capsys):
+    """Offline callers may explicitly keep only the stored trace sink."""
+    from memory.execution_trace import ExecutionTrace
+    trace = ExecutionTrace("web", "safe offline request", console=False)
+    trace.process_event({"Home_Agent": {"messages": []}})
+    trace.finalize(response="ready")
+    trace.save()
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("channel", ["web", "telegram", "matrix"])
+@pytest.mark.parametrize("fail", [False, True])
+def test_all_channels_log_complete_correlated_tool_lifecycle(channel, fail, capsys):
+    """The default recorder sink explains both success and unresolved failures."""
+    from memory.execution_trace import ExecutionTrace, load_traces
+    trace = ExecutionTrace(channel, 'password="offline-secret"')
+    for event in TracedGraph(False).stream({}, {}):
+        trace.process_event(event)
+        if fail and "Home_Agent" in event:
+            break
+    trace.finalize(response=None if fail else "ready", error="RuntimeError" if fail else None)
+    trace.save()
+    prefix = f"[{channel.title()}Trace]: "
+    output = capsys.readouterr().out
+    rows = [json.loads(line.removeprefix(prefix)) for line in output.splitlines()]
+    assert rows
+    assert all(row["channel"] == channel and row["correlation_id"] == trace.trace_id for row in rows)
+    assert rows[0]["event"] == "turn_started"
+    assert rows[-1]["event"] == "turn_finished"
+    assert any(row["event"] == "tool_called" for row in rows)
+    assert any(row["event"] == ("tool_unresolved" if fail else "tool_result") for row in rows)
+    assert rows[-1]["error"] == ("RuntimeError" if fail else None)
+    assert not any(secret in output for secret in ("offline-secret", "private-test-token", "private-result-key"))
+    assert load_traces()[0]["correlation_id"] == trace.trace_id

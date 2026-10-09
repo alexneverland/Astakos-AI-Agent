@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Matrix, Web and Telegram terminal execution logs mirror the shared trace recorder with correlated
+  graph steps, tool calls/results, phase timings, unresolved calls and final replies
+  or failures. Previews retain credential redaction and size limits.
+
 - Canonical named GPS places alongside configured home/work, with fresh-point
   saving and radius matching. Matrix turns record agent/tool/result/timing/error
   evidence through the shared Web trace store, with concurrent process-safe writes

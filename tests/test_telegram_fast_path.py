@@ -94,28 +94,12 @@ def test_ultra_light_ack_response_is_neutral_confirmation():
 from unittest.mock import patch
 
 
-def test_handle_message_ultra_light_ack_sends_reply_without_graph(monkeypatch):
+def test_handle_message_ultra_light_ack_sends_reply_without_graph(monkeypatch, capsys):
     import clients.telegram_bot as bot
     import core.utils as utils
     import memory.execution_trace as execution_trace
     import memory.pending_assets as pending_assets
     import tools.telegram as telegram
-
-    class DummyTrace:
-        def __init__(self, **_kwargs):
-            self.agent = ""
-
-        def mark_phase(self, *_args):
-            pass
-
-        def process_event(self, *_args):
-            pass
-
-        def finalize(self, **_kwargs):
-            pass
-
-        def save(self):
-            pass
 
     sent = []
     monkeypatch.setattr(bot, "pending_routine_confirmations", {})
@@ -137,7 +121,6 @@ def test_handle_message_ultra_light_ack_sends_reply_without_graph(monkeypatch):
     monkeypatch.setattr(bot.graph, "stream", lambda *_args, **_kwargs: pytest.fail("graph must not run"))
     monkeypatch.setattr(pending_assets, "clear_expired_pending_assets", lambda: None)
     monkeypatch.setattr(pending_assets, "get_latest_pending_asset", lambda *_args: None)
-    monkeypatch.setattr(execution_trace, "ExecutionTrace", DummyTrace)
     monkeypatch.setattr(utils, "is_ultra_light_ack", lambda _text: True)
     monkeypatch.setattr(utils, "get_ultra_light_ack_response", lambda: "ACK")
     monkeypatch.setattr(utils, "is_reply_to_recent_mail_prompt", lambda _history: False)
@@ -147,6 +130,13 @@ def test_handle_message_ultra_light_ack_sends_reply_without_graph(monkeypatch):
     bot.handle_message("ok", "user123")
 
     assert sent == ["ACK"]
+    import json
+    rows = [json.loads(line.removeprefix("[TelegramTrace]: "))
+        for line in capsys.readouterr().out.splitlines() if line.startswith("[TelegramTrace]: ")]
+    assert rows[0]["event"] == "turn_started"
+    assert any(row["event"] == "turn_finished" and row["response"] == "ACK" for row in rows)
+    assert not any(row["event"] in {"graph_step", "tool_called"} for row in rows)
+    assert execution_trace.load_traces()[0]["response"] == "ACK"
 
 
 @patch("memory.pending_assets.get_latest_pending_asset", return_value=None)
