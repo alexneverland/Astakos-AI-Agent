@@ -33,6 +33,19 @@ without requiring a second human approval; the protected `main` still requires
 a PR, required checks, and resolved review conversations. Feature branches may
 be deleted after merge. Squash, merge commits, and rebase remain supported.
 
+## Documentation and releases
+
+Update README/setup/discovery docs and the Unreleased changelog for user-visible
+changes. Keep source `main` separate from published releases, and document any
+explicit migration or activation requirement. Documentation-only edits need link,
+command and whitespace review; do not rerun the full suite without a relevant reason.
+
+Verify review findings against current code and fix actionable defects. Additional
+automated review requests are owner-controlled; do not create an endless speculative
+review cycle. Release preparation must keep `VERSION`, the dated changelog and
+`SECURITY.md` consistent. Tag/image publication is a separate approved action;
+see [release readiness](docs/release-readiness.md).
+
 ## Licensing and security
 
 First-party contributions are submitted under the repository's

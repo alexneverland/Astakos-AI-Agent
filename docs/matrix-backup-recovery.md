@@ -8,8 +8,10 @@ The deployment environment is now included in a verified private Drive artifact.
 Canonical bot settings and automated bot/watchdog coordination are implemented.
 The separate Windows nightly task is registered and its first Task Scheduler
 invocation completed successfully. An isolated database/service restore passed
-on 2026-10-02 (details and remaining limitations below). The existing Astakos
-backup task is unchanged.
+on 2026-10-02 (details and remaining limitations below). The timed 03:00 Matrix
+run was verified on 2026-10-04. Astakos now uses a separate selective data-only
+backup at 00:00; see [its inventory and recovery limits](daily-data-backup.md).
+These are dated operator observations, not a fresh check of today's jobs.
 
 ### First local live capture (2026-10-02)
 
@@ -128,7 +130,7 @@ file prefixes, hashes source files, verifies the tar's actual contents against
 its manifest, and rejects detected changes. These checks do not replace a
 consistent capture or prove a database dump is fully restorable.
 
-## Explicit execution (do not run against production yet)
+## Explicit execution (live runs require owner authorization)
 
 After approving the collector and first live capture, substitute real private
 paths. Use a work directory outside the source, repository and cloud-sync roots.
@@ -221,7 +223,7 @@ crypto store with the service account. A revoked token requires normal reauthent
 this backup does not verify/trust new devices or replace Element's recovery key.
 This slice passed 55 focused fixture tests, including CLI packaging and upload
 boundaries. The first two real artifacts predate this option; use the verified
-recapture below when bot-runtime recovery is required. Isolated restore is pending.
+recapture below when bot-runtime recovery is required. At this historical checkpoint, isolated restore was pending; the later 2026-10-02 rehearsal below supersedes that status.
 
 ### Verified recapture with bot settings (2026-10-02 13:35 UTC)
 

@@ -32,3 +32,10 @@ start active, but no trigger, confirmation, cooldown, or learned state is import
 The Setup Wizard invokes this importer explicitly; it is never run automatically
 by the scheduler or during normal application startup. The local JSON file is
 preserved by release Docker updates, even after its one-time import.
+
+## Dated feedback is separate
+
+Normal routine database setup prepares the dated occurrence ledger for fresh
+and existing installations transactionally. Importing declarations is separate:
+it does not reset feedback/baselines or reconstruct historical occurrences. See [routines and context](routines-and-context.md)
+and [release readiness](release-readiness.md) for activation and upgrade scope.

@@ -19,6 +19,16 @@ Astakos remembers useful context, learns recurring routines, follows up naturall
 
 ---
 
+## Documentation checkpoint
+
+This README describes merged `main` through PR #238 and the accompanying
+fresh-install readiness changes (2026-10-09). The latest
+published release remains **v2.7.0**; a source checkout can contain newer features
+than the release image or ZIP. See [Unreleased changes](CHANGELOG.md),
+[routines and context](docs/routines-and-context.md),
+[data backups](docs/daily-data-backup.md) and the
+[proposed v2.8.0 assessment](docs/release-readiness.md).
+
 ## Recommended: Docker with Automatic Updates
 
 The release deployment uses the official GHCR image and Watchtower. Watchtower checks for a newer image every five minutes, replaces only the application container, and preserves the Astakos data volume.
@@ -54,7 +64,13 @@ is in the [Beginner Setup Guide](SETUP_GUIDE.md#external-messaging-telegram-or-e
 - logs, uploads, generated files, backups, and runtime data
 - credentials and OAuth token files
 
-The release image refreshes application code while keeping those user-owned files in the persistent `astakos_data` Docker volume.
+The release image refreshes application code while preserving runtime files in
+`astakos_data`. Host credentials remain in the mounted `credentials/` directory;
+Google Workspace OAuth tokens use the separate `astakos_workspace` volume.
+Persistence through an update is not a backup. The Windows
+[data-only backup](docs/daily-data-backup.md) and
+[encrypted Matrix backup](docs/matrix-backup-recovery.md) are separate operator
+workflows, with different inventories and recovery requirements.
 
 ### Useful release commands
 
@@ -151,10 +167,12 @@ Astakos combines memory, agents, schedulers, approvals, analytics, and tools int
 - Web messages are mirrored to the selected external app; original attachments and generated files are not copied between apps.
 - ChromaDB semantic memory for facts, goals, sessions, documents, and photos.
 - Hybrid recall combining recent context, SQLite history, and semantic memory.
-- Isolated behavioral observations that classify trusted user reports and surface repeated pattern candidates in Debug before they can influence any future feature.
-- Recurring-routine learning with context-aware reminders and adaptive anti-spam cooldowns.
+- Trusted behavioral observations and specific entity/action patterns supporting ordinary conversational comments and guarded spontaneous openers, with Debug evidence and topic preferences.
+- Semantic reassessment of related context flags using current owner reports and bounded history, with event-time, provenance and stale-write safeguards.
+- Context-aware routines, clarification questions and optional notes when a routine action is blocked.
+- Dated routine delivery, acknowledgement and completion with separate silence/refusal backoff, with dated storage provisioned by normal startup. See [activation and status meanings](docs/routines-and-context.md).
 - Delayed conversational follow-ups that cancel when the topic is already resolved.
-- Long-term goal tracking and follow-up after inactivity.
+- Conversational partial goal updates and follow-ups based on recent relevant activity.
 
 ### Multi-agent tools
 
@@ -162,11 +180,13 @@ LangGraph routes work to specialized Chat, Home, Web, Tech, Git, Mail, and Dev a
 
 - Gmail search, reading, drafting, and sending
 - Google Calendar and Drive workflows
-- web research, weather, places, and navigation
+- multi-result web research with Reddit, YouTube and LinkedIn evidence, recent-date filtering where supported, source links and supplied-link failure handling
+- weather, places, and navigation
 - local project and GitHub actions
 - bounded reading of explicitly approved local projects
 - provider-aware image generation and voice input/output
-- reminders, routines, files, documents, receipts, stories, and health summaries
+- reminders, routines, native file/document workflows with Office CLI support, receipts, stories, and health summaries
+- approved terminal-result continuation and read-only bug diagnosis separated from code repair
 
 ### Live Voice
 
@@ -326,14 +346,14 @@ See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for full instructions.
 
 ## Releases and Docker Images
 
-Every `v*` Git tag triggers GitHub Actions to build multi-architecture images for AMD64 and ARM64:
+Every `v*` Git tag triggers GitHub Actions to validate the tag against `VERSION` and build multi-architecture images for AMD64 and ARM64:
 
 ```text
 ghcr.io/alexneverland/astakos-ai-agent:<version>
 ghcr.io/alexneverland/astakos-ai-agent:latest
 ```
 
-The release compose file tracks `latest`; Watchtower downloads a new image and restarts Astakos automatically. Versioned tags remain available for users who prefer pinned deployments.
+The release compose file tracks `latest`; Watchtower downloads a new image and restarts Astakos automatically. Versioned tags remain available for users who prefer pinned deployments. Manual dispatch of the publishing workflow also updates `latest`; it is a publication action, not a preview. See [release readiness](docs/release-readiness.md) for the current proposal and upgrade gates.
 
 ---
 
