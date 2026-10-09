@@ -83,31 +83,41 @@ class RoutineFeedbackStore:
             connection.close()
 
     def initialize(self) -> None:
-        """Create only the approved occurrence table, without historical guesses."""
+        """Provision the ledger atomically without historical guesses or resets."""
         with self._write() as connection:
-            connection.execute("""
-                CREATE TABLE IF NOT EXISTS routine_occurrences (
-                    routine_id INTEGER NOT NULL REFERENCES routines(id),
-                    occurrence_date TEXT NOT NULL,
-                    delivered_at TEXT,
-                    receipt_id TEXT,
-                    feedback TEXT CHECK(feedback IN
-                        ('complete','acknowledge','skip_today','pause','defer')),
-                    feedback_at TEXT,
-                    baseline_at TEXT,
-                    PRIMARY KEY (routine_id, occurrence_date),
-                    CHECK ((delivered_at IS NULL) = (receipt_id IS NULL)),
-                    CHECK ((feedback IS NULL) = (feedback_at IS NULL))
-                )
-            """)
-            columns = {row[1] for row in connection.execute("PRAGMA table_info(routine_occurrences)")}
-            if "baseline_at" not in columns:
-                connection.execute("ALTER TABLE routine_occurrences ADD COLUMN baseline_at TEXT")
-            for column in ("question_text", "delivery_channel", "dispatch_started_at",
-                           "staged_receipt_id", "staged_delivered_at", "staged_channel", "staged_question",
-                           "pending_history_json", "staged_draft_event"):
-                if column not in columns:
-                    connection.execute(f"ALTER TABLE routine_occurrences ADD COLUMN {column} TEXT")
+            self.initialize_schema(connection)
+
+    @staticmethod
+    def initialize_schema(connection: sqlite3.Connection) -> None:
+        """Add compatible ledger storage within the caller-owned write transaction.
+
+        Canonical routine setup and explicit memory callers share this schema.
+        Never commit here, reconstruct occurrences or change routine/baseline state.
+        """
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS routine_occurrences (
+                routine_id INTEGER NOT NULL REFERENCES routines(id),
+                occurrence_date TEXT NOT NULL,
+                delivered_at TEXT,
+                receipt_id TEXT,
+                feedback TEXT CHECK(feedback IN
+                    ('complete','acknowledge','skip_today','pause','defer')),
+                feedback_at TEXT,
+                baseline_at TEXT,
+                PRIMARY KEY (routine_id, occurrence_date),
+                CHECK ((delivered_at IS NULL) = (receipt_id IS NULL)),
+                CHECK ((feedback IS NULL) = (feedback_at IS NULL))
+            )
+        """)
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(routine_occurrences)")}
+        if "baseline_at" not in columns:
+            connection.execute("ALTER TABLE routine_occurrences ADD COLUMN baseline_at TEXT")
+        for column in ("question_text", "delivery_channel", "dispatch_started_at",
+                       "staged_receipt_id", "staged_delivered_at", "staged_channel", "staged_question",
+                       "pending_history_json", "staged_draft_event"):
+            if column not in columns:
+                connection.execute(f"ALTER TABLE routine_occurrences ADD COLUMN {column} TEXT")
+
 
     def stage_delivery(self, proof: PendingDeliveryProof, *, history_content: str | None = None) -> bool:
         """Commit bounded confirmed proof separately before the ledger projection.
