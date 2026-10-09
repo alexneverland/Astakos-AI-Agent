@@ -9,6 +9,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Canonical named GPS places alongside configured home/work, with fresh-point
+  saving and radius matching. Matrix turns record agent/tool/result/timing/error
+  evidence through the shared Web trace store, with concurrent process-safe writes
+  and credential redaction.
+
 - Opt-in OwnTracks HTTP GPS intake over private Tailscale HTTPS, with a dedicated
   generated credential/device binding, bounded durable queue and source-time
   freshness/order checks. The selected external worker reuses location reminders
@@ -16,6 +21,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   when OwnTracks is configured. Includes private provisioning and setup instructions.
 
 ### Fixed
+
+- Interrupted OwnTracks uploads are rejected without an unhandled traceback or
+  accepting partial location data; subsequent authenticated uploads remain usable.
+
+- Newer same-value GPS observations no longer discard grounded relationship
+  updates from an ordinary owner report; newer conflicting state remains protected.
 
 - Scheduled and Telegram-entry location reminders remain pending when external
   delivery is not confirmed. Location-reminder SQLite connections close explicitly,
