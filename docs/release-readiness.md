@@ -1,18 +1,19 @@
-# Release readiness: proposed v2.8.0
+# Release verification: v2.8.0
 
-Assessment: 2026-10-09, merged `main` at
-`4d40b1082f808a6a89a7baae32d7c93d185e5ef2` (PR #238), plus the local
-fresh-install readiness changes. Latest published release: **v2.7.0**,
-2026-09-11. `VERSION` remains `2.7.0`; no tag, release or image was published.
+Release checkpoint: 2026-10-09, including merged PR #240 at
+`ca853c5` and the v2.8.0 release preparation. `VERSION` is `2.8.0`.
+The owner authorized merging PR #240, deleting its branch and publishing the new
+release. Check the [release page](https://github.com/alexneverland/Astakos-AI-Agent/releases/tag/v2.8.0)
+and tag-triggered publishing workflow for artifact availability.
 
-## Recommendation
+## Version scope
 
-Use **v2.8.0**, a minor release, for Matrix/Element, richer research/native file
+**v2.8.0** is a minor release for Matrix/Element, richer research/native file
 workflows, behavioral conversation, dated/context-aware routines, goal continuity
 and selective backups. The scope exceeds a patch release. No deliberate
 incompatible API removal has been identified.
 
-[CHANGELOG.md](../CHANGELOG.md) contains consolidated Unreleased notes.
+[CHANGELOG.md](../CHANGELOG.md) contains the dated v2.8.0 release notes.
 [SETUP_GUIDE.md](../SETUP_GUIDE.md) distinguishes source and published images.
 
 ## Installation gaps resolved
@@ -69,7 +70,22 @@ dependency warnings). A rebuilt Linux AMD64 release image passed all four isolat
 container tests, including invalid-local fallback and real Office/OpenXML checks.
 No release publication or live owner-data changes were performed.
 
-## Publishing sequence after explicit authorization
+## Security and upgrade recovery
+
+The release updates `pypdf` from 6.16.1 to 6.19.0, the patched version covering
+the eight open PDF parsing runtime/memory alerts checked on 2026-10-09. ChromaDB
+server API advisories remain unpatched; supported deployments keep it embedded
+and do not expose a Chroma HTTP server. This release is not a claim that all
+upstream advisories have disappeared.
+
+Preserve a pre-upgrade backup of the persistent data and separate credentials.
+For an image rollback, stop Watchtower and pin the previous versioned image in
+the deployment's Compose file before restarting the application. Do not remove
+volumes or attempt to undo schema changes manually. Downgrading after new data
+has been written is not verified; restoring the pre-upgrade data is a separate
+operator recovery decision. See the backup guides for capture/recovery limits.
+
+## Publishing sequence
 
 1. Merge the scoped readiness/documentation changes through the PR process.
 2. Update `VERSION`, date the v2.8.0 changelog section and update `SECURITY.md`

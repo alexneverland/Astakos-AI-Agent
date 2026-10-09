@@ -35,7 +35,7 @@ description: A modular, local-first, LLM-agnostic multi-agent companion framewor
 - [llms.txt](../llms.txt): Discovery map for AI agents
 - [Routines and context](routines-and-context.md): State, dated feedback and delivery meanings
 - [Data backup](daily-data-backup.md): Selected inventory and recovery limits
-- [Release readiness](release-readiness.md): Proposed v2.8.0 and installation gates
+- [Release readiness](release-readiness.md): v2.8.0 verification and installation gates
 
 ## Example Usage
 

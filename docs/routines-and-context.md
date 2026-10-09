@@ -1,8 +1,8 @@
 # Routines, context and proactive conversation
 
-This guide describes `main` after PR #238 (2026-10-09). The latest published
-release is still v2.7.0; see [release readiness](release-readiness.md) before
-assuming these changes are in a downloaded release image.
+This guide describes v2.8.0 (2026-10-09), including PR #238 and the installation
+fixes in PR #240. See [release verification](release-readiness.md) for the evidence
+and remaining deployment-specific observations.
 
 ## Context follows the conversation
 
