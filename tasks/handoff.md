@@ -4,6 +4,15 @@ Snapshot: 2026-10-09, PR #240 merged and v2.8.0 release preparation authorized. 
 for current code, runtime evidence or a new task's approval. Refresh when state changes.
 
 Latest checkpoint 2026-10-09: #242 merged as `1c5b508`; its branch was deleted.
+Subsequent checkpoint: #243 OwnTracks merged as `a0f1e52`; its branch was deleted.
+Owner then approved resolving the three deferred reminder-test failures.
+Work branch: `codex/reminder-delivery-maintenance`. Transport
+failures now leave scheduled/Telegram-entry location reminders pending; memory
+connections close explicitly; legacy tests use the canonical delivery boundary
+and current GPS refresh semantics. 100 related offline tests passed. See
+`tasks/reminder-delivery-maintenance.md` for evidence and scope.
+
+The following OwnTracks implementation checkpoint predates that merge:
 Owner then approved OwnTracks background GPS over the existing private Tailscale
 network. Local implementation is on `codex/owntracks-location`; no PR yet.
 See `owntracks-location-spec.md` and `docs/owntracks-location.md`.

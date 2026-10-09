@@ -3151,15 +3151,20 @@ def handle_location(msg, live_update=False):
         return
     from services.location_update import process_location_update
 
+    def send_location_reminder(message: str) -> str:
+        """Propagate transport failure so the shared pipeline retains the reminder."""
+        external_id = _send_and_record_assistant(message, agent="Reminder_Agent")
+        if external_id is None:
+            raise RuntimeError("Location reminder delivery was not confirmed")
+        return external_id
+
     try:
         process_location_update(
             lat,
             lon,
             live_update=live_update,
             source_channel="telegram",
-            send_reminder=lambda message: _send_and_record_assistant(
-                message, agent="Reminder_Agent"
-            ),
+            send_reminder=send_location_reminder,
         )
     except Exception as exc:
         print(f"[Location Handler Error]: {exc}")
@@ -3868,7 +3873,7 @@ def run_polling():
 # ────────────────────────────────────────────────────────────────
 
 def job_check_reminders():
-    """Checks for reminders (SQL) and sends them to Telegram."""
+    """Deliver due reminders through the selected channel before completing them."""
     if is_reminders_paused():
         return
     import sqlite3
@@ -3889,7 +3894,8 @@ def job_check_reminders():
             msg = f"🔔 REMINDER: {task}"
             if is_duplicate_notification(msg, cooldown_seconds=60):
                 continue
-            _send_and_record_assistant(msg, agent="Routine_Agent")
+            if _send_and_record_assistant(msg, agent="Routine_Agent") is None:
+                continue
             log_event("reminders", "sent", task=task)
             cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
             conn.commit()

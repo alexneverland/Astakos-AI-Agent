@@ -1,6 +1,7 @@
 """Durable GPS anchors for reminders that fire after leaving the current place."""
 
 import json
+from contextlib import closing
 import os
 import sqlite3
 import time
@@ -118,7 +119,7 @@ def find_triggered_location_reminders(
     """Read only location reminders reached by one trusted GPS point."""
     if not os.path.isfile(db_path):
         return []
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         at_home = [
             (reminder_id, task, "home")
             for reminder_id, task in conn.execute(
@@ -138,5 +139,5 @@ def find_triggered_location_reminders(
 
 def finish_location_reminder(*, db_path: str, reminder_id: int) -> None:
     """Mark one delivered location reminder complete through the memory layer."""
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         complete_location_reminder(conn, reminder_id)
