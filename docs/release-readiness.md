@@ -87,11 +87,15 @@ operator recovery decision. See the backup guides for capture/recovery limits.
 
 ## Publishing sequence
 
-1. Merge the scoped readiness/documentation changes through the PR process.
-2. Update `VERSION`, date the v2.8.0 changelog section and update `SECURITY.md`
-   support versions together; verify consistency and merge release preparation.
-3. Create matching `v2.8.0`, publish release/setup assets and verify AMD64/ARM64
-   images with versioned and `latest` tags.
+PR #240 is merged; VERSION, the dated changelog and supported-version policy
+are aligned to v2.8.0 in this release preparation.
+
+1. Merge the verified release preparation, then create matching `v2.8.0` on that
+   integration commit. The tag starts the existing image publishing workflow.
+2. Verify the workflow's build/API smoke and published AMD64/ARM64 manifests,
+   including matching versioned and `latest` image digests.
+3. Publish the GitHub release with its setup/Compose assets and verification
+   notes; confirm the release points to the same tag and commit.
 
 The [publishing workflow](../.github/workflows/publish-ghcr.yml) validates VERSION
 against a pushed `v*` tag; manual dispatch also publishes `latest`. Either can
