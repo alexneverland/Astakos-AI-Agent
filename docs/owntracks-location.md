@@ -28,12 +28,19 @@ your own host's `.ts.net` name; do not include a password in the URL:
 
 The helper creates `credentials/owntracks-auth.json` (a verifier only) and
 `credentials/owntracks.otrc` (private phone configuration including its credential).
-Neither is versioned. Existing files are preserved; rerunning does not rotate or
-overwrite them. Treat the `.otrc` as a password. Transfer it privately to your
+Neither is versioned. A complete installation is preserved; rerunning does not
+rotate or overwrite it. If setup stopped after creating only the phone import,
+rerun with the same URL: a validated import restores its missing verifier using
+the same token. Invalid partial imports are preserved and rejected.
+Treat the `.otrc` as a password. Transfer it privately to your
 phone, import it in OwnTracks, then remove unnecessary transferred copies.
 These credentials are excluded from the data-only backup; preserve them separately
 or reprovision and reimport on a replacement host. Restrict the credentials
 directory to your Windows account/service account; POSIX writes use mode 0600.
+
+The verifier hashes a machine-generated 256-bit token, not a human-chosen
+password. The SHA-256 password-hashing CodeQL findings were reviewed on this
+basis; this format must not be reused for human passwords.
 
 Add only the dedicated mount, retaining Matrix's existing `/` handler:
 

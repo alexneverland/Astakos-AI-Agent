@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 from pathlib import Path
 import secrets
 import sys
@@ -26,8 +27,21 @@ def provision(root: Path, url: str) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     auth_file, export = folder / "owntracks-auth.json", folder / "owntracks.otrc"
     with FileLock(str(auth_file) + ".lock", timeout=5):
-        if auth_file.exists() or export.exists():
+        if auth_file.exists():
             raise FileExistsError("OwnTracks is already provisioned; existing credentials were preserved")
+        if export.exists():
+            settings = json.loads(export.read_text(encoding="utf-8"))
+            token = settings.get("password") if isinstance(settings, dict) else None
+            if (not isinstance(settings, dict) or settings.get("_type") != "configuration"
+                    or settings.get("url") != url or settings.get("username") != "owner"
+                    or settings.get("deviceId") != "phone" or settings.get("mode") != 3
+                    or settings.get("auth") is not True or not isinstance(token, str)
+                    or len(token) != 64 or any(char not in "0123456789abcdef" for char in token)):
+                raise ValueError("Partial OwnTracks configuration is invalid; existing files were preserved")
+            write_private_json(auth_file, {"username": "owner", "device": "phone",
+                "secret_sha256": hashlib.sha256(token.encode()).hexdigest()})
+            return export
+        # SHA-256 verifies this random token; this is not human password storage.
         password = secrets.token_hex(32)
         username, device = "owner", "phone"
         write_private_json(export, {

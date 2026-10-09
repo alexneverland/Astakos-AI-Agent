@@ -245,3 +245,48 @@ def test_durable_write_failure_returns_retryable_status(intake, monkeypatch):
     assert response.status_code == 503
     assert "private storage detail" not in response.text
     assert not store.pending()
+
+
+def test_partial_provisioning_recovers_same_phone_credential(tmp_path, monkeypatch):
+    """Verifier write failure or interrupted setup must not strand the import."""
+    from scripts import configure_owntracks as provisioning
+    from api.owntracks import build_owntracks_app
+    from services.owntracks import OwnTracksStore
+    original = provisioning.write_private_json
+    def fail_verifier(path, value):
+        if path.name == "owntracks-auth.json":
+            raise OSError("simulated failure")
+        original(path, value)
+    monkeypatch.setattr(provisioning, "write_private_json", fail_verifier)
+    url = "https://example.tailnet.ts.net/owntracks/"
+    with pytest.raises(OSError):
+        provisioning.provision(tmp_path, url)
+    export = tmp_path / "credentials" / "owntracks.otrc"
+    before = export.read_bytes()
+    settings = json.loads(before)
+    monkeypatch.setattr(provisioning, "write_private_json", original)
+    assert provisioning.provision(tmp_path, url) == export
+    assert export.read_bytes() == before
+    client = TestClient(build_owntracks_app(
+        auth_file=export.with_name("owntracks-auth.json"),
+        store=OwnTracksStore(tmp_path / "queue.json")))
+    assert client.post("/", json=point(), auth=(settings["username"], settings["password"]),
+        headers={"X-Limit-D": settings["deviceId"]}).status_code == 200
+
+
+@pytest.mark.parametrize("change", [{"password": "weak"}, {"url": "https://other/owntracks/"},
+    {"_type": "location"}, {"deviceId": "other"}])
+def test_partial_provisioning_refuses_invalid_export_without_overwrite(tmp_path, change):
+    """Recovery accepts only the generated credential for the requested endpoint."""
+    from scripts.configure_owntracks import provision
+    url = "https://example.tailnet.ts.net/owntracks/"
+    export = provision(tmp_path, url)
+    auth = export.with_name("owntracks-auth.json")
+    auth.unlink()
+    data = json.loads(export.read_text())
+    data.update(change)
+    export.write_text(json.dumps(data))
+    before = export.read_bytes()
+    with pytest.raises(ValueError):
+        provision(tmp_path, url)
+    assert export.read_bytes() == before and not auth.exists()

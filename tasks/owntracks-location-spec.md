@@ -66,6 +66,14 @@ mode combines interval and displacement; use interval 120 seconds, displacement
 
 ## Verification recorded 2026-10-09
 
+- PR #243 review repair: failing regressions confirmed the unbound runtime
+  channel and stranded partial provisioning. Active-channel draining now fails
+  closed without a runtime channel; validated partial imports recover the same
+  token. Final related run: 88 passed, one existing dependency warning.
+- CodeQL password-hashing findings concern SHA-256 verification of an explicitly
+  machine-generated 256-bit token (and synthetic test data), not human passwords.
+  Reviewed separately without a rule-wide suppression or credential rotation.
+
 - Final focused PR check (OwnTracks, scheduler startup, API authentication,
   Matrix runtime and existing home/work environmental context): 81 passed,
   one existing dependency warning.

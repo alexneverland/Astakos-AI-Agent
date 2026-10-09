@@ -93,9 +93,15 @@ def test_default_tick_does_not_open_dated_storage(monkeypatch):
     bot.job_check_routines()
 
 
-def test_external_scheduler_registers_queued_matrix_approval_delivery(monkeypatch) -> None:
+@pytest.mark.parametrize("channel", ["matrix", "telegram", None])
+def test_external_scheduler_registers_queued_matrix_approval_delivery(monkeypatch, channel) -> None:
     """The active external runtime regularly drains Web-origin approvals."""
     import clients.telegram_bot as bot
+    from services import owntracks
+    calls = []
+    monkeypatch.delenv("ASTAKOS_EXTERNAL_CHANNEL", raising=False)
+    monkeypatch.setattr(bot, "_external_background_runtime_channel", channel)
+    monkeypatch.setattr(owntracks, "drain_owntracks", lambda **kwargs: calls.append(kwargs))
 
     class CapturingScheduler:
         def __init__(self) -> None:
@@ -110,7 +116,8 @@ def test_external_scheduler_registers_queued_matrix_approval_delivery(monkeypatc
     assert scheduler.jobs["matrix_approvals"][1] == 5
     assert scheduler.jobs["matrix_approvals"][0].__name__ == "drain_queued_matrix_approvals"
     assert scheduler.jobs["owntracks_location"][1] == 5
-    assert scheduler.jobs["owntracks_location"][0].__name__ == "drain_owntracks"
+    scheduler.jobs["owntracks_location"][0]()
+    assert calls == ([{"channel": channel}] if channel else [])
 
 
 def test_external_background_runtime_starts_once_for_matrix(monkeypatch) -> None:

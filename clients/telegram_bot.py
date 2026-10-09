@@ -6052,8 +6052,13 @@ def _build_external_scheduler() -> AstakosScheduler:
         if _external_background_runtime_channel in {"telegram", "matrix"}:
             drain_web_mirrors(_external_background_runtime_channel)
 
+    def drain_selected_owntracks() -> None:
+        """Process owner GPS through this process's active external transport."""
+        if _external_background_runtime_channel in {"telegram", "matrix"}:
+            drain_owntracks(channel=_external_background_runtime_channel)
+
     scheduler = AstakosScheduler()
-    scheduler.register(drain_owntracks, interval_seconds=5, name="owntracks_location", verbose=False)
+    scheduler.register(drain_selected_owntracks, interval_seconds=5, name="owntracks_location", verbose=False)
     scheduler.register(drain_selected_web_mirrors, interval_seconds=10, name="web_mirror", verbose=False)
     scheduler.register(
         drain_queued_matrix_approvals,

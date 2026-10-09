@@ -33,6 +33,7 @@ def build_owntracks_app(*, auth_file: Path | None = None,
                 raise ValueError("Invalid verifier")
         except (OSError, ValueError, KeyError, TypeError):
             raise HTTPException(503, "OwnTracks is not configured") from None
+        # Basic's password field carries a generated 256-bit token, never a human password.
         if (credentials is None or len(credentials.password) > 256
                 or not secrets.compare_digest(credentials.username.encode(), username.encode())
                 or not secrets.compare_digest(hashlib.sha256(credentials.password.encode()).hexdigest(), verifier)):
