@@ -60,6 +60,8 @@ Web and Telegram graph traces finalize and save from cleanup on success,
 exceptions and empty replies (`NoResponse`). Telegram records stream events as
 they arrive, so a later exception retains earlier pending tool calls. Awaiting
 approval is an intercepted, completed trace; it is not an executed tool call.
+Telegram photo traces remain open through archive-prompt preparation, output
+extraction and sending; downstream failures are recorded at the final cleanup.
 These lines appear in each worker's console/container output; the durable
 record remains the shared day trace file. They describe observable execution,
 not private model reasoning or transport delivery confirmation.

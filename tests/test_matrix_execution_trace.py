@@ -280,6 +280,55 @@ def test_telegram_photo_error_or_empty_response_retains_trace(monkeypatch, capsy
     assert sum(row["event"] == "turn_finished" for row in logs) == 1
 
 
+@pytest.mark.parametrize("stage", ["prompt", "extract", "send", "output_send", "success"])
+def test_telegram_photo_trace_covers_downstream_pipeline(monkeypatch, capsys, stage):
+    """A successful graph is insufficient evidence that the photo turn finished."""
+    from types import SimpleNamespace
+    from clients import telegram_bot as bot
+    from memory.execution_trace import load_traces
+    monkeypatch.setattr(bot, "_load_shared_context_messages", lambda _: [])
+    monkeypatch.setattr(bot.graph, "stream", lambda *args, **kwargs: iter([
+        {"Chat_Agent": {"messages": [AIMessage(content="graph preview")]}}]))
+    monkeypatch.setattr("memory.conversation_history.append_message", lambda **kwargs: None)
+    monkeypatch.setattr(bot, "enqueue_fast_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "enqueue_slow_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr("memory.pending_assets.looks_like_asset_confirmation_prompt", lambda _: False)
+    def prompt(*args):
+        if stage == "prompt":
+            raise RuntimeError("offline prompt failure")
+        return "with archive prompt"
+    def extract(*args):
+        if stage == "extract":
+            raise RuntimeError("offline output failure")
+        return SimpleNamespace(text="final sent response", outputs=[
+            SimpleNamespace(kind="photo", path="offline-output.png")
+        ] if stage == "output_send" else [])
+    def send(*args):
+        if stage == "send":
+            raise RuntimeError("offline send failure")
+        return 1
+    monkeypatch.setattr("services.pending_asset_confirmation.ensure_asset_archive_prompt", prompt)
+    monkeypatch.setattr("services.created_file.extract_created_files", extract)
+    monkeypatch.setattr("tools.telegram.send_telegram_msg", send)
+    monkeypatch.setattr(bot, "send_telegram_msg", send)
+    def send_output(*args):
+        raise RuntimeError("offline attachment failure")
+    monkeypatch.setattr(bot, "_send_photo_to_telegram", send_output)
+    if stage in {"success", "output_send"}:
+        bot._process_photo_with_question("offline.png", "offline.png", "analysis", "question", "user123")
+    else:
+        with pytest.raises(RuntimeError):
+            bot._process_photo_with_question("offline.png", "offline.png", "analysis", "question", "user123")
+    rows = load_traces()
+    assert len(rows) == 1
+    assert rows[0]["error"] == (None if stage == "success" else "RuntimeError")
+    if stage == "success":
+        assert rows[0]["response"] == "final sent response"
+    logs = [json.loads(line.removeprefix("[TelegramTrace]: "))
+        for line in capsys.readouterr().out.splitlines() if line.startswith("[TelegramTrace]: ")]
+    assert sum(row["event"] == "turn_finished" for row in logs) == 1
+
+
 def test_console_output_can_be_disabled_explicitly(capsys):
     """Offline callers may explicitly keep only the stored trace sink."""
     from memory.execution_trace import ExecutionTrace

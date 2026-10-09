@@ -1436,7 +1436,29 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         send_telegram_msg(f"Master, photo stalled. Error: {e}")
 
 
-def _process_photo_with_question(filename: str, local_path: str, analysis: str, question: str, chat_id: str):
+def _process_photo_with_question(
+    filename: str, local_path: str, analysis: str, question: str, chat_id: str,
+) -> None:
+    """Keep photo execution evidence open through preparation and transport."""
+    from memory.execution_trace import ExecutionTrace
+
+    trace = ExecutionTrace(channel="telegram", user_message=question)
+    response = None
+    try:
+        response = _run_photo_question_turn(filename, local_path, analysis, question, chat_id, trace)
+    except Exception as exc:
+        trace.error = type(exc).__name__
+        raise
+    finally:
+        trace.finalize(response=response,
+            error=trace.error or ("NoResponse" if not response else None))
+        trace.save()
+
+
+def _run_photo_question_turn(
+    filename: str, local_path: str, analysis: str, question: str, chat_id: str,
+    trace: "ExecutionTrace",
+) -> str | None:
     """Passes a photo + question to the graph and sends ONE response (correct streaming pattern)."""
     import re
     from langchain_core.messages import HumanMessage, AIMessage
@@ -1467,14 +1489,10 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         content=user_log_msg,
         additional_kwargs=external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE]),
     )
-    _ptrace = None
-    trace_error = None
     try:
-        from memory.execution_trace import ExecutionTrace
-        _ptrace = ExecutionTrace(channel="telegram", user_message=user_log_msg)
         for event in graph.stream({"messages": context_msgs + [photo_message], "channel": "telegram"}, {"recursion_limit": 50}):
             events.append(event)
-            _ptrace.process_event(event)
+            trace.process_event(event)
             for node, data in event.items():
                 if data is None:
                     continue
@@ -1485,14 +1503,9 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
                         if candidate:
                             final_response = candidate
     except Exception as e:
-        trace_error = type(e).__name__
+        trace.error = type(e).__name__
         send_telegram_msg(f"❌ Photo processing error: {e}")
         return
-    finally:
-        if _ptrace is not None:
-            _ptrace.finalize(response=final_response or None,
-                error=trace_error or ("NoResponse" if not final_response else None))
-            _ptrace.save()
 
     if not final_response:
         send_telegram_msg(t("clients.telegram_bot.bot_msg_226c6b"))
@@ -1586,8 +1599,11 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
                 from tools.telegram import send_telegram_document
 
                 send_telegram_document(output.path)
-        except Exception:
-            pass
+        except Exception as exc:
+            trace.error = type(exc).__name__
+    return final_response or None
+
+
 def _run_nutrition(image_path: str, chat_id: str):
     """Runs the nutrition analyzer and sends the result."""
     try:
