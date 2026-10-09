@@ -49,6 +49,20 @@ def test_clarification_ledger_backed_up_but_lock_and_partial_excluded(tmp_path):
     assert ".routine-clarification-test.tmp" not in selected
 
 
+def test_named_places_backed_up_without_lock_or_partial_files(tmp_path):
+    """Preserve saved geometry in the existing cold-data inventory."""
+    from services.daily_data_backup import select_data_files
+    root = tmp_path / "installation"
+    root.mkdir()
+    fixture_tree(root)
+    for name in ("known_places.json", "known_places.json.lock", ".known-places-test.tmp"):
+        (root / name).write_text("synthetic")
+    selected = {path.relative_to(root).as_posix() for path in select_data_files(root)}
+    assert "known_places.json" in selected
+    assert "known_places.json.lock" not in selected
+    assert ".known-places-test.tmp" not in selected
+
+
 def test_package_contains_only_recovery_data_and_indexed_assets(tmp_path: Path) -> None:
     """Preserve cold data/sidecars; exclude code, unknown JSON and temp media."""
     root = tmp_path / "installation"

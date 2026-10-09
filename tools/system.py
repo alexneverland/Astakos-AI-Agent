@@ -73,6 +73,7 @@ from astakos_skills.file_generator import (
 )
 from astakos_skills.register_tool import register_tool
 from astakos_skills.get_world_time import get_world_time
+from astakos_skills.known_places import manage_known_places
 from astakos_skills.manage_context_flag import manage_context_flag
 from astakos_skills.text_stats import text_stats
 from astakos_skills.scan_receipt import scan_receipt
@@ -4231,7 +4232,7 @@ all_tools = [
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, search_flights, search_google_places,
-    create_file_tool, get_current_location,
+    create_file_tool, get_current_location, manage_known_places,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
     search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url,
     duckduckgo_search, research_web, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, update_goal_progress_tool, update_goal_milestones_tool, tool_stats, system_doctor, memory_review,

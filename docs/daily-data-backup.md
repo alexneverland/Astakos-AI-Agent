@@ -41,6 +41,12 @@ Scheduling, runtime changes and live execution require explicit owner scope.
 
 ## Inspect a configured installation
 
+The selected runtime-state inventory also includes `known_places.json`, the
+owner's custom named GPS locations. Configured home/work geometry remains part
+of its existing configuration; credentials and transient GPS queues keep their
+separate recovery requirements.
+
+
 These read-only PowerShell commands show the registered task and last result:
 
 ```powershell

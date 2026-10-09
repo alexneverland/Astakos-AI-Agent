@@ -108,6 +108,8 @@ def mock_dbs(monkeypatch, tmp_path):
         
     import memory.event_log as event_log
     monkeypatch.setattr(event_log, 'LOGS_DIR', str(tmp_path / 'events'), raising=False)
+    import memory.execution_trace as execution_trace
+    monkeypatch.setattr(execution_trace, '_TRACES_DIR', str(tmp_path / 'traces'))
 
 
 @pytest.fixture

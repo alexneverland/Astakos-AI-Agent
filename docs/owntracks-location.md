@@ -99,6 +99,8 @@ policy; do not extend that policy to conceal a stopped phone client.
 
 - `401`: missing/wrong dedicated Basic credential.
 - `403`: wrong/missing `X-Limit-D` phone identifier.
+- `400`: client disconnected before completing the upload; no point is queued.
+  A disconnected phone may not receive this response; publish a new actual fix.
 - `422`: malformed coordinates/time/accuracy or JSON.
 - `408` / `413`: request upload timeout (10 seconds) / body above 8 KiB.
 - `503`: not provisioned, corrupt verifier, or intake storage unavailable.
@@ -116,6 +118,11 @@ Stop OwnTracks sharing before rotating/reprovisioning credentials. Preserve the
 queue watermark and existing location state; do not reset them as an upgrade step.
 
 ## Protocol references
+
+Named places and diagnostic evidence are documented in
+[known places and execution traces](known-places-and-traces.md). Saving a place
+uses the fresh canonical GPS point; a profile note alone does not register it.
+
 
 [OwnTracks HTTP authentication and acknowledgements](https://owntracks.org/booklet/tech/http/),
 [fix timestamps, ping semantics and configuration](https://owntracks.org/booklet/tech/json/),

@@ -211,6 +211,10 @@ Planner v2 supports automatic multi-step detection, confirmation before executio
 
 Astakos includes SAFE, WARNING, NOTIFY, and CRITICAL action levels, approval expiry, terminal-command protection, provenance handling for external content, execution traces, tool statistics, `/doctor`, and runtime dashboards.
 
+The Home Agent can save named locations from fresh GPS alongside configured
+home/work. Matrix and Web share diagnostic execution traces; see
+[known places and execution evidence](docs/known-places-and-traces.md).
+
 ---
 
 ## Privacy Model

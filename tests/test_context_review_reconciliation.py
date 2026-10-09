@@ -22,7 +22,7 @@ def isolated_context(tmp_path, monkeypatch):
     monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "routines.db"))
     routine_db.setup_db()
     monkeypatch.setattr(event_log, "log_event", lambda *args, **kwargs: None)
-    monkeypatch.setattr(extractor, "load_recent_trusted_user_messages", lambda **kwargs: [])
+    monkeypatch.setattr(extractor, "load_recent_state_messages", lambda **kwargs: [])
     monkeypatch.setattr(extractor, "safe_gemini_call", forbidden)
     monkeypatch.setattr(extractor, "infer_routine_reconciliation_directives", lambda *args, **kwargs: [])
     return {"question": "Είναι η Σοφία μαζί σου;", "flags": ["partner_with_user"]}

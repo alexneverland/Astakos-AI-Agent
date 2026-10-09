@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from starlette.requests import ClientDisconnect
 from services.owntracks import OwnTracksStore, default_auth_file, parse_location
 
 MAX_BODY_BYTES = 8192
@@ -53,6 +54,8 @@ def build_owntracks_app(*, auth_file: Path | None = None,
                     body.extend(chunk)
         except TimeoutError:
             raise HTTPException(408, "Request timed out") from None
+        except ClientDisconnect:
+            raise HTTPException(400, "Request disconnected") from None
         if not body:
             return []
         try:

@@ -29,7 +29,7 @@ STATE_FILES = frozenset({
     "behavioral_initiative_state.json", "behavioral_conversation_preferences.json",
     "astakos_routine_context_questions.json",
     "project_access.json", "room_map.json", "messenger_draft.json", "linkedin_draft.json",
-    "scheduler_state.json", "persona.md", "last_location.json",
+    "scheduler_state.json", "persona.md", "last_location.json", "known_places.json",
     "astakos_skills/food_history.json", "astakos_skills/recipe_library.json",
     ".goal_followup_sent", ".hn_briefing_sent", ".calendar_briefing_sent", ".ai_briefing_sent",
 })

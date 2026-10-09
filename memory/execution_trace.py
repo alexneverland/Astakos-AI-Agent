@@ -19,6 +19,8 @@ import json
 import time
 import uuid
 import threading
+import re
+from filelock import FileLock
 from datetime import datetime
 
 _TRACES_DIR = os.path.join(os.path.dirname(__file__), "..", "logs", "traces")
@@ -30,7 +32,101 @@ _MAX_MSG = 200   # max chars for user/response preview
 
 def _truncate(val, maxlen: int = _MAX_STR) -> str:
     s = str(val) if not isinstance(val, str) else val
+    s = _redact_preview(s)
     return s[:maxlen] + ("…" if len(s) > maxlen else "")
+
+
+def _credential_field(key: str) -> bool:
+    """Recognize credential field names consistently in JSON and text."""
+    normalized = key.casefold().replace("_", "").replace("-", "").replace(" ", "")
+    return any(part in normalized for part in (
+        "token", "password", "secret", "apikey", "authorization", "credentials",
+        "privatekey", "passphrase"))
+
+
+def _redact_private_key_blocks(value: str) -> str:
+    """Remove complete or interrupted PEM private keys with forward-only scans."""
+    chunks: list[str] = []
+    cursor = 0
+    headers = re.finditer(r"-----BEGIN ([A-Z0-9 ]*PRIVATE KEY)-----", value)
+    for header in headers:
+        if header.start() < cursor:
+            continue
+        closing = "-----END " + header[1] + "-----"
+        end = value.find(closing, header.end())
+        end = len(value) if end < 0 else end + len(closing)
+        chunks.extend((value[cursor:header.start()], "[REDACTED]"))
+        cursor = end
+    chunks.append(value[cursor:])
+    return "".join(chunks)
+
+
+def _redact_text_fields(value: str) -> str:
+    """Scan field tokens once; consume quoted values without regex backtracking."""
+    chunks: list[str] = []
+    cursor = 0
+    for field in re.finditer(r"[\w-]+", value):
+        if field.start() < cursor:
+            continue
+        key, end = field[0], field.end()
+        # Preserve support for prose labels such as "API key" and "private key".
+        if key.casefold() in {"api", "private"}:
+            second = end
+            while second < len(value) and value[second] in " \t":
+                second += 1
+            if value[second:second + 3].casefold() == "key":
+                key += "key"
+                end = second + 3
+        if not _credential_field(key):
+            continue
+        if end < len(value) and value[end] in "\"'":
+            end += 1
+        while end < len(value) and value[end].isspace():
+            end += 1
+        if end == len(value) or value[end] not in ":=":
+            continue
+        end += 1
+        while end < len(value) and value[end].isspace():
+            end += 1
+        start = end
+        if end < len(value) and value[end] in "\"'":
+            quote = value[end]
+            end += 1
+            while end < len(value):
+                char = value[end]
+                end += 1
+                if char == "\\":
+                    end = min(end + 1, len(value))
+                elif char == quote:
+                    break
+        else:
+            while end < len(value) and not value[end].isspace() and value[end] not in ",;}<":
+                end += 1
+        chunks.extend((value[cursor:start], '"[REDACTED]"'))
+        cursor = end
+    chunks.append(value[cursor:])
+    return "".join(chunks)
+
+
+def _redact_preview(value: str) -> str:
+    """Redact credential-shaped fields before truncating diagnostic previews."""
+    def redact(data: object) -> object:
+        """Walk structured previews without copying credential values."""
+        if isinstance(data, dict):
+            return {key: ("[REDACTED]" if _credential_field(str(key))
+                else redact(item)) for key, item in data.items()}
+        if isinstance(data, list):
+            return [redact(item) for item in data]
+        return data
+    try:
+        decoded = json.loads(value)
+        if isinstance(decoded, (dict, list)):
+            value = json.dumps(redact(decoded), ensure_ascii=False)
+    except (ValueError, TypeError):
+        pass
+    value = _redact_private_key_blocks(value)
+    value = re.sub(r"(?i)\bBearer\s+[^\s\"'<>]+", "Bearer [REDACTED]", value)
+    return _redact_text_fields(value)
 
 
 class ExecutionTrace:
@@ -52,6 +148,7 @@ class ExecutionTrace:
         self.start_ts       = time.monotonic()
         self.timestamp      = datetime.now().isoformat(timespec="seconds")
         self.channel        = channel
+        self.correlation_id: str | None = None
         self.user_message   = _truncate(user_message, _MAX_MSG)
         self.agent          = None          # last agent node
         self.tool_calls     = []            # list of dicts
@@ -167,6 +264,11 @@ class ExecutionTrace:
                 self.loop_guard = True
         if error:
             self.error = _truncate(str(error), 200)
+        for pending in self._pending.values():
+            self.tool_calls.append({"tool": pending["tool"], "args": pending["args"],
+                "result": "No tool result recorded", "status": "unresolved",
+                "duration_ms": int((time.monotonic()-pending["t0"]) * 1000), "error": False})
+        self._pending.clear()
         self.duration_ms = int((time.monotonic() - self.start_ts) * 1000)
 
     def save(self):
@@ -181,6 +283,7 @@ class ExecutionTrace:
                 "trace_id":    self.trace_id,
                 "timestamp":   self.timestamp,
                 "channel":     self.channel,
+                "correlation_id": self.correlation_id,
                 "agent":       self.agent,
                 "user_message": self.user_message,
                 "tool_calls":  self.tool_calls,
@@ -191,7 +294,7 @@ class ExecutionTrace:
                 "phase_timings": self.phase_timings,
             }
 
-            with _write_lock:
+            with _write_lock, FileLock(log_file + ".lock", timeout=5):
                 entries = []
                 if os.path.exists(log_file):
                     try:

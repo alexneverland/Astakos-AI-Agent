@@ -16,6 +16,7 @@ from memory.conversation_history import (
     append_message,
     load_recent_context,
 )
+from memory.execution_trace import ExecutionTrace
 
 UserPersistedHook = Callable[[dict[str, Any]], None]
 ExchangeCompletedHook = Callable[[str, str, str, str], None]
@@ -187,6 +188,32 @@ class MatrixTurnService:
         allow_commands: bool = True,
         ensure_asset_prompt_type: str | None = None,
     ) -> str | MatrixReply:
+        """Record one isolated execution trace, including intercepts and failures."""
+        trace = ExecutionTrace(channel="matrix", user_message=user_text)
+        trace.correlation_id = event_id
+        trace.mark_phase("graph_used", 0)
+        try:
+            reply = self._run_traced_sync(user_text, event_id, user_metadata_extra,
+                external_derived, allow_commands, ensure_asset_prompt_type, trace=trace)
+            trace.finalize(response=reply.text if isinstance(reply, MatrixReply) else reply)
+            return reply
+        except Exception as exc:
+            trace.finalize(error=type(exc).__name__)
+            raise
+        finally:
+            trace.save()
+
+    def _run_traced_sync(
+        self,
+        user_text: str,
+        event_id: str,
+        user_metadata_extra: dict[str, Any] | None = None,
+        external_derived: bool = False,
+        allow_commands: bool = True,
+        ensure_asset_prompt_type: str | None = None,
+        *, trace: ExecutionTrace,
+    ) -> str | MatrixReply:
+        """Execute the existing turn lifecycle with a caller-owned recorder."""
         clean_user_text = str(user_text or "").strip()
         if not clean_user_text:
             raise ValueError("Matrix turn requires non-empty user text")
@@ -251,6 +278,7 @@ class MatrixTurnService:
             db_path=self._conversation_db_path,
         )
         self._run_hook(self._on_user_persisted, saved_user)
+        trace.mark_phase("owner_rowid", saved_user["rowid"])
 
         if not external_derived and (
             self._routine_confirmation_handler is not None
@@ -400,10 +428,12 @@ class MatrixTurnService:
         if routine_draft_offer is not None:
             graph_state["routine_draft_offer_authorized"] = True
         tool_results: list[str] = []
+        trace.mark_phase("graph_used", 1)
         for event in self._graph.stream(
             graph_state,
             {"recursion_limit": 100},
         ):
+            trace.process_event(event)
             for node, data in event.items():
                 if data is None:
                     continue

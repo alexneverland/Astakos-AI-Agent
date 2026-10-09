@@ -1,5 +1,7 @@
 """Offline OwnTracks intake, abuse cases and persisted location integration."""
 import hashlib
+import base64
+import asyncio
 import json
 import time
 
@@ -30,6 +32,34 @@ def point(**changes):
     """Return a realistic actual fix, unrelated metadata must not be retained."""
     return {"_type": "location", "lat": 40.0, "lon": 22.0,
             "tst": int(time.time()) - 1, "acc": 20, "SSID": "private", **changes}
+
+
+@pytest.mark.parametrize("partial", [b"", b'{"_type":"location",'])
+def test_disconnected_upload_is_rejected_without_intake_and_next_fix_recovers(intake, partial):
+    """Exercise real ASGI disconnect events without accepting a partial report."""
+    client, store, _, auth = intake
+    token = base64.b64encode(":".join(auth).encode())
+    events = iter([{"type": "http.request", "body": partial, "more_body": True},
+                   {"type": "http.disconnect"}])
+    responses = []
+
+    async def receive():
+        return next(events)
+
+    async def send(message):
+        responses.append(message)
+
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+             "method": "POST", "scheme": "http", "path": "/owntracks/",
+             "raw_path": b"/owntracks/", "query_string": b"", "root_path": "",
+             "headers": [(b"authorization", b"Basic " + token), (b"x-limit-d", b"phone")],
+             "client": ("127.0.0.1", 1234), "server": ("testserver", 80)}
+    asyncio.run(client.app(scope, receive, send))
+    assert responses[0]["status"] == 400
+    assert not store.pending()
+    assert not store.path.exists()
+    assert client.post("/owntracks/", json=point(), auth=auth).status_code == 200
+    assert len(store.pending()) == 1
 
 
 def test_auth_is_mandatory_even_for_local_proxy(intake):
