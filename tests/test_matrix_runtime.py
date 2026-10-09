@@ -79,11 +79,15 @@ def test_web_origin_matrix_approval_result_is_added_to_web_history(
 
 
 def test_matrix_origin_approval_result_is_not_repeated_in_web_history(
-    monkeypatch,
+    monkeypatch, tmp_path,
 ) -> None:
     """A Matrix-origin confirmation stays in its room without a Web duplicate."""
     from clients.matrix_bot import _record_web_approval_result
     from services.matrix_approval import ApprovalReactionResult
+    import memory.conversation_history as history
+    append_message = history.append_message
+    db_path = str(tmp_path / "conversation.db")
+    monkeypatch.setattr(history, "append_message", lambda **kw: append_message(**kw, db_path=db_path))
 
     recorded: list[str] = []
     monkeypatch.setattr(
@@ -99,6 +103,7 @@ def test_matrix_origin_approval_result_is_not_repeated_in_web_history(
     _record_web_approval_result(result, "✅ Στάλθηκε, μάστορα.")
 
     assert recorded == []
+    assert len(history.load_messages(db_path=db_path)) == 1
 
 
 class FakeDevice:
