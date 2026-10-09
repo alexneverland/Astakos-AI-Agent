@@ -1,5 +1,13 @@
 [
   {
+    "name": "manage_known_places",
+    "description": "Save a named fresh owner GPS point, list known home/work/custom places, or locate the owner within their radii.",
+    "agent": "Home_Agent",
+    "risk_level": "WARNING",
+    "priority": 6,
+    "triggers": []
+  },
+  {
     "name": "get_world_time",
     "description": "Returns the current local time for a given city.",
     "agent": "Chat_Agent",

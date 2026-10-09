@@ -43,6 +43,8 @@ behavioral_initiative_state.diagnostics.json.lock
 .behavioral-prefs-*.tmp
 last_location.json
 last_location.json.lock
+known_places.json.lock
+.known-places-*.tmp
 owntracks-pending.json.lock
 .owntracks-*
 linkedin_draft.json

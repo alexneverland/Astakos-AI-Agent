@@ -86,7 +86,7 @@ def test_every_external_source_remains_available_for_read_only_follow_up() -> No
 
     assert (
         UNTRUSTED_EXTERNAL_TOOL_NAMES
-        - {"drive_manager", "manage_list", "run_code", "run_terminal_command"}
+        - {"drive_manager", "manage_list", "manage_known_places", "run_code", "run_terminal_command"}
         <= READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES
     )
     assert not is_read_only_external_followup_tool("run_code", {"filename": "script.py"})

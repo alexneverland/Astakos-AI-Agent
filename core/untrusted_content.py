@@ -27,6 +27,7 @@ UNTRUSTED_EXTERNAL_TOOL_NAMES: frozenset[str] = frozenset({
     "list_project_files",
     "list_recent_files",
     "manage_list",
+    "manage_known_places",
     "morning_briefing",
     "memory_review",
     "read_local_file",
@@ -114,7 +115,7 @@ EXTERNAL_PROVENANCE_SOURCE_NAMES: frozenset[str] = (
 READ_ONLY_EXTERNAL_FOLLOWUP_TOOL_NAMES: frozenset[str] = (
     (
         UNTRUSTED_EXTERNAL_TOOL_NAMES
-        - {"drive_manager", "manage_list", "run_code", "run_terminal_command"}
+        - {"drive_manager", "manage_list", "manage_known_places", "run_code", "run_terminal_command"}
     )
     | frozenset({
         "browse_url",
@@ -275,6 +276,8 @@ def is_read_only_external_followup_tool(
 ) -> bool:
     """Return whether a call can read data without mutating state after external content."""
     normalized_name = str(tool_name or "")
+    if normalized_name == "manage_known_places":
+        return (tool_args or {}).get("action") in {"list", "locate"}
     if normalized_name == "drive_manager":
         action = str((tool_args or {}).get("action", "list_files")).strip().lower()
         return action in DRIVE_READ_ACTIONS
