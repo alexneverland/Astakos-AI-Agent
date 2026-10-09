@@ -1,5 +1,23 @@
 # Astakos: Current Tasks
 
+## Documentation and release assessment (2026-10-09)
+
+- [x] Refresh README, setup, agent/contributor/discovery docs and Unreleased notes
+  against merged changes through PR #238; preserve historical release records.
+- [x] Document routine status/feedback meanings and distinct data/Matrix backup scopes.
+- [x] Assess v2.8.0; record the explicit dated-store first-install/upgrade gate.
+- [x] Verify local links/anchors, code fences, source commands and diff whitespace;
+  initial documentation-only verification; focused readiness tests followed.
+- [x] Prepare scoped PR publication after owner authorization; branch
+  `codex/fresh-install-readiness`. Merge/release/tag/VERSION changes remain separate.
+- [x] Owner authorized fresh-install readiness: normal transactional dated-store
+  setup, native Office provisioning, release preservation and guided Wizard settings.
+  320 storage/Office and 80 Wizard/provider cases passed; no baseline reset.
+
+PR #238 is merged at 4d40b10 and its task branch is deleted. Final combined focused
+verification: 491 passed, two existing dependency warnings; compilation/diff checks
+passed. Historical intermediate totals below remain dated implementation evidence.
+
 ## Dated routine identity evidence (2026-10-09)
 
 - [x] Reproduce missing catalogue evidence before implementation (five failures).
@@ -12,7 +30,7 @@
 - [ ] Owner-controlled live identity interpretation observation; existing
   supervisors automatically reload the changed Python sources.
 - [ ] Separately authorized correction of today's mistaken morning completion.
-- [ ] Git/PR lifecycle authorized on 2026-10-09, including reading review comments.
+- [x] Git/PR lifecycle completed: PR #238 reviewed, repaired, merged; task branch deleted.
 
 PR #238 review repair: four RED failures reproduced stale/unsaved text borrowing
 the latest source, flat output overwriting newer context and fixed-signature
@@ -47,10 +65,10 @@ Python compilation and staged diff checks passed. No live data was rewritten.
 - [x] Owner's 12:12 work-arrival observation persisted work=true, out-of-home=true,
   partner-with-user=false, family-at-home=false and child-with-user=false.
 - [ ] Live interpretation observation of the original separate departure.
-- [ ] Git/PR lifecycle authorized together with the routine identity repair.
+- [x] Git/PR lifecycle completed together with the routine identity repair in PR #238.
   No manual live flag rewrite was performed.
 
-## Current status (2026-10-08)
+## Historical status (2026-10-08)
 
 See `handoff.md` before interpreting older checkpoints. PRs #227 through #236
 are merged; implementation/review lifecycle wording below is historical.

@@ -309,8 +309,18 @@ def setup_db() -> None:
         fp = make_fingerprint(day or "", time or "", event or "")
         cursor.execute("UPDATE routines SET fingerprint=? WHERE id=?", (fp, r_id))
 
-    conn.commit()
-    conn.close()
+    # The same startup transaction provisions dated feedback on every platform.
+    # This adds schema only; the separate owner reset must never run at startup.
+    from memory.routine_feedback import RoutineFeedbackStore
+
+    try:
+        RoutineFeedbackStore.initialize_schema(conn)
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 # ────────────────────────────────────────────────────────────────
 # STATE MACHINE LAYER

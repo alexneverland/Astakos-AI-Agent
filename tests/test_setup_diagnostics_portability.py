@@ -71,6 +71,7 @@ class _NoOpThread:
 
 def _configure_isolated_wizard(monkeypatch: pytest.MonkeyPatch, base: Path) -> None:
     """Redirects all setup wizard file operations to a clean temporary path."""
+    monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "telegram")
     import api.setup_wizard as wizard
 
     prompts_dir = base / "prompts"

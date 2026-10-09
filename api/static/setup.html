@@ -55,8 +55,8 @@
                                 <select id="llm_provider" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="onProviderChanged()">
                                     <option value="vertex" selected>Google Cloud Vertex AI</option>
                                     <option value="gemini">Google Gemini API</option>
-                                    <option value="openai">OpenAI (GPT-4o)</option>
-                                    <option value="anthropic">Anthropic (Claude 3.5)</option>
+                                    <option value="openai">OpenAI</option>
+                                    <option value="anthropic">Anthropic</option>
                                 </select>
                             </div>
                             <div>
@@ -93,6 +93,10 @@
                         </div>
 
                         <!-- Provider Advisories -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div><label for="project_id" class="block text-sm text-gray-400 mb-1">Vertex project ID (optional override)</label><input id="project_id" type="text" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"><p class="text-xs text-gray-400 mt-1">Otherwise resolved from Vertex credentials.</p></div>
+                            <div><label for="vertex_location" class="block text-sm text-gray-400 mb-1">Vertex region</label><input id="vertex_location" type="text" placeholder="global" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                        </div>
                         <div id="anthropic_emb_warning" class="hidden mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-300 text-xs flex items-start">
                             <span class="mr-2">⚠️</span>
                             <div><strong>Anthropic Notice:</strong> Anthropic does not provide a native embeddings API. Semantic memory requires an independent embeddings provider (Vertex AI, Gemini API, OpenAI, or Local E5).</div>
@@ -313,9 +317,53 @@
 
                     <hr class="border-gray-700">
 
-                    <!-- 5. Core Files -->
+                    <!-- 5. Optional location and installation requirements -->
+                    <section id="installation_settings">
+                        <h2 class="text-xl font-semibold text-white mb-4">5. Location, Files &amp; Backups</h2>
+                        <p class="text-sm text-gray-400 mb-4">Optional. Configure your own locations for GPS context. Leave both coordinates blank when a place is unknown; GPS never establishes who is with you.</p>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+                            <div><label for="home_latitude" class="block text-sm text-gray-400 mb-1">Home latitude</label><input id="home_latitude" type="number" min="-90" max="90" step="any" oninput="validateCoordinatePair('home')" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="home_longitude" class="block text-sm text-gray-400 mb-1">Home longitude</label><input id="home_longitude" type="number" min="-180" max="180" step="any" oninput="validateCoordinatePair('home')" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="home_radius_m" class="block text-sm text-gray-400 mb-1">Home radius (metres)</label><input id="home_radius_m" type="number" min="1" step="any" value="150" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="work_latitude" class="block text-sm text-gray-400 mb-1">Work latitude</label><input id="work_latitude" type="number" min="-90" max="90" step="any" oninput="validateCoordinatePair('work')" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="work_longitude" class="block text-sm text-gray-400 mb-1">Work longitude</label><input id="work_longitude" type="number" min="-180" max="180" step="any" oninput="validateCoordinatePair('work')" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="work_radius_m" class="block text-sm text-gray-400 mb-1">Work radius (metres)</label><input id="work_radius_m" type="number" min="1" step="any" value="300" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                        </div>
+                        <div class="mb-5"><label for="developer_name" class="block text-sm text-gray-400 mb-1">Local project alias (optional)</label><input id="developer_name" type="text" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                        <div class="bg-gray-800/60 border border-gray-700 rounded-xl p-5 mb-5">
+                            <h3 class="font-semibold text-white mb-2">Office files</h3>
+                            <p id="officecli_setup_status" class="text-sm text-gray-400" role="status">Checking the native Office tool…</p>
+                            <p class="text-xs text-gray-400 mt-2">Docker builds include the verified tool. For manual Python installs, run <code>python scripts/install_officecli.py</code> from the project folder. It downloads the pinned native executable and verifies SHA-256. Linux installs also need ICU. PDF, TXT and CSV use native generators.</p>
+                        </div>
+                        <div class="bg-gray-800/60 border border-gray-700 rounded-xl p-5 mb-5">
+                            <h3 class="font-semibold text-white mb-2">Private Drive backup destination (optional)</h3>
+                            <label for="backup_drive_folder_id" class="block text-sm text-gray-400 mb-1">Drive folder ID</label>
+                            <input id="backup_drive_folder_id" type="text" pattern="[A-Za-z0-9_-]{1,200}" placeholder="Folder ID only; leave blank if not configured" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2">
+                            <p class="text-xs text-gray-400 mt-2">Connect Google Workspace above with Drive access, create an owner-only private folder, and copy its ID from the folder URL. This saves the destination; it does not schedule a backup. The backup job checks folder ownership/privacy before upload.</p>
+                            <p class="text-xs text-gray-400 mt-2">Windows operator setup: configure the data-backup task separately for 00:00. The registration helper updates an existing approved task. Matrix encrypted backups are a separate 03:00 operator job requiring the server deployment, public encryption recipient, protected key recovery and its own destination. Docker/macOS/Linux users need a separately configured backup schedule. Open Read Full Instructions for the backup setup and recovery references.</p>
+                        </div>
+                        <p class="text-xs text-gray-400">Dated routine storage is prepared automatically at normal Astakos startup, even without declared routines. Startup does not reset existing feedback or invent old delivery history.</p>
+                    </section>
+                    <hr class="border-gray-700">
+                    <section id="optional_integrations">
+                        <h2 class="text-xl font-semibold text-white mb-4">6. Optional Integrations</h2>
+                        <p class="text-sm text-gray-400 mb-4">Leave unused services blank. Existing masked tokens are retained when saving. GitHub access needs a token with permissions for your intended repositories; vacuum control needs the device's local IP and token. LinkedIn needs a valid access token. These fields configure access; external actions retain their approval requirements.</p>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><label for="github_token" class="block text-sm text-gray-400 mb-1">GitHub token</label><input id="github_token" type="password" autocomplete="new-password" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="linkedin_token" class="block text-sm text-gray-400 mb-1">LinkedIn access token</label><input id="linkedin_token" type="password" autocomplete="new-password" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="vacuum_ip" class="block text-sm text-gray-400 mb-1">Vacuum local IP</label><input id="vacuum_ip" type="text" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="vacuum_token" class="block text-sm text-gray-400 mb-1">Vacuum token</label><input id="vacuum_token" type="password" autocomplete="new-password" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="google_places_api_key" class="block text-sm text-gray-400 mb-1">Google Places API key</label><input id="google_places_api_key" type="password" autocomplete="new-password" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="spotify_client_id" class="block text-sm text-gray-400 mb-1">Spotify client ID</label><input id="spotify_client_id" type="password" autocomplete="new-password" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="spotify_client_secret" class="block text-sm text-gray-400 mb-1">Spotify client secret</label><input id="spotify_client_secret" type="password" autocomplete="new-password" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                            <div><label for="spotify_redirect_uri" class="block text-sm text-gray-400 mb-1">Spotify redirect URI</label><input id="spotify_redirect_uri" type="url" placeholder="http://127.0.0.1:8888/callback" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2"></div>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-3">Places requires an API key with the Places service enabled. For Spotify, create an app, register the exact redirect URI in its developer dashboard, and complete Spotify consent on first use. Docker needs a reachable callback and operator port mapping; saving credentials alone does not complete OAuth. See Read Full Instructions.</p>
+                    </section>
+                    <hr class="border-gray-700">
+                    <!-- 7. Core Files -->
                     <div>
-                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-orange-500/20 text-orange-400 p-2 rounded-lg mr-3">⚙️</span> 5. Core Config Files</h2>
+                        <h2 class="text-xl font-semibold text-white mb-4 flex items-center"><span class="bg-orange-500/20 text-orange-400 p-2 rounded-lg mr-3">⚙️</span> 7. Core Config Files</h2>
 
                         <div class="space-y-6">
                             <div>
@@ -452,6 +500,18 @@
             document.querySelectorAll('.matrix-required').forEach(input => {
                 input.required = useMatrix;
             });
+        }
+
+        function validateCoordinatePair(prefix) {
+            const latitude = document.getElementById(`${prefix}_latitude`);
+            const longitude = document.getElementById(`${prefix}_longitude`);
+            latitude.required = longitude.required = latitude.value !== '' || longitude.value !== '';
+        }
+
+        function readCoordinates(prefix) {
+            const latitude = document.getElementById(`${prefix}_latitude`).value;
+            const longitude = document.getElementById(`${prefix}_longitude`).value;
+            return latitude === '' && longitude === '' ? [0, 0] : [Number(latitude), Number(longitude)];
         }
 
         function switchTab(tab) {
@@ -748,6 +808,10 @@
                     if (envMap['MATRIX_ALLOWED_DEVICE_IDS']) document.getElementById('matrix_allowed_device_ids').value = envMap['MATRIX_ALLOWED_DEVICE_IDS'];
                     if (envMap['MATRIX_ROOM_ID']) document.getElementById('matrix_room_id').value = envMap['MATRIX_ROOM_ID'];
                     if (envMap['MATRIX_STORE_PATH']) document.getElementById('matrix_store_path').value = envMap['MATRIX_STORE_PATH'];
+                    const optionalEnvFields = {project_id: 'PROJECT_ID', vertex_location: 'LOCATION', github_token: 'GITHUB_TOKEN', vacuum_ip: 'VACUUM_IP', vacuum_token: 'VACUUM_TOKEN', linkedin_token: 'LINKEDIN_TOKEN', spotify_client_id: 'SPOTIPY_CLIENT_ID', spotify_client_secret: 'SPOTIPY_CLIENT_SECRET', spotify_redirect_uri: 'SPOTIPY_REDIRECT_URI', google_places_api_key: 'GOOGLE_PLACES_API_KEY'};
+                    Object.entries(optionalEnvFields).forEach(([field, key]) => {
+                        document.getElementById(field).value = envMap[key] || '';
+                    });
                 }
 
                 onProviderChanged();
@@ -756,6 +820,21 @@
                 // Populate Settings basics
                 loadedSettings = data.settings || {};
                 const s = loadedSettings;
+                ['home', 'work'].forEach(prefix => {
+                    const coordinates = s[`${prefix}_coords`];
+                    if (Array.isArray(coordinates) && coordinates.length === 2 && (coordinates[0] !== 0 || coordinates[1] !== 0)) {
+                        document.getElementById(`${prefix}_latitude`).value = coordinates[0];
+                        document.getElementById(`${prefix}_longitude`).value = coordinates[1];
+                    }
+                    document.getElementById(`${prefix}_radius_m`).value = s[`${prefix}_radius_m`] || (prefix === 'home' ? 150 : 300);
+                    validateCoordinatePair(prefix);
+                });
+                document.getElementById('backup_drive_folder_id').value = s.backup_drive_folder_id || '';
+                document.getElementById('developer_name').value = s.developer_name || '';
+                const office = data.installation?.officecli;
+                document.getElementById('officecli_setup_status').textContent = office?.present
+                    ? `Verified native Office CLI ${office.version}.`
+                    : 'Office tool not found or not verified. Complete the manual install step below for Office files.';
                 if(s.user_name) document.getElementById('user_name').value = s.user_name;
                 if(s.bot_name) document.getElementById('bot_name').value = s.bot_name;
                 document.getElementById('voice_wake_name').value = s.voice_wake_name || s.bot_name || 'Astakos';
@@ -820,6 +899,12 @@
                 default_city: document.getElementById('default_city').value,
                 response_language: document.getElementById('response_language').value,
                 partner_name: document.getElementById('partner_name').value,
+                developer_name: document.getElementById('developer_name').value,
+                backup_drive_folder_id: document.getElementById('backup_drive_folder_id').value.trim(),
+                home_coords: readCoordinates('home'),
+                work_coords: readCoordinates('work'),
+                home_radius_m: Number(document.getElementById('home_radius_m').value || 150),
+                work_radius_m: Number(document.getElementById('work_radius_m').value || 300),
             });
             if (kids.length > 0) {
                 settingsObj.kid1_name = kids[0];
@@ -853,6 +938,16 @@
                     matrix_allowed_device_ids: document.getElementById('matrix_allowed_device_ids').value,
                     matrix_room_id: document.getElementById('matrix_room_id').value,
                     matrix_store_path: document.getElementById('matrix_store_path').value,
+                    project_id: document.getElementById('project_id').value,
+                    vertex_location: document.getElementById('vertex_location').value,
+                    github_token: document.getElementById('github_token').value,
+                    vacuum_ip: document.getElementById('vacuum_ip').value,
+                    vacuum_token: document.getElementById('vacuum_token').value,
+                    linkedin_token: document.getElementById('linkedin_token').value,
+                    spotify_client_id: document.getElementById('spotify_client_id').value,
+                    spotify_client_secret: document.getElementById('spotify_client_secret').value,
+                    spotify_redirect_uri: document.getElementById('spotify_redirect_uri').value,
+                    google_places_api_key: document.getElementById('google_places_api_key').value,
                     persona: document.getElementById('persona_content').value,
                     intents: document.getElementById('intents_content').value,
                     env: document.getElementById('env_content').value,

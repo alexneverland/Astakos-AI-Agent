@@ -5,6 +5,7 @@ from pathlib import Path
 from langchain_core.tools import tool
 from config import BASE_DIR
 from core.i18n import t
+from services.officecli_installation import officecli_binary_path, verified_officecli_path
 
 
 _OFFICE_OUTPUT_SUFFIXES = {".docx", ".xlsx", ".pptx", ".pdf", ".html", ".png", ".jpg", ".jpeg"}
@@ -55,9 +56,9 @@ def run_officecli(command: str) -> str:
     options only when OfficeCLI is unavailable, returns an error, or cannot cover
     the required structure. Preserve the requested format and all safety/approval
     gates; never use fallback to bypass a security rejection.
-    ALWAYS create or save files inside the folder:
-    C:/astakos_v2/outputs/
-    So that drive_manager and the Web UIs can find them!
+    ALWAYS create or save files inside this installation's outputs folder so
+    drive_manager and the Web UIs can find them. Commands run in that folder;
+    use relative filenames as in the examples, without a host-specific path.
     
     Examples:
     - officecli create report.docx
@@ -69,11 +70,12 @@ def run_officecli(command: str) -> str:
     
     If the command starts with 'officecli ', it will be replaced with the full path of the executable.
     """
-    officecli_path = os.path.join(BASE_DIR, "vendor", "officecli", "officecli.exe")
+    verified_path = verified_officecli_path(BASE_DIR)
+    officecli_path = str(verified_path or officecli_binary_path(BASE_DIR, allow_bundled=False))
     outputs_dir = os.path.join(BASE_DIR, "outputs")
     os.makedirs(outputs_dir, exist_ok=True)
     
-    if not os.path.exists(officecli_path):
+    if verified_path is None or not os.path.exists(officecli_path):
         return t("skills.officecli_skill.msg_not_found_2", path=officecli_path)
     
     # Remove 'officecli ' from the beginning if it exists, in order to insert our own path

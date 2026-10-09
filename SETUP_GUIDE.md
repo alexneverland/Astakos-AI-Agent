@@ -4,6 +4,10 @@ Run your own personal AI assistant on your computer without manually building a 
 
 The recommended installation uses **Docker Desktop**. Docker installs the Python dependencies, browser components, and runtime services inside an isolated container while your memories, settings, databases, and files remain on your computer: in the project folder for a source build or in a named Docker volume for the release image.
 
+This guide follows source `main` through PR #238 (2026-10-09). The latest
+published release is v2.7.0; newer routines, context and backup behavior may require
+source `main` and explicit setup. See [release readiness](docs/release-readiness.md).
+
 > **What you need:** Docker Desktop, one supported AI provider, and about 10 minutes for the first setup.
 
 ---
@@ -86,6 +90,44 @@ Choose a **Chat Provider** and enter its credential. Then choose an **Embeddings
 - Leave Voice Provider on **Auto** when chat uses Vertex AI, Gemini API, or OpenAI. With Anthropic chat, explicitly choose one of those three voice providers and provide its credential.
 - Choose **Telegram** or **Element / Matrix** as Astakos's active external app. The Web UI remains available either way. The Setup Wizard retains the inactive app's settings so you can switch later without re-entering them.
 
+The Basic Settings steps cover:
+
+1. **AI Brain & APIs:** chat, embeddings and voice providers/credentials; Vertex project override and region.
+2. **External messaging:** Telegram or Matrix credentials and trusted owner/device/room settings.
+3. **Personalization:** owner, companion, family names, language, city and voice wake name.
+4. **Google Workspace:** explicit OAuth connection and Drive/Gmail/Calendar/Tasks/Fit readiness.
+5. **Location, Files & Backups:** optional home/work coordinate pairs and radii, local project alias, native Office tool status/install command, and the private Drive data-backup folder ID.
+6. **Optional Integrations:** GitHub token, vacuum local IP/token, LinkedIn token, Google Places key and Spotify client credentials/redirect URI. Unused integrations can remain blank; masked existing tokens are preserved.
+7. **Core Config Files:** persona, local custom intents and advanced environment settings.
+
+The **Routines** tab validates and imports declared routines only into an empty
+routine catalogue. **Advanced Prompts** edits the existing prompt files. Location
+pairs must both be filled or both blank; latitude/longitude ranges and positive
+radii are validated before writes. Leave locations blank when unknown. The backup
+field accepts a folder ID, not a URL; saving it does not create a scheduled task.
+Office status verifies the native executable's pinned size and SHA-256 for the
+current platform. It does not run a live functionality test. Clearing a supplied
+optional non-secret field removes its saved value; omitted fields and masked
+secrets retain their saved values.
+Backup schedules, Matrix server deployment, Element recovery keys and local E5
+model installation remain explicit operator steps; use the linked instructions.
+
+Home/work coordinates define known places; they do not turn on phone tracking.
+GPS context arrives only when the owner shares location through the active
+Telegram or Matrix app. Allow location access on the phone when using that
+feature; client support for location/live updates varies. A static point is not
+continuous tracking, and GPS never proves partner/child presence.
+
+For Google Places, enable the Places API for the supplied key and apply suitable
+key restrictions. For Spotify, create a developer app, enter its client ID/secret,
+and register the exact redirect URI you enter in the Wizard. A manual local
+installation can use `http://127.0.0.1:8888/callback`; external callbacks require
+HTTPS, and `localhost` is not accepted by Spotify. See the
+[official redirect requirements](https://developer.spotify.com/documentation/web-api/concepts/redirect_uri).
+Complete Spotify consent on first use. Docker's default Compose publishes only
+port 8000: Spotify callback access/port mapping and interactive OAuth must be
+configured separately; saved credentials do not prove Spotify readiness.
+
 ### External messaging: Telegram or Element / Matrix
 
 Astakos uses one external messaging transport at a time. This avoids duplicate
@@ -127,9 +169,15 @@ under your control. Before selecting **Element / Matrix** in the Setup Wizard:
    Device ID and restart Astakos.
 
 For a normal family conversation, create a **different encrypted room** for
-you, Sofia, and Alexandros and do **not** invite the Astakos account. Astakos
+you and your family and do **not** invite the Astakos account. Astakos
 can only see rooms to which its own account is invited; the family room stays
 separate from the assistant.
+
+Matrix approvals use an exact **Reply** to Astakos's approval message. Reactions
+are not approvals. Shared context and location updates do not authorize sending
+messages to another person. The release compose file starts Astakos, not a
+Matrix homeserver; operate and back up that server separately. See the
+[Matrix recovery runbook](docs/matrix-backup-recovery.md).
 
 The wizard's diagnostics show whether chat, semantic memory, and optional Google Workspace integrations are ready. A missing embeddings provider does not stop basic chat and tools, but long-term semantic recall remains unavailable until it is configured.
 
@@ -280,7 +328,10 @@ Use the Web UI at:
 http://localhost:8000
 ```
 
-When Telegram is configured, open your bot and send it a message.
+When Telegram is selected and configured, open your bot and send it a message.
+When Matrix is selected, use the configured encrypted owner/Astakos room in Element.
+See [routines and context](docs/routines-and-context.md) for Active/Suppressed,
+expiry, context questions and the difference between acknowledgement and completion.
 
 The runtime dashboard is available at:
 
@@ -291,6 +342,11 @@ http://localhost:8000/debug/runtime
 ---
 
 ## Everyday Docker Commands
+
+The commands below use source-build `docker-compose.yml`. For the downloaded
+release deployment, add `-f docker-compose.release.yml` after `docker compose`.
+Release updates pull the published image; they do not build source `main`.
+The README documents [release commands](README.md#useful-release-commands).
 
 ### View status
 
@@ -325,9 +381,13 @@ git pull
 docker compose up --build -d
 ```
 
-Your local databases and configuration remain in the project folder because Docker maps that folder into the container.
+The source compose deployment maps the project directory into the container.
+The release compose deployment instead uses `astakos_data` and
+`astakos_workspace` named volumes plus a host credentials mount.
 
-> Do not use `docker compose down -v` unless you understand what volumes are being removed. Astakos currently persists its main runtime state through the mapped project directory, but deleting data blindly is never a clever backup strategy.
+> `docker compose down -v` removes named volumes and can destroy release runtime
+> data and OAuth tokens. Normal `down` preserves them. Backups are separate from
+> volume persistence; see [data backup](docs/daily-data-backup.md).
 
 ---
 
@@ -389,29 +449,62 @@ start_astakos.bat
 
 ## Step 4 — Run Individual Components
 
-### Telegram bot
+### Selected external app
 
 ```bash
-python run_telegram.py
+python run_external.py
 ```
 
-### Web UI and API
+This selects the configured Telegram or Matrix supervisor. For a deliberately
+selected standalone transport, use `python run_telegram.py` or `python run_matrix.py`.
+
+### Web UI and API supervisor
 
 ```bash
-uvicorn api.server:server --reload
+python run_web.py
 ```
 
-### API server and Telegram together
+### API server and selected external app together
 
 ```bash
 python boot.py --server
 ```
 
+On Windows, `start_astakos.bat` launches the Web and selected external supervisors.
+Those source supervisors restart their child process when watched Python sources
+or supported prompt files change; do not manually restart after every code edit.
+`boot.py --server` is the combined startup path, not the same source-watch loop.
+Configuration/provider changes still require a controlled restart. These local
+supervisors also coordinate supported backup pauses; direct `uvicorn --reload`
+is not a substitute for the normal operator startup path.
+
+---
+
+# File Creation and Office Support
+
+Astakos uses native generators directly for PDF, TXT and CSV. Word, Excel and
+PowerPoint workflows prefer Office CLI; supported DOCX/XLSX generators are
+fallbacks when it is unavailable or cannot cover the requested structure.
+They are not PowerPoint generators and do not bypass approval checks.
+
+Docker builds provision the checksum-verified native Office CLI v1.0.154.
+For manual Python installs, run `python scripts/install_officecli.py` from the
+project directory using your configured Python environment. The installer selects
+Windows, Linux or macOS x64/ARM64, checks size and SHA-256, and replaces atomically.
+Linux requires ICU; the Debian Trixie Docker images include `libicu76`. Linux
+musl/Alpine is not covered. The canonical path is `vendor/officecli/officecli.exe`
+on Windows and `vendor/officecli/officecli` elsewhere. Docker additionally keeps
+`/opt/astakos-tools/officecli` available when source Compose mounts the checkout
+over `/app`. The installer does not
+configure MCP, install host packages or execute upstream installers. Missing or
+unsupported tooling is visible in Wizard step 5. Generated files are discovered in `outputs/` and delivered through
+the originating channel; Web mirroring does not duplicate them to another app.
+
 ---
 
 # Where Your Data Lives
 
-Astakos is local-first. Its runtime state is stored in the project folder, including:
+Astakos is local-first. Manual/source deployments keep runtime state in the project folder; release Docker keeps it in persistent volumes. This includes:
 
 - SQLite conversation, profile, routine, state, and analytics databases
 - `chroma_db/` semantic memory
@@ -420,11 +513,32 @@ Astakos is local-first. Its runtime state is stored in the project folder, inclu
 
 The configured AI provider and enabled integrations may receive prompts, uploaded media, or tool payloads required to perform their jobs. Local-first does not mean that external AI APIs magically stop being external.
 
-Back up the complete Astakos folder before major upgrades if the stored memory matters to you.
+Before a major upgrade, preserve the runtime data and credentials securely.
+The [daily data-only backup](docs/daily-data-backup.md) excludes credentials,
+`.env`, code and unindexed outputs. The [Matrix encrypted backup](docs/matrix-backup-recovery.md)
+covers a different server/bot inventory; Element recovery keys remain separate.
+Neither workflow is automatically installed for a new Docker user.
+
+Normal startup prepares dated routine storage in the routine database transaction
+for new and existing installations. Existing feedback, baselines and routines are
+preserved; no manual reset or historical backfill is required. Release updates
+preserve runtime JSON, registered context flags, Matrix crypto/media and backups
+while refreshing application registries and code. See
+[release readiness](docs/release-readiness.md) for verification scope.
 
 ---
 
 # Troubleshooting
+
+## Element says the server is offline
+
+Check the phone's network/VPN and whether the configured homeserver URL is
+reachable. A homeserver outage is separate from the Astakos Python transport;
+restarting only Astakos cannot restore an unavailable Matrix server. If Element
+can reach the server but Astakos does not reply, check the selected transport,
+encrypted room, configured trusted Device IDs and transport logs. A newly signed-in
+Element session needs its Device ID explicitly trusted and Astakos restarted.
+Preserve the crypto store while diagnosing; deleting it is not a connectivity fix.
 
 ## The browser cannot open `localhost:8000`
 

@@ -13,7 +13,7 @@ from services.external_delivery import DeliveryReceipt
 class RoutineFeedbackRuntime:
     """Prepare all dated dependencies before any worker uses them.
 
-    Storage must already be explicitly migrated. Installation is startup-only;
+    Canonical routine setup must have provisioned storage. Installation is startup-only;
     this object never silently initializes a database or changes owner state.
     """
 
@@ -64,7 +64,7 @@ class RoutineFeedbackRuntime:
 
 
 def build_existing_routine_feedback_runtime() -> RoutineFeedbackRuntime | None:
-    """Compose production dependencies only after the explicit schema gate.
+    """Compose production dependencies after canonical routine setup's schema gate.
 
     No schema initialization, reset, model request or external send occurs here.
     Authentication remains enforced by the channel before invoking its handler.

@@ -1,5 +1,34 @@
 # Astakos: Current Plan
 
+## Fresh-install readiness extension (2026-10-09)
+
+Owner authorized implementation after the documentation assessment. Contract:
+`tasks/fresh-install-readiness-spec.md`. Reuse canonical atomic routine startup
+migration without resetting data; then provision checksum-pinned native Office CLI
+and verify source/release packaging in isolated containers. Owner additionally
+requested guided Wizard settings; 320 storage/Office and 80 Wizard/provider cases
+passed. Source/release Linux AMD64 builds, offline API import and real native Office
+fixtures passed. Protect runtime JSON,
+Matrix crypto/media and backups across release rsync updates. No live migration,
+provider request, transport startup, backup-task installation or release publication.
+
+Dependencies: routine setup tests → shared transactional schema → native installer
+and adapter tests → Docker packaging/preservation checks → final documentation.
+Preserve all earlier observations and the existing documentation refresh.
+
+## Documentation and release assessment (2026-10-09)
+
+Owner requested current README, setup, operator/agent instructions and release
+assessment. Documentation follows merged main at 4d40b10 (PR #238). Recommend
+v2.8.0 for the accumulated features since v2.7.0; no VERSION/tag/release change
+is authorized. The initially identified activation/Office/packaging gaps are
+resolved by the subsequent owner-authorized readiness work above. Preserve the
+owner deployment and historical baseline; see `docs/release-readiness.md`.
+
+PR #238 is merged and its branch deleted. The final focused 491-test run passed;
+remaining live observations and separately approved data corrections stay open.
+Earlier planning/publication states below are dated history, not pending Git work.
+
 ## Dated routine identity evidence (2026-10-09)
 
 Repair the morning/afternoon departure mix-up through the canonical candidate
@@ -20,7 +49,7 @@ report persisted the expected work/absence/co-presence flags in live operation;
 the original departure interpretation remains a separate observation. Existing
 Web/Matrix supervisors automatically restart after Python source changes.
 
-## Current entry point (2026-10-08)
+## Historical entry point (2026-10-08)
 
 Start with `handoff.md` for the verified Git snapshot and current boundaries.
 PRs #227 through #236 are merged; their implementation/review checkpoints below

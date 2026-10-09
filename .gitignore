@@ -99,6 +99,8 @@ tmp/
 !data/routine_tokens.json
 # OfficeCLI binary
 vendor/officecli/*.exe
+vendor/officecli/officecli
+vendor/officecli/.officecli-install-*/
 # Personal configuration files
 persona.md
 astakos_settings.json

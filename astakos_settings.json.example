@@ -22,8 +22,8 @@
     "messenger_contacts": {
         "example_contact": "000000000000"
     },
-    "backup_drive_folder_id": "your-google-drive-folder-id",
-    "partner_name": "YourPartnerName",
-    "kid1_name": "YourKid1Name",
-    "kid2_name": "YourKid2Name"
+    "backup_drive_folder_id": "",
+    "partner_name": "",
+    "kid1_name": "",
+    "kid2_name": ""
 }

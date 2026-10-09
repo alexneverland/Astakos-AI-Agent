@@ -19,7 +19,12 @@ astakos/
 - `tasks/handoff.md` - Dated new-session orientation; verify its Git snapshot before relying on it. Read only the task-relevant specs, not the entire historical task archive.
 - `core/agents.py` - LangGraph nodes, tools binding, and supervisor definition
 - `main.py` - CLI Entry point
-- `run_telegram.py` - Telegram Bot Entry point
+- `run_external.py` - Selects the configured Telegram/Matrix supervisor
+- `run_web.py`, `run_telegram.py`, `run_matrix.py` - Source supervisors, watched-source restart and coordinated backup pauses
+- `boot.py`, `start_astakos.bat` - Combined startup and Windows supervisor launcher
+- `docs/routines-and-context.md` - Context/status and dated feedback contract
+- `docs/daily-data-backup.md`, `docs/matrix-backup-recovery.md` - Distinct backup inventories and recovery limits
+- `docs/release-readiness.md`, `VERSION`, `CHANGELOG.md` - Proposed release gates and published/unreleased distinction
 - `config.py` - Environment Variables (DO NOT EDIT directly unless explicitly requested)
 
 ## Development Workflow & Rules
@@ -114,6 +119,21 @@ agent's merged task branch; creating or publishing tags/releases; modifying
 credentials, `.env`, or `config.py`; database migrations; and Docker,
 runtime, or watchdog changes. Platform-enforced confirmations and higher-level
 safety policies always take precedence over this repository policy.
+
+## Documentation and operations boundaries
+
+Keep README, setup instructions, discovery docs and Unreleased notes consistent
+with merged behavior. A source feature is not evidence that it is published in
+the latest image. Mark dated verification as dated; preserve historical specs.
+Canonical routine database setup provisions the dated schema transactionally;
+runtime composition remains read-only. Never reset baselines or rewrite historical
+feedback as part of an upgrade or documentation/release assessment.
+
+Use the existing source supervisors for restart behavior rather than modifying
+runtime/watchdogs to force an update. If an authorized cleanup is blocked by the
+execution policy, give the owner a narrowly scoped PowerShell command after
+verifying every resolved target. Preserve code, live data, credentials and backups;
+do not broaden deletion or work around the policy through another shell.
 
 ## Coding Conventions
 - Python >= 3.11 required.

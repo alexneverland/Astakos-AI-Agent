@@ -1,6 +1,6 @@
 # Astakos: new-session handoff
 
-Snapshot: 2026-10-08, after merging PR #236. This is orientation, not a substitute
+Snapshot: 2026-10-09, PR #240 fresh-install readiness and authorized review fixes. This is orientation, not a substitute
 for current code, runtime evidence or a new task's approval. Refresh when state changes.
 
 ## Start here
@@ -14,13 +14,19 @@ for current code, runtime evidence or a new task's approval. Refresh when state 
 ## Verified Git checkpoint
 
 - Repository: `alexneverland/Astakos-AI-Agent`, workspace `C:\astakos_v2`.
-- Local `main` and `origin/main`: `39611b874928009b392956381c65bf601560333c`.
-- Working tree was clean before this documentation-only handoff edit.
-- PR #236 merged; `codex/behavioral-identity-resolution` deleted locally/remotely.
-- No open owner feature PR in the GitHub listing; open Dependabot PRs #4-19
-  are separate, not approved dependency upgrades. Recheck before any Git action.
-- Owner authorized publishing these handoff/doc edits on 2026-10-08 in a separate
-  documentation PR; merge remains a separate instruction.
+- Local `main` and `origin/main`: `4d40b1082f808a6a89a7baae32d7c93d185e5ef2`.
+- PR #240 is open on `codex/fresh-install-readiness`; base work was published at
+  `9290cef2b52943b0d05a3fc6b1308d3725f3f707`. Verify the current head and working tree.
+  Owner authorized fixing its two Codex findings and one CodeQL test finding.
+- PR #238 merged; `codex/context-routine-continuity` deleted locally/remotely.
+- Before publishing this task, the 2026-10-09 listing contained only Dependabot PRs;
+  #4-19 and #239 are separate, not approved dependency upgrades.
+- Owner requested documentation/release assessment, then authorized fresh-install
+  fixes and guided Wizard settings, then authorized the scoped PR. Task branch:
+  `codex/fresh-install-readiness`. VERSION changes and tag/release publication
+  remain separate actions.
+- Latest published release and VERSION: v2.7.0 / 2.7.0. Proposed v2.8.0 has an
+  resolved dated-store installation/upgrade path; see `docs/release-readiness.md`.
 
 ## Collaboration and safety
 
@@ -59,6 +65,19 @@ for current code, runtime evidence or a new task's approval. Refresh when state 
 
 ## Latest completed slices / where to look
 
+- #238 context/routine continuity: `services/context_extractor.py`,
+  `prompts/context_state_transition.md`, `memory/routine_feedback.py` and
+  `services/routine_completion_selector.py`. General related-flag reassessment,
+  grounded current-source writes, same-second ordering and bounded dated evidence
+  for routine variants. Final combined focused run: 491 passed, two existing
+  dependency warnings; compilation and diff checks passed. Work-arrival flags
+  were observed live; original departure interpretation remains to observe.
+  Today's mistaken morning completion was not manually corrected.
+- Current user-facing guides: `docs/routines-and-context.md`,
+  `docs/daily-data-backup.md` and `docs/release-readiness.md`. Normal routine setup
+  provisions dated storage; runtime composition only loads it. Do not repeat the
+  owner's baseline reset.
+
 - #236 behavioral identity: `services/behavioral_event_extractor.py`,
   `prompts/behavioral_event_extraction.md`, `services/behavioral_pattern_aggregator.py`,
   `services/behavioral_conversation_initiative.py`; contract
@@ -93,4 +112,16 @@ for current code, runtime evidence or a new task's approval. Refresh when state 
 
 `tasks/todo.md` retains detailed observation items. Older "not activated/reset pending"
 paragraphs are historical checkpoints, superseded by the completed rollout sections.
-No runtime, database, provider or scheduled backup was reverified for this handoff.
+Fresh-install work: 320 focused storage/Office tests and 80 Wizard/provider cases
+passed. Linux AMD64 source/release builds, offline API import and real native Office
+fixtures passed. Release refresh preservation is verified on synthetic stores.
+No live owner database, credentials, provider or scheduled backup was changed.
+PR #240 review repairs: canonical native size/SHA-256 verification controls Wizard
+status and execution, invalid local binaries allow verified Docker fallback, and
+explicit empty optional non-secret fields remove stale saved/raw values. Exact
+styling-CDN URL matching replaces the test's substring match. 110 focused
+Wizard/provider/Office cases and four rebuilt Linux release container tests passed.
+Verify its current PR/commit status in GitHub. Stop after updating the PR; no new
+review request, merge or branch deletion was authorized. VERSION remains 2.7.0;
+release publication is separate.
+See `fresh-install-readiness-spec.md` and `docs/release-readiness.md`.

@@ -7,6 +7,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+Scope: merged `main` through PR #238 plus fresh-install readiness, 2026-10-09. Proposed release: **v2.8.0**;
+`VERSION` and the published release remain **v2.7.0**. See
+[release readiness](docs/release-readiness.md) before publishing.
+
+### Added
+
+- Guided Wizard location/backup/optional integration settings, validation and masked-secret preservation; pinned native Office installer and Docker provisioning.
+- Element/Matrix as the selected external messaging app, with shared Web/Telegram/Matrix history, encrypted owner-room delivery, explicit trusted devices and exact-Reply approval.
+- Reddit, YouTube and LinkedIn research evidence, multi-result web research, clickable source links and supported recent-date filtering.
+- Photo conversation and document lifecycle improvements, with channel-aware file delivery and unified native PDF/TXT/CSV versus Office CLI workflows.
+- Behavioral conversation from trusted recurring observations: specific entity/action patterns, ordinary reply comments, guarded spontaneous openers, preferences and Debug diagnostics.
+- Source-timed daily context inference and general semantic reassessment of related registered flags, including owner whereabouts and family co-presence.
+- Dated routine delivery/feedback, acknowledgement versus completion, historical occurrence identity, separate refusal/silence pressure and optional relevant notes for blocked routines.
+- Partial conversational goal updates with activity/provenance, and follow-ups grounded in recent relevant context.
+- Selective midnight Astakos data backup, separate encrypted Matrix backup, guarded pause/resume, verified Drive upload and scoped retention. Windows scheduling and recovery evidence remain deployment-specific.
+
+### Changed
+
+- One active external transport controls external approvals, reminders and routine delivery; changing transport preserves shared history.
+- Routine selection includes snapshot-consistent schedules, conditions and bounded dated engagement. Ambiguous variants and catalogue changes cannot silently reuse a stale selection.
+- Context clarification retains additional facts and unrelated requests; preparation replies do not complete an activity, and completed occurrences avoid redundant questions.
+- Behavioral identity resolution uses bounded trusted references and specific actions without rewriting historical observations.
+- Read-only bug diagnosis is distinct from an approved repair; approved terminal results continue through the normal conversational flow.
+- Vendored agent workflows and Office CLI were updated; existing upstream licenses and attribution remain separate from first-party MIT licensing.
+
+### Fixed
+
+- Fresh/legacy dated feedback activation during canonical startup, atomic rollback and history preservation; release updates no longer replace registered context flags or remove runtime JSON/Matrix crypto/media/backups.
+- Stale, unsaved or ungrounded reports replacing newer context; same-second latest saved reports now pass the ordinary grounded path while preserving history/version guards.
+- Morning/afternoon routine mix-ups after expired preparation engagement, and selector compatibility when injecting routine evidence.
+- Family-presence, work-shift expiry, bedtime/absence and GPS-freshness edge cases; location does not establish companion presence.
+- Follow-up continuity, supplied-link research failures, redundant research work, proactive timing/quiet checks and fact provenance/deduplication.
+- Graceful external shutdown and backup supervisor recovery, including headless Windows Scheduler handle failures.
+
+### Upgrade notes
+
+- Source `main` contains these changes before a versioned image is published. A repository merge alone does not update the release image.
+- Normal routine startup provisions dated feedback storage transactionally for fresh/legacy installations, preserving routines, history and baselines without reset or backfill.
+- Release Docker runtime persistence uses named data/workspace volumes and a separate credentials mount. Selective data backups exclude credentials, `.env`, code and unindexed outputs; Matrix/Element recovery is separate.
+- Recorded backup capture, upload and isolated extraction do not prove full application or replacement-host/client recovery. Preserve the documented recovery limits.
+- No historical behavioral backfill, live routine-ledger correction or owner credential change is included. Docker now includes the native Office tool and ICU; optional services still require owner configuration.
+
 ## [v2.7.0] — 2026-09-11
 
 Headline: **Astakos adds hands-free Jarvis-style conversations, provider-aware voice and image generation, and safer access to approved local projects.**
