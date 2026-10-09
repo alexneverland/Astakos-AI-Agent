@@ -1,6 +1,8 @@
 import os
 import threading
 import time
+import math
+import re
 from urllib.parse import urlparse
 
 import uvicorn
@@ -53,7 +55,17 @@ _SENSITIVE_ENV_KEYS = frozenset({
     "GITHUB_TOKEN",
     "EMAIL_PASSWORD",
     "VACUUM_TOKEN",
+    "LINKEDIN_TOKEN",
+    "GOOGLE_PLACES_API_KEY",
 })
+
+_OPTIONAL_ENV_FIELDS = {
+    "project_id": "PROJECT_ID", "vertex_location": "LOCATION",
+    "github_token": "GITHUB_TOKEN", "vacuum_ip": "VACUUM_IP",
+    "vacuum_token": "VACUUM_TOKEN", "linkedin_token": "LINKEDIN_TOKEN",
+    "spotify_client_id": "SPOTIPY_CLIENT_ID", "spotify_client_secret": "SPOTIPY_CLIENT_SECRET",
+    "spotify_redirect_uri": "SPOTIPY_REDIRECT_URI", "google_places_api_key": "GOOGLE_PLACES_API_KEY",
+}
 
 _PROVIDER_SECRET_KEYS = {
     "openai": "OPENAI_API_KEY",
@@ -61,6 +73,32 @@ _PROVIDER_SECRET_KEYS = {
     "gemini": "GEMINI_API_KEY",
     "vertex": "GOOGLE_APPLICATION_CREDENTIALS",
 }
+
+
+def _validate_guided_settings(settings: dict) -> None:
+    """Validate optional structured location and backup fields before any write."""
+    for key in ("home_coords", "work_coords"):
+        if key not in settings:
+            continue
+        coordinates = settings[key]
+        if (not isinstance(coordinates, (list, tuple)) or len(coordinates) != 2
+                or any(type(value) not in (int, float) or not math.isfinite(value) for value in coordinates)
+                or not -90 <= coordinates[0] <= 90 or not -180 <= coordinates[1] <= 180):
+            raise HTTPException(status_code=422, detail=f"Invalid {key}: enter latitude and longitude.")
+    for key in ("home_radius_m", "work_radius_m"):
+        if key in settings and (type(settings[key]) not in (int, float)
+                or not math.isfinite(settings[key]) or settings[key] <= 0):
+            raise HTTPException(status_code=422, detail=f"Invalid {key}: use a positive radius in metres.")
+    folder = settings.get("backup_drive_folder_id")
+    if folder is not None and (not isinstance(folder, str)
+            or (folder and not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", folder))):
+        raise HTTPException(status_code=422, detail="Enter a Drive folder ID, not a URL, for backups.")
+
+
+def _office_setup_status() -> dict[str, object]:
+    """Report local provisioning without executing a binary or contacting upstream."""
+    from services.officecli_installation import VERSION, officecli_binary_path
+    return {"present": officecli_binary_path(BASE_DIR).is_file(), "version": VERSION}
 
 _MATRIX_ENV_FIELDS = {
     "matrix_homeserver_url": "MATRIX_HOMESERVER_URL",
@@ -409,7 +447,8 @@ MATRIX_STORE_PATH=matrix_store
             "env": sanitize_env_text(env_content),
             "settings": settings_json,
             "prompts": prompts_data,
-            "setup_guide": get_file_content(SETUP_GUIDE_FILE)
+            "setup_guide": get_file_content(SETUP_GUIDE_FILE),
+            "installation": {"officecli": _office_setup_status()},
         }
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to load configuration files.") from None
@@ -420,8 +459,16 @@ async def save_setup(payload: SetupPayload):
     try:
         adv = payload.advanced
         basic = payload.basic
+        for field in _OPTIONAL_ENV_FIELDS:
+            if field in basic and (not isinstance(basic[field], str)
+                                  or any(char in basic[field] for char in "\r\n\0")):
+                raise HTTPException(status_code=422, detail="Invalid integration setting.")
         prompts = payload.prompts
         routines_text = payload.routines.strip()
+        if "settings" in basic:
+            if not isinstance(basic["settings"], dict):
+                raise HTTPException(status_code=422, detail="Settings must be an object.")
+            _validate_guided_settings(basic["settings"])
         validated_routines: list[dict[str, str]] | None = None
 
         if routines_text:
@@ -457,6 +504,7 @@ async def save_setup(payload: SetupPayload):
             or basic.get("telegram_token")
             or basic.get("external_channel")
             or basic.get("matrix_access_token")
+            or any(field in basic for field in _OPTIONAL_ENV_FIELDS)
             or new_env
         ):
             env_map.update(submitted_env_map)
@@ -481,6 +529,14 @@ async def save_setup(payload: SetupPayload):
                     env_map[key] = existing_env_map.get(key, "")
 
             provider_secrets = _resolve_provider_secrets(basic)
+            for field, key in _OPTIONAL_ENV_FIELDS.items():
+                if field not in basic:
+                    continue
+                value = basic[field].strip()
+                if key in _SENSITIVE_ENV_KEYS:
+                    _set_secret(key, value)
+                elif value:
+                    env_map[key] = value
 
             if basic.get("llm_provider"):
                 env_map["LLM_PROVIDER"] = basic["llm_provider"]

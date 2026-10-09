@@ -34,6 +34,7 @@ class _NoOpThread:
 
 def _configure_isolated_setup_files(monkeypatch: pytest.MonkeyPatch, base: Path) -> None:
     """Redirect every Setup Wizard write target into one temporary directory."""
+    monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "telegram")
     import api.setup_wizard as wizard
 
     prompts_dir = base / "prompts"
