@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from filelock import FileLock
 
 _DEPARTURE_ANCHOR_SECONDS = 45 * 60
 _DEPARTURE_DISTANCE_METERS = 300
@@ -169,6 +170,7 @@ def process_location_update(
     send_reminder: Callable[[str], object],
     storage_file: str | os.PathLike[str] | None = None,
     now_ts: float | None = None,
+    observed_at: float | None = None,
 ) -> str | None:
     """Persist a trusted point and deliver matching location reminders."""
     if source_channel not in {"telegram", "matrix"}:
@@ -204,16 +206,32 @@ def process_location_update(
             return False
         return True
 
-    reply = record_location_update(
-        latitude,
-        longitude,
-        live_update=live_update,
-        storage_file=storage_file,
-        now_ts=now_ts,
-        departure_handler=create_departure_followup,
-    )
-    dispatch_location_reminders(latitude, longitude, send_reminder=send_reminder)
-    return reply
+    if storage_file is None:
+        from config import GPS_STORAGE_FILE
+        storage_file = GPS_STORAGE_FILE
+    target = Path(storage_file)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(target) + ".lock", timeout=5):
+        timestamp = time.time() if now_ts is None else float(now_ts)
+        if observed_at is not None:
+            from memory.location_reminders import FRESH_LOCATION_MAX_AGE_SECONDS
+            if (not math.isfinite(observed_at)
+                    or not 0 <= timestamp - observed_at <= FRESH_LOCATION_MAX_AGE_SECONDS):
+                return None
+            try:
+                previous = json.loads(target.read_text(encoding="utf-8"))
+                if float(previous["timestamp"]) >= observed_at:
+                    return None
+            except FileNotFoundError:
+                pass
+            # Corrupt existing state fails closed instead of losing ordering.
+            timestamp = observed_at
+        reply = record_location_update(
+            latitude, longitude, live_update=live_update, storage_file=storage_file,
+            now_ts=timestamp, departure_handler=create_departure_followup,
+        )
+        dispatch_location_reminders(latitude, longitude, send_reminder=send_reminder)
+        return reply
 
 
 def dispatch_location_reminders(

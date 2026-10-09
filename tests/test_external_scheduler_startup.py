@@ -109,6 +109,8 @@ def test_external_scheduler_registers_queued_matrix_approval_delivery(monkeypatc
 
     assert scheduler.jobs["matrix_approvals"][1] == 5
     assert scheduler.jobs["matrix_approvals"][0].__name__ == "drain_queued_matrix_approvals"
+    assert scheduler.jobs["owntracks_location"][1] == 5
+    assert scheduler.jobs["owntracks_location"][0].__name__ == "drain_owntracks"
 
 
 def test_external_background_runtime_starts_once_for_matrix(monkeypatch) -> None:

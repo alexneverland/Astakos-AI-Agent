@@ -931,6 +931,8 @@ async def lifespan(app: FastAPI):
 # ────────────────────────────────────────────────────────────────
 
 server = FastAPI(lifespan=lifespan)
+from api.owntracks import build_owntracks_app
+server.mount("/owntracks", build_owntracks_app(), name="owntracks")
 
 def _api_internal_error(operation: str) -> str:
     logging.exception("API %s failed", operation)

@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in OwnTracks HTTP GPS intake over private Tailscale HTTPS, with a dedicated
+  generated credential/device binding, bounded durable queue and source-time
+  freshness/order checks. The selected external worker reuses location reminders
+  and owner whereabouts context; Element sharing renewal is no longer required
+  when OwnTracks is configured. Includes private provisioning and setup instructions.
+
 ### Fixed
 
 - A new local reminder grounded in the owner's current request no longer requires

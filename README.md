@@ -77,6 +77,10 @@ Persistence through an update is not a backup. The Windows
 [encrypted Matrix backup](docs/matrix-backup-recovery.md) are separate operator
 workflows, with different inventories and recovery requirements.
 
+Optional background Android GPS through OwnTracks is available in source:
+[private Tailscale setup and phone configuration](docs/owntracks-location.md).
+This Unreleased feature is not yet included in the published v2.8.0 image.
+
 ### Useful release commands
 
 ```bash
