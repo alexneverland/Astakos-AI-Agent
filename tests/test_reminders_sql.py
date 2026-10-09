@@ -11,12 +11,24 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Always an old/future date — we avoid race conditions at the minute level
 # without needing to mock datetime.now() inside the functions.
 PAST_TIME   = "2020-01-01 00:00"
 FUTURE_TIME = "2099-01-01 00:00"
+
+
+@pytest.fixture(autouse=True)
+def prevent_external_delivery(monkeypatch):
+    """Legacy tests must explicitly mock successful sends, never use live adapters."""
+    from services.external_delivery import external_delivery_router
+    def blocked(*args, **kwargs):
+        pytest.fail("Unexpected external delivery in offline reminder test")
+    monkeypatch.setattr(external_delivery_router, "send_text", blocked)
+    monkeypatch.setattr(external_delivery_router, "send_text_to", blocked)
 
 
 def _make_reminders_db(path, rows):
@@ -270,8 +282,9 @@ class TestJobCheckReminders:
         with (
             patch.object(cfg, "STATE_DB", db_path),
             patch.object(bot, "is_reminders_paused", return_value=paused),
-            patch.object(bot, "is_duplicate_notification", return_value=duplicate),
-            patch.object(bot, "send_telegram_msg", side_effect=lambda m: sent.append(m)),
+            patch("memory.event_log.reserve_notification", return_value=None if duplicate else 10000.0),
+            patch.object(bot, "_send_and_record_assistant",
+                         side_effect=lambda m, **kwargs: sent.append(m) or "fixture-event"),
             patch.object(bot, "log_event"),
         ):
             bot.job_check_reminders()
@@ -304,7 +317,7 @@ class TestJobCheckReminders:
         assert _row_status(db_path, "Πάρε ψωμί") == "pending"
 
     def test_duplicate_notification_skipped_and_left_pending(self):
-        # is_duplicate_notification=True → continue, not UPDATE.
+        # A blocked reservation means no send and no completion.
         sent, db_path = self._run(
             [{"task": "Πλύσιμο αυτοκινήτου", "time": PAST_TIME}], duplicate=True
         )
@@ -354,7 +367,7 @@ class TestLocationReminders:
             patch.object(
                 bot,
                 "_send_and_record_assistant",
-                side_effect=lambda message, **_kwargs: sent.append(message),
+                side_effect=lambda message, **_kwargs: sent.append(message) or "fixture-event",
             ),
         ):
             print("STATE_DB path:", cfg.STATE_DB, "Exists:", os.path.exists(cfg.STATE_DB))
@@ -381,7 +394,7 @@ class TestLocationReminders:
         assert sent == []
         assert _row_status(db_path, "Πάρε γάλα") == "pending"
 
-    def test_live_location_updates_out_of_home_only_on_home_boundary(self):
+    def test_live_location_refreshes_out_of_home_evidence_on_every_observation(self):
         import clients.telegram_bot as bot
         import config as cfg
         import memory.routine_db as routine_db
@@ -424,6 +437,7 @@ class TestLocationReminders:
         assert state["value"] == "false"
         assert [call.args[:2] for call in set_context_state.call_args_list] == [
             ("user_out_of_home", "false"),
+            ("user_out_of_home", "true"),
             ("user_out_of_home", "true"),
             ("user_out_of_home", "false"),
         ]
@@ -601,7 +615,7 @@ class TestLeaveCurrentLocationReminders:
                 patch.object(
                     bot,
                     "_send_and_record_assistant",
-                    side_effect=lambda message, **_kwargs: sent.append(message),
+                    side_effect=lambda message, **_kwargs: sent.append(message) or "fixture-event",
                 ),
             ):
                 bot.handle_location(

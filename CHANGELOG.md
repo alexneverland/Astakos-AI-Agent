@@ -17,6 +17,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Scheduled and Telegram-entry location reminders remain pending when external
+  delivery is not confirmed. Location-reminder SQLite connections close explicitly,
+  preventing Windows file locks after processing.
+
 - A new local reminder grounded in the owner's current request no longer requires
   approval solely because unrelated external content remains in older history.
   Ambiguous requests, failed validation and fresh external results retain their
