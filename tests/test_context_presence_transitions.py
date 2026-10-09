@@ -253,3 +253,82 @@ def test_latest_matching_event_still_requires_fresh_timestamp(transition_store, 
     extractor.extract_and_update_context_flags(DEPARTURE, channel="matrix",
         now=EVENT_AT + timedelta(hours=3), conversation_db_path=path)
     assert db.get_context_state("partner_with_user") == previous
+
+
+@pytest.mark.parametrize("channel", ["web", "matrix", "telegram"])
+@pytest.mark.parametrize("scenario", ["later_row", "older_turn", "newer_state", "state_race", "history_race"])
+def test_same_second_reports_respect_latest_source_and_conditional_state(
+    transition_store, monkeypatch, channel, scenario,
+) -> None:
+    """Same-second later reports update explicit and derived flags without defeating CAS."""
+    history, db, extractor, path, shared = transition_store
+    first_text = "Είμαστε όλοι μαζί σπίτι τώρα"
+    first = history.append_message(role="user", channel="web", content=first_text,
+                                   timestamp=EVENT_AT, db_path=path)
+    monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=json.dumps({
+        "flags": {"partner_with_user": True, "user_out_of_home": False,
+                  "family_at_home": True, "user_at_work": False},
+        "event_rowid": first["rowid"], "support_rowids": [shared["rowid"], first["rowid"]]})))
+    extractor.extract_and_update_context_flags(first_text, channel="web", now=EVENT_AT,
+                                               conversation_db_path=path)
+    text = "Έφτασα στη δουλειά μόνος, εκείνοι έμειναν σπίτι"
+    event = history.append_message(role="user", channel=channel, content=text,
+                                   timestamp=EVENT_AT + timedelta(microseconds=500000), db_path=path)
+    assert event["rowid"] > first["rowid"]
+    assert event["timestamp"] == first["timestamp"]
+    if scenario == "newer_state":
+        previous = db.get_context_state("partner_with_user")
+        db.set_context_states_if_unchanged({"partner_with_user": ("true", "2026-10-09")},
+            {"partner_with_user": previous}, recorded_at=EVENT_AT + timedelta(seconds=1))
+    previous = {key: db.get_context_state(key) for key in
+                ("partner_with_user", "user_out_of_home", "family_at_home", "user_at_work")}
+
+    def model(prompt: str) -> SimpleNamespace:
+        if scenario == "state_race":
+            db.set_context_states_if_unchanged({"partner_with_user": ("false", "2026-10-09")},
+                {"partner_with_user": previous["partner_with_user"]}, recorded_at=EVENT_AT)
+        if scenario == "history_race":
+            history.append_message(role="user", channel="web", content="Τελικά γύρισα σπίτι",
+                                   timestamp=EVENT_AT, db_path=path)
+        return SimpleNamespace(text=json.dumps({"flags": {"partner_with_user": False,
+            "user_at_work": True}, "event_rowid": event["rowid"],
+            "support_rowids": [first["rowid"], event["rowid"]]}))
+
+    monkeypatch.setattr(extractor, "safe_gemini_call", model)
+    extractor.extract_and_update_context_flags(first_text if scenario == "older_turn" else text,
+        channel=channel, now=EVENT_AT + timedelta(seconds=2), conversation_db_path=path)
+    if scenario == "later_row":
+        assert db.get_context_state("partner_with_user")["value"] == "false"
+        assert db.get_context_state("user_out_of_home")["value"] == "true"
+        assert db.get_context_state("family_at_home")["value"] == "false"
+        assert db.get_context_state("user_at_work")["value"] == "true"
+        assert db.get_context_state("user_at_work")["updated_at"] == event["timestamp"]
+    else:
+        for key, state in previous.items():
+            if scenario == "state_race" and key == "partner_with_user":
+                assert db.get_context_state(key)["value"] == "false"
+            else:
+                assert db.get_context_state(key) == state
+
+
+def test_pre_question_older_reference_cannot_replace_equal_time_state(
+    transition_store, monkeypatch,
+) -> None:
+    """Historical resolution lacks the ordinary latest-event proof and stays strict."""
+    history, db, extractor, path, _ = transition_store
+    older = history.append_message(role="user", channel="web", content=DEPARTURE,
+                                   timestamp=EVENT_AT, db_path=path)
+    current_text = "Επιστρέψαμε όλοι μαζί σπίτι"
+    history.append_message(role="user", channel="matrix", content=current_text,
+                           timestamp=EVENT_AT, db_path=path)
+    previous = db.get_context_state("partner_with_user")
+    db.set_context_states_if_unchanged({"partner_with_user": ("true", "2026-10-09")},
+        {"partner_with_user": previous}, recorded_at=EVENT_AT)
+    previous = db.get_context_state("partner_with_user")
+    monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=json.dumps({
+        "flags": {"partner_with_user": False}, "event_rowid": older["rowid"],
+        "support_rowids": [older["rowid"]]})))
+    assert not extractor.resolve_daily_context_before_question(("partner_with_user",),
+        now=EVENT_AT + timedelta(seconds=1), still_current=lambda: True,
+        channel="matrix", conversation_db_path=path)
+    assert db.get_context_state("partner_with_user") == previous

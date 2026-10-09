@@ -26,6 +26,16 @@ mutations were caught by final persisted-outcome assertions. Final combined run:
 Live model interpretation remains unproven by mocked inference. No live ledger
 correction or watchdog change was performed.
 
+PR #238 same-second review repair: three failing channel regressions reproduced
+a later saved report being rejected solely because its source timestamp equaled
+the preceding update. Permit equality only in ordinary grounded extraction after
+latest row/text verification, with history freshness and canonical CAS intact;
+retain strict ordering for historical pre-question resolution. Verify explicit
+and consistency-derived state writes, older turns, newer state, same-second state
+and history races, and historical resolution. No timestamp/schema migration.
+Final combined focused run: 491 passed, two existing dependency warnings;
+Python compilation and staged diff checks passed. No live data was rewritten.
+
 ## General related-state reassessment (2026-10-09)
 
 - [x] Ground ordinary semantic updates in current trusted source IDs/times and

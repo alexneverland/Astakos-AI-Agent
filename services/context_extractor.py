@@ -300,9 +300,12 @@ def extract_and_update_context_flags(
                 for row in daily_rows
             ):
                 return None
+            # The latest row ID/text prove this ordinary report's identity.
+            # Second-resolution timestamps alone cannot order adjacent reports;
+            # final history freshness and the canonical CAS still guard the write.
             resolved = _validate_context_resolution(payload, daily_rows, expected,
                 allowed=_CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES),
-                now=current)
+                now=current, allow_equal_timestamp=True)
             if resolved is None:
                 return None
             payload, source_event_at = resolved
@@ -418,7 +421,7 @@ def extract_and_update_context_flags(
                 return None
             if source_event_at is not None:
                 return _persist_context_payload(payload, valid_keys, today_str, expected,
-                                                recorded_at=source_event_at)
+                    recorded_at=source_event_at, allow_equal_timestamp=True)
             return _persist_context_payload(payload, valid_keys, today_str, expected)
 
         applied_flags = (
@@ -460,9 +463,14 @@ def reconcile_context_message(user_text: str) -> None:
 
 def _validate_context_resolution(
     payload: object, rows: list[dict], expected: dict, *, allowed: set[str],
-    now: datetime,
+    now: datetime, allow_equal_timestamp: bool = False,
 ) -> tuple[dict, datetime] | None:
-    """Validate typed state and source times without interpreting owner wording."""
+    """Validate typed state/time; equality requires a caller-verified latest source.
+
+    Pre-question historical resolution retains strict timestamp ordering because
+    its selected event need not be the latest source. Ordinary callers verify the
+    latest row/text before permitting equality and recheck freshness before CAS.
+    """
     from services.routine_context_evidence import STORED_VALIDITY, _recorded_time
     if not isinstance(payload, dict) or set(payload) != {"flags", "event_rowid", "support_rowids"}:
         return None
@@ -483,7 +491,9 @@ def _validate_context_resolution(
         previous = expected.get(key)
         if previous:
             previous_at = _recorded_time(previous.get("updated_at"), now)
-            if previous_at is None or previous_at.timestamp() >= event_at.timestamp():
+            if (previous_at is None or previous_at.timestamp() > event_at.timestamp()
+                    or (not allow_equal_timestamp
+                        and previous_at.timestamp() == event_at.timestamp())):
                 return None
     return flags, event_at
 
@@ -530,7 +540,7 @@ def resolve_daily_context_before_question(
 
 def _persist_context_payload(
     payload: dict, valid_keys: set[str], today: str, expected: dict[str, dict | None],
-    *, recorded_at: datetime | None = None,
+    *, recorded_at: datetime | None = None, allow_equal_timestamp: bool = False,
 ) -> frozenset[str] | None:
     """Preserve the shared flag-writing path for ordinary and clarification turns."""
     updates = {}
@@ -553,7 +563,9 @@ def _persist_context_payload(
             previous = expected.get(key)
             if previous:
                 previous_at = _recorded_time(previous.get("updated_at"), recorded_at)
-                if previous_at is None or previous_at.timestamp() >= recorded_at.timestamp():
+                if (previous_at is None or previous_at.timestamp() > recorded_at.timestamp()
+                        or (not allow_equal_timestamp
+                            and previous_at.timestamp() == recorded_at.timestamp())):
                     return None
         saved = set_context_states_if_unchanged(updates, expected, recorded_at=recorded_at)
     else:
