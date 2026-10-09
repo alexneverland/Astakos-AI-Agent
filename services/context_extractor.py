@@ -491,7 +491,10 @@ def _validate_context_resolution(
         previous = expected.get(key)
         if previous:
             previous_at = _recorded_time(previous.get("updated_at"), now)
-            if (previous_at is None or previous_at.timestamp() > event_at.timestamp()
+            agreeing_refresh = (allow_equal_timestamp and previous_at is not None
+                and previous.get("value") == str(flags[key]).lower())
+            if (previous_at is None or (previous_at.timestamp() > event_at.timestamp()
+                                       and not agreeing_refresh)
                     or (not allow_equal_timestamp
                         and previous_at.timestamp() == event_at.timestamp())):
                 return None
@@ -558,15 +561,41 @@ def _persist_context_payload(
     if recorded_at is not None:
         from services.routine_context_evidence import _recorded_time
 
+        # Same-value observations may refresh while the model is running. They
+        # change evidence time, not meaning; retain their timestamp and keep the
+        # atomic guard against any actual state/expiry change.
+        refreshed_expected = dict(expected)
+        for key, previous in expected.items():
+            latest = get_context_state(key)
+            if latest == previous:
+                continue
+            old_at = _recorded_time((previous or {}).get("updated_at"), recorded_at)
+            new_at = _recorded_time((latest or {}).get("updated_at"), recorded_at)
+            if (not allow_equal_timestamp or not previous or not latest
+                    or latest["value"] != previous["value"]
+                    or latest["expires_at"] != previous["expires_at"]
+                    or old_at is None or new_at is None
+                    or new_at.timestamp() < old_at.timestamp()):
+                return None
+            refreshed_expected[key] = latest
+        expected = refreshed_expected
         # Consistency-derived updates must also respect newer canonical evidence.
+        redundant = []
         for key in updates:
             previous = expected.get(key)
             if previous:
                 previous_at = _recorded_time(previous.get("updated_at"), recorded_at)
+                if (allow_equal_timestamp and previous_at is not None
+                        and previous_at.timestamp() > recorded_at.timestamp()
+                        and previous["value"] == updates[key][0]):
+                    redundant.append(key)
+                    continue
                 if (previous_at is None or previous_at.timestamp() > recorded_at.timestamp()
                         or (not allow_equal_timestamp
                             and previous_at.timestamp() == recorded_at.timestamp())):
                     return None
+        for key in redundant:
+            updates.pop(key)
         saved = set_context_states_if_unchanged(updates, expected, recorded_at=recorded_at)
     else:
         saved = set_context_states_if_unchanged(updates, expected)
