@@ -10,7 +10,7 @@ import hashlib
 import json
 import os
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Iterator
 from collections.abc import Mapping
@@ -23,12 +23,13 @@ from services.routine_completion_helper import RoutineFeedbackQuestion, RoutineF
 
 @dataclass(frozen=True)
 class FeedbackCandidate:
-    """Canonical name, known dates and revision captured on one read snapshot."""
+    """Canonical identity evidence, dates and revision from one read snapshot."""
 
     routine_id: int
     name: str
     allowed_dates: frozenset[date]
     revision: str
+    identity_evidence: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -557,9 +558,12 @@ class RoutineFeedbackStore:
         connection = self.connection_factory()
         try:
             connection.execute("BEGIN")
-            routines = connection.execute("SELECT id, event_name FROM routines ORDER BY id").fetchall()
+            cursor = connection.execute("SELECT * FROM routines ORDER BY id")
+            columns = [item[0] for item in cursor.description]
+            routines = [dict(zip(columns, row)) for row in cursor.fetchall()]
             candidates = []
-            for rid, name in routines:
+            for routine in routines:
+                rid, name = routine["id"], routine["event_name"]
                 if not isinstance(name, str) or not name.strip():
                     continue
                 dates = {today}
@@ -569,9 +573,36 @@ class RoutineFeedbackStore:
                     day = date.fromisoformat(day_text)
                     if day <= today:
                         dates.add(day)
+                occurrence_cursor = connection.execute(
+                    """SELECT occurrence_date, delivered_at, feedback, feedback_at,
+                              question_text, delivery_channel FROM routine_occurrences
+                       WHERE routine_id=? AND occurrence_date<=?
+                       ORDER BY occurrence_date DESC LIMIT 8""", (rid, today.isoformat()))
+                occurrence_columns = [item[0] for item in occurrence_cursor.description]
+                occurrences = [dict(zip(occurrence_columns, row))
+                               for row in occurrence_cursor.fetchall()]
+                for occurrence in occurrences:
+                    if occurrence["question_text"] is not None:
+                        occurrence["question_text"] = occurrence["question_text"][:2000]
+                metadata = {key: routine[key] for key in (
+                    "day_of_week", "time_str", "event_type", "conditions_json",
+                    "condition_type", "condition_payload", "condition_mode", "state",
+                    "is_active", "paused_until", "paused_indefinitely") if key in routine}
                 candidates.append(FeedbackCandidate(rid, name, frozenset(dates),
-                                                     self._revision(connection, rid)))
+                    self._revision(connection, rid),
+                    {"routine": metadata, "occurrences": occurrences}))
             return tuple(candidates)
+        finally:
+            connection.close()
+
+    def feedback_candidate_revisions(self) -> dict[int, str]:
+        """Read the complete named candidate set and revisions on one snapshot."""
+        connection = self.connection_factory()
+        try:
+            connection.execute("BEGIN")
+            return {rid: self._revision(connection, rid)
+                    for rid, name in connection.execute("SELECT id, event_name FROM routines")
+                    if isinstance(name, str) and name.strip()}
         finally:
             connection.close()
 

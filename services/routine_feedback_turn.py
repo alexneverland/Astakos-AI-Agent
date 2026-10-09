@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from datetime import timedelta
 from functools import partial
+from inspect import signature
 
 from services.routine_completion_helper import (
     DatedRoutineSelection, RoutineFeedbackQuestion, RoutineFeedbackGroupQuestion, validate_dated_selection,
@@ -242,6 +243,7 @@ def process_stored_feedback_turn(
     user_rowid: int, conversation_db_path: str,
     reply_channel: str | None = None, reply_event_id: str | None = None,
     expected_revisions: dict[int, str] | None = None,
+    catalog_is_current: Callable[[], bool] | None = None,
 ) -> FeedbackTurnResult:
     """Prepare persisted correlation/freshness for the shared inactive service.
 
@@ -267,6 +269,8 @@ def process_stored_feedback_turn(
 
         def correlation_is_current() -> bool:
             """Reload the same delivery/outcome, including response-window expiry."""
+            if catalog_is_current is not None and not catalog_is_current():
+                return False
             return store.pending_question(now=clock(), reply_channel=reply_channel,
                                           reply_event_id=reply_event_id) == pending
 
@@ -297,12 +301,28 @@ def process_catalog_feedback_turn(
         return FeedbackTurnResult("none")
     try:
         snapshot = store.feedback_candidates(now=now)
+
+        def catalog_is_current() -> bool:
+            """Reject identity decisions when any compared candidate has changed."""
+            return store.feedback_candidate_revisions() == {
+                item.routine_id: item.revision for item in snapshot}
+
+        evidence = {item.routine_id: item.identity_evidence for item in snapshot}
+        try:
+            signature(selector).bind_partial(candidate_evidence=evidence)
+        except (TypeError, ValueError):
+            # Preserve fixed-signature injected consumers without retrying errors
+            # raised inside a selector after inference has already started.
+            pass
+        else:
+            selector = partial(selector, candidate_evidence=evidence)
         return process_stored_feedback_turn(user_text,
             {item.routine_id: item.name for item in snapshot},
             {item.routine_id: item.allowed_dates for item in snapshot},
             store=store, selector=selector, now=now, clock=clock, trusted=True,
             user_rowid=user_rowid, conversation_db_path=conversation_db_path,
             reply_channel=reply_channel, reply_event_id=reply_event_id,
+            catalog_is_current=catalog_is_current,
             expected_revisions={item.routine_id: item.revision for item in snapshot})
     except Exception:
         return FeedbackTurnResult("error")

@@ -39,7 +39,7 @@ def test_unrelated_history_during_model_does_not_lose_owner_update(tmp_path, mon
         history.append_message(role="assistant" if noise == "assistant" else "user",
             channel="web", content="unrelated notification", timestamp=NOW, db_path=path,
             metadata={"untrusted_external_tool_names":["user_provided_asset"]} if noise == "external" else {})
-        payload = {"partner_with_user":False} if mode == "ordinary" else {
+        payload = {
             "flags":{"partner_with_user":False}, "event_rowid":source["rowid"],
             "support_rowids":[source["rowid"]]}
         return SimpleNamespace(text=json.dumps(payload))
@@ -69,10 +69,12 @@ def test_partner_work_mode_uses_semantic_subject_not_word_cooccurrence(
     path = str(tmp_path / "history.db")
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "routines.db"))
     db.setup_db()
-    db.set_context_state("partner_work_mode", "office", "2026-10-08")
-    history.append_message(role="user", channel=channel, timestamp=NOW, content=text, db_path=path)
+    db.set_context_states_if_unchanged({"partner_work_mode": ("office", "2026-10-08")},
+        {"partner_work_mode": None}, recorded_at=NOW - timedelta(minutes=1))
+    source = history.append_message(role="user", channel=channel, timestamp=NOW, content=text, db_path=path)
     monkeypatch.setattr(extractor, "safe_gemini_call",
-                        lambda _: SimpleNamespace(text=json.dumps(payload)))
+                        lambda _: SimpleNamespace(text=json.dumps({"flags": payload,
+                            "event_rowid": source["rowid"], "support_rowids": [source["rowid"]]})))
     monkeypatch.setattr(reconciler, "_infer_llm_reconciliation_candidates", lambda *a, **k: [])
     extractor.extract_and_update_context_flags(text, channel=channel, now=NOW,
                                                conversation_db_path=path)
@@ -93,12 +95,14 @@ def test_daily_plan_combines_with_departure_before_question(tmp_path, monkeypatc
     history.append_message(role="user", channel="web", timestamp=NOW.replace(hour=8, minute=39),
         content="Σήμερα η Σοφία δεν δουλεύει, θα είναι σπίτι για την παράδοση", db_path=path)
     text = "Έφυγα για δουλειά, στον δρόμο είμαι"
-    history.append_message(role="user", channel=channel, timestamp=NOW, content=text, db_path=path)
+    source = history.append_message(role="user", channel=channel, timestamp=NOW, content=text, db_path=path)
     def model(prompt):
         assert "Σήμερα η Σοφία δεν δουλεύει" in prompt
         assert "2026-10-08T08:39" in prompt
         assert "daily" in prompt.lower()
-        return SimpleNamespace(text='{"partner_with_user":false,"user_out_of_home":true}')
+        return SimpleNamespace(text=json.dumps({"flags": {"partner_with_user": False,
+            "user_out_of_home": True}, "event_rowid": source["rowid"],
+            "support_rowids": [source["rowid"]]}))
     monkeypatch.setattr(extractor, "safe_gemini_call", model)
     monkeypatch.setattr(extractor, "reconcile_context_message", lambda _: None)
     extractor.extract_and_update_context_flags(text, channel=channel, now=NOW, conversation_db_path=path)
@@ -130,11 +134,13 @@ def test_new_user_message_during_inference_cannot_commit(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "routines.db"))
     db.setup_db()
     text = "Έφυγα μόνος για δουλειά"
-    history.append_message(role="user", channel="matrix", timestamp=NOW, content=text, db_path=path)
+    source = history.append_message(role="user", channel="matrix", timestamp=NOW, content=text, db_path=path)
     def model(_):
         history.append_message(role="user", channel="web", timestamp=NOW,
                                content="Τελικά δεν έφυγα", db_path=path)
-        return SimpleNamespace(text='{"partner_with_user":false,"user_out_of_home":true}')
+        return SimpleNamespace(text=json.dumps({"flags": {"partner_with_user": False,
+            "user_out_of_home": True}, "event_rowid": source["rowid"],
+            "support_rowids": [source["rowid"]]}))
     monkeypatch.setattr(extractor, "safe_gemini_call", model)
     monkeypatch.setattr(extractor, "reconcile_context_message", lambda _: None)
     extractor.extract_and_update_context_flags(text, now=NOW, conversation_db_path=path)

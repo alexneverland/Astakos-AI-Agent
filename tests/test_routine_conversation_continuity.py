@@ -151,6 +151,9 @@ def test_shared_temporal_context_reaches_real_flag_persistence(tmp_path, monkeyp
     routine_db.setup_db()
     append_message(role="user", content="Γύρισα σπίτι μετά το σχολείο για καφέ", channel="web",
                    timestamp=NOW-timedelta(minutes=5), db_path=path)
+    text = "Πίνω τον καφέ μου και μετά θα φύγω"
+    current = append_message(role="user", content=text, channel="matrix",
+                             timestamp=NOW, db_path=path)
     monkeypatch.setattr(context_extractor, "load_recent_state_messages",
                         lambda **kwargs: load_recent_state_messages(now=NOW, db_path=path))
     monkeypatch.setattr(context_extractor, "infer_routine_reconciliation_directives", lambda *a, **k: [])
@@ -158,9 +161,12 @@ def test_shared_temporal_context_reaches_real_flag_persistence(tmp_path, monkeyp
         assert "Γύρισα σπίτι μετά το σχολείο για καφέ" in prompt
         assert "2026-10-08T10:04:47+03:00" in prompt
         assert '"channel": "web"' in prompt
-        return SimpleNamespace(text='{"user_out_of_home":false,"user_at_work":false}')
+        return SimpleNamespace(text=json.dumps({"flags": {"user_out_of_home": False,
+            "user_at_work": False}, "event_rowid": current["rowid"],
+            "support_rowids": [current["rowid"]]}))
     monkeypatch.setattr(context_extractor, "safe_gemini_call", provider)
-    context_extractor.extract_and_update_context_flags("Πίνω τον καφέ μου και μετά θα φύγω", channel="matrix")
+    context_extractor.extract_and_update_context_flags(text, channel="matrix", now=NOW,
+                                                      conversation_db_path=path)
     assert routine_db.get_context_state("user_out_of_home")["value"] == "false"
     assert routine_db.get_context_state("user_at_work")["value"] == "false"
 

@@ -1,5 +1,55 @@
 # Astakos: Current Tasks
 
+## Dated routine identity evidence (2026-10-09)
+
+- [x] Reproduce missing catalogue evidence before implementation (five failures).
+- [x] Supply snapshot-consistent schedule/conditions and bounded dated engagement
+  to the shared semantic selector; preserve explicit identity and ambiguity.
+- [x] Recheck the entire compared candidate set/outcomes before persistence.
+- [x] Final combined PR regression run: 470 passed, two dependency deprecation
+  warnings; Python compilation and diff review/check passed. Inference is mocked,
+  so live semantic interpretation remains an observation task.
+- [ ] Owner-controlled live identity interpretation observation; existing
+  supervisors automatically reload the changed Python sources.
+- [ ] Separately authorized correction of today's mistaken morning completion.
+- [ ] Git/PR lifecycle authorized on 2026-10-09, including reading review comments.
+
+PR #238 review repair: four RED failures reproduced stale/unsaved text borrowing
+the latest source, flat output overwriting newer context and fixed-signature
+selector incompatibility. Saved ordinary reports now require the grounded
+envelope; empty results reconcile only matching current text. Evidence injection
+checks the callable signature without retrying inference. Tests now cover a latest
+matching row with a stale timestamp and derive implicit routine identity from
+recorded engagement while requiring the continuity instruction. Two in-memory
+mutations were caught by final persisted-outcome assertions. Final combined run:
+475 passed, two dependency warnings; compilation and whitespace checks passed.
+Live model interpretation remains unproven by mocked inference. No live ledger
+correction or watchdog change was performed.
+
+PR #238 same-second review repair: three failing channel regressions reproduced
+a later saved report being rejected solely because its source timestamp equaled
+the preceding update. Permit equality only in ordinary grounded extraction after
+latest row/text verification, with history freshness and canonical CAS intact;
+retain strict ordering for historical pre-question resolution. Verify explicit
+and consistency-derived state writes, older turns, newer state, same-second state
+and history races, and historical resolution. No timestamp/schema migration.
+Final combined focused run: 491 passed, two existing dependency warnings;
+Python compilation and staged diff checks passed. No live data was rewritten.
+
+## General related-state reassessment (2026-10-09)
+
+- [x] Ground ordinary semantic updates in current trusted source IDs/times and
+  reassess all related schema flags, including child presence and work context.
+- [x] Persisted-outcome regression, joint-travel/safety cases and future typed
+  schema entry coverage; 199 focused offline cases passed across two disjoint runs.
+- [x] Fix the stale clarification-test reader patch after reproducing it at HEAD;
+  source-age mutation caught, Python compilation and whitespace checks passed.
+- [x] Owner's 12:12 work-arrival observation persisted work=true, out-of-home=true,
+  partner-with-user=false, family-at-home=false and child-with-user=false.
+- [ ] Live interpretation observation of the original separate departure.
+- [ ] Git/PR lifecycle authorized together with the routine identity repair.
+  No manual live flag rewrite was performed.
+
 ## Current status (2026-10-08)
 
 See `handoff.md` before interpreting older checkpoints. PRs #227 through #236

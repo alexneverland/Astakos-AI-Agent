@@ -126,3 +126,25 @@ do not send test notifications or actuate tools during offline verification.
 
 - Persistence design/migration, if necessary, must be scoped and approved before
   any production migration. Implementation planning follows spec approval.
+
+## Dated identity evidence extension (2026-10-09)
+
+Owner-approved repair: the 09:31 afternoon-departure reminder was acknowledged,
+but the 10:04 actual departure selected the undelivered morning variant. Names
+alone do not identify variants reliably after the pending response window expires.
+
+Supply the existing semantic selector with each candidate's persisted schedule,
+conditions and newest eight dated delivery/feedback occurrences, captured alongside
+its existing revision on one read snapshot. Expired delivery/acknowledgement remains
+identity context, never completion or renewed send authority. Current explicit
+identity/date overrides implicit continuity; ambiguity requires clarification.
+Dispatch conditions and paused status do not prohibit a report of actual execution.
+Reject stale decisions if any compared routine/outcome or named candidate set
+changes during inference, including the final transaction freshness check.
+
+Regression scope: exact reported departure, preparation, explicit other variant,
+ambiguous identity and candidate/outcome races across Web, Matrix and Telegram.
+Use temporary stores and mock inference; assert both final dated outcomes.
+No phrase lists, schema change, historical correction, live send or runtime change.
+Live provider interpretation and owner-requested correction of today's mistaken
+record are separate follow-ups.

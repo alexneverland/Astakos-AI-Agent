@@ -19,7 +19,7 @@ def context_pipeline(tmp_path, monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", forbidden)
     monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "routines.db"))
     routine_db.setup_db()
-    monkeypatch.setattr(extractor, "load_recent_trusted_user_messages", lambda **_: [])
+    monkeypatch.setattr(extractor, "load_recent_state_messages", lambda **_: [])
     monkeypatch.setattr(extractor, "infer_routine_reconciliation_directives", forbidden)
     return {"question": "Είναι η Σοφία μαζί σου τώρα;", "flags": ["partner_with_user"]}
 
