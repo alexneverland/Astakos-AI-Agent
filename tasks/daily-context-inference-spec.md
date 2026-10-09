@@ -5,6 +5,68 @@ in PR #233; this document does not authorize merging that PR or changing runtime
 
 ## Objective and assumptions
 
+### General related-state reassessment (2026-10-09)
+
+Owner approved this repair with "ΠΑΜΕ" after the live report: 08:59 Web reports
+returning home and sorting toys with Sofia; 09:31 reports preparing to leave;
+10:04 Matrix reports "Έφυγα, φίλε, πάω να πάρω το λεωφορείο". The extractor
+changed owner whereabouts but retained `partner_with_user=true`, blocking
+routine #4 at 10:45/10:55. Owner confirmed departure was alone.
+
+Reassess co-presence semantically when a completed personal movement supersedes
+a fresh shared activity. A separate owner journey can establish separation from
+that activity without requiring the owner to spell out every resulting flag.
+First-person grammar or not-working alone does not prove separation. Joint
+travel, future preparation and unresolved accompaniment must remain distinct.
+
+Owner clarified scope during implementation: reassess all related canonical
+flags after every ordinary report, including child presence and other current
+or later schema flags. Do not specialize interpretation to departure or Sofia.
+The validated schema is supplied to the model; semantic consequences are stored
+together. Future intentions still do not become current facts. Source-grounded
+explicit co-presence must survive default assumptions about work or travel.
+
+One slice: extend the ordinary extraction contract to accept source-grounded
+updates through the existing daily source validator and conditional writer;
+preserve legacy direct reports, clarification and pre-question resolution.
+Use the current trusted source as the event and retain its time. Validate model
+schema, source IDs and races; do not interpret words deterministically.
+
+Acceptance: the exact lifecycle persists false and allows the Messenger routine
+condition; joint travel retains true and blocks that condition. Future/ambiguous
+events, invalid sources, malformed flags, and newer history/state cannot clear
+presence. Provider/transport boundaries stay offline and stores temporary.
+Also verify child/household/work consequences, explicit companions at work,
+return/join events, and a new typed schema flag using the same writer. An empty
+state result must retain unrelated durable routine request handling.
+
+Tasks: write failing persisted-outcome regression and safety tests, extend the
+shared validator/ordinary contract, then run focused context/routine checks and
+compile changed Python. No live-state writes, sending, runtime restart or Git
+publication. Live provider interpretation remains a separate observation.
+
+Verify:
+`venv\Scripts\python.exe -m pytest tests/test_context_presence_transitions.py tests/test_context_extractor.py tests/test_context_extractor_presence.py tests/test_daily_context_inference.py tests/test_routine_context_evidence.py tests/test_routine_conditions.py -q --tb=short --basetemp=C:\Users\PC\.pytest_temp\presence_transition`
+
+Verification: 25 new offline cases cover persisted flags and the routine gate.
+The initial grounded-transition regression failed before the implementation.
+177 focused context/condition/poll cases passed; 22 clarification-answer cases
+passed separately after correcting their stale reader patch. That fixture setup
+error was reproduced against the unchanged HEAD extractor first. These two
+successful runs cover disjoint sets, 199 cases total, with one existing provider
+dependency warning per run. An in-memory removal of the shared source-age guard
+was caught by the stale-event regression; workspace source was not mutated.
+Python compilation and whitespace checks passed. No live provider interpretation,
+runtime restart, live flag rewrite, message sending or Git publication performed.
+
+Subsequent live observation: owner's 2026-10-09 12:12:02 work-arrival report
+persisted `user_at_work=true`, `user_out_of_home=true`, `partner_with_user=false`,
+`family_at_home=false`, `kid1_with_user=false` with the source timestamp. This
+does not replay the original departure. Owner authorized PR publication on
+2026-10-09. Existing `run_web.py` and `run_matrix.py` supervisors gracefully
+restart for Python changes in the modified source directories; individual
+prompt files are read on demand and are not separately watched.
+
 Combine explicitly reported daily plans with newer completed events across Web,
 Telegram and Matrix so Astakos can infer a routine's context instead of asking an
 already answered question. Use semantic interpretation, not phrase matching.

@@ -1,5 +1,25 @@
 # Astakos: Current Plan
 
+## Dated routine identity evidence (2026-10-09)
+
+Repair the morning/afternoon departure mix-up through the canonical candidate
+snapshot and existing semantic selector. Preserve expired recorded engagement as
+identity evidence; retain explicit identity/date and ambiguity handling. Verify
+both persisted outcomes and all-candidate freshness with offline temporary stores.
+Scope and acceptance criteria: `routine-feedback-spec.md` extension. No live ledger
+correction or watchdog change is included. Owner authorized publishing both
+continuity repairs in one PR and inspecting its review on 2026-10-09.
+
+## General related-state reassessment (2026-10-09)
+
+Owner-approved extension in `daily-context-inference-spec.md`: after each ordinary
+report, evaluate related canonical flags semantically against timed shared owner
+context. Reuse source validation and conditional writes; keep future plans distinct
+from current state. Implemented and offline verified. The owner's 12:12 work-arrival
+report persisted the expected work/absence/co-presence flags in live operation;
+the original departure interpretation remains a separate observation. Existing
+Web/Matrix supervisors automatically restart after Python source changes.
+
 ## Current entry point (2026-10-08)
 
 Start with `handoff.md` for the verified Git snapshot and current boundaries.

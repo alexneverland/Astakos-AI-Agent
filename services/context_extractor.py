@@ -46,7 +46,8 @@ Available flags:
 
 Rules:
 - Return ONLY a JSON object.
-- Include only flags that are clearly confirmed by the message.
+- Include flags grounded by the current report and its timed owner context,
+  including clearly supported consequences for related states.
 - Recent timestamped user messages across all channels are supplied to resolve
   unambiguous pronoun or reference in the current message. They are not current
   state by themselves: never carry a previous location or relationship forward
@@ -57,7 +58,9 @@ Rules:
   Habit or a typical schedule alone never proves current location. Omit flags
   when the current statement and its reference do not establish a state clearly.
 - If you are not sure enough, do not include the flag at all.
-- DO NOT deduce unstated whereabouts. For example, if the user says the kids are alone, DO NOT deduce that the partner is with the user. Only update states explicitly stated.
+- DO NOT invent unstated whereabouts. For example, the kids being alone does not
+  establish that the partner is with the user. Distinguish supported relationship
+  transitions from guesses about another person's location.
 - DO NOT convert future intention into a current state.
 - If the user says they will leave in a bit, that they will go somewhere later, or that they are planning to go, this DOES NOT mean they are already out of the house.
 - Preparing, eating, drinking coffee, or getting ready in order to leave for work means the user is still at their current location until they explicitly say they left or arrived at work.
@@ -229,6 +232,9 @@ def extract_and_update_context_flags(
             "sources": [{"rowid": row["rowid"], "at": row["timestamp"],
                          "channel": row["channel"], "text": row["content"]} for row in daily_rows],
             "stored_context": expected,
+            "state_schema": {"boolean_flags": sorted(_CONTEXT_BOOLEAN_FLAGS),
+                             "enum_flags": {key: sorted(values)
+                                            for key, values in _CONTEXT_ENUM_VALUES.items()}},
         }, ensure_ascii=False))
         if daily_resolution_flags is not None:
             from services.routine_context_evidence import VOLATILE_FLAGS
@@ -238,6 +244,9 @@ def extract_and_update_context_flags(
             prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
                                 "daily_context_resolution.md").read_text(encoding="utf-8")
             prompt += "\nAllowed flags: " + json.dumps(daily_resolution_flags)
+        elif not clarification:
+            prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
+                                "context_state_transition.md").read_text(encoding="utf-8")
         if clarification:
             from services.routine_context_evidence import VOLATILE_FLAGS
 
@@ -269,6 +278,25 @@ def extract_and_update_context_flags(
                 allowed=set(daily_resolution_flags), now=current,
                 still_current=lambda: (get_latest_trusted_user_rowid(**history_options) == source_version
                     and (clarification_still_current is None or clarification_still_current())))
+        source_event_at = None
+        if not clarification and isinstance(payload, dict) and "flags" in payload:
+            if payload == {"flags": {}, "event_rowid": None, "support_rowids": []}:
+                # No live-state inference must not swallow durable routine requests.
+                if get_latest_trusted_user_rowid(**history_options) == source_version:
+                    reconcile_context_message(user_text)
+                return None
+            # Source IDs validate provenance, never the meaning of a state change.
+            if payload.get("event_rowid") != source_version or not any(
+                row["rowid"] == source_version and row["content"] == user_text
+                for row in daily_rows
+            ):
+                return None
+            resolved = _validate_context_resolution(payload, daily_rows, expected,
+                allowed=_CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES),
+                now=current)
+            if resolved is None:
+                return None
+            payload, source_event_at = resolved
         if clarification:
             if (not isinstance(payload, dict)
                     or set(payload) not in ({"relation", "flags"}, {"relation", "flags", "continue_conversation"})
@@ -334,16 +362,24 @@ def extract_and_update_context_flags(
         if payload.get("user_at_work") is True:
             payload["user_out_of_home"] = True
             payload["family_at_home"] = False
-            payload["partner_with_user"] = False
-            payload["kid1_with_user"] = False
+            if source_event_at is not None:
+                payload.setdefault("partner_with_user", False)
+                payload.setdefault("kid1_with_user", False)
+            else:
+                payload["partner_with_user"] = False
+                payload["kid1_with_user"] = False
 
         if payload.get("partner_at_work") is True:
             if payload.get("partner_work_mode") not in valid_partner_work_modes:
                 payload["partner_work_mode"] = "office"
             if payload["partner_work_mode"] == "office":
                 payload["family_at_home"] = False
-                payload["partner_with_user"] = False
-                payload["kid1_with_partner"] = False
+                if source_event_at is not None:
+                    payload.setdefault("partner_with_user", False)
+                    payload.setdefault("kid1_with_partner", False)
+                else:
+                    payload["partner_with_user"] = False
+                    payload["kid1_with_partner"] = False
 
         if payload.get("kid1_with_user") is True:
             payload["kid1_away_from_home"] = False
@@ -371,6 +407,9 @@ def extract_and_update_context_flags(
             """Apply the already validated semantic state through canonical writers."""
             if get_latest_trusted_user_rowid(**history_options) != source_version:
                 return None
+            if source_event_at is not None:
+                return _persist_context_payload(payload, valid_keys, today_str, expected,
+                                                recorded_at=source_event_at)
             return _persist_context_payload(payload, valid_keys, today_str, expected)
 
         applied_flags = (
@@ -410,18 +449,18 @@ def reconcile_context_message(user_text: str) -> None:
         print(f"[ContextReconciler Error]: {type(exc).__name__}")
 
 
-def _commit_daily_resolution(
+def _validate_context_resolution(
     payload: object, rows: list[dict], expected: dict, *, allowed: set[str],
-    now: datetime, still_current: Callable[[], bool],
-) -> ContextExtractionResult | None:
-    """Validate source identity/time, then reuse the canonical conditional writer."""
+    now: datetime,
+) -> tuple[dict, datetime] | None:
+    """Validate typed state and source times without interpreting owner wording."""
     from services.routine_context_evidence import STORED_VALIDITY, _recorded_time
     if not isinstance(payload, dict) or set(payload) != {"flags", "event_rowid", "support_rowids"}:
         return None
     flags, event_id, support = payload["flags"], payload["event_rowid"], payload["support_rowids"]
     sources = {row["rowid"]: row for row in rows}
     if (not isinstance(flags, dict) or not flags or not set(flags) <= allowed
-            or any(type(value) is not bool for value in flags.values())
+            or any(not _valid_context_flag_value(key, value) for key, value in flags.items())
             or type(event_id) is not int or event_id not in sources
             or not isinstance(support, list) or not support or len(support) > 12
             or any(type(value) is not int or value not in sources for value in support)
@@ -437,8 +476,25 @@ def _commit_daily_resolution(
             previous_at = _recorded_time(previous.get("updated_at"), now)
             if previous_at is None or previous_at.timestamp() >= event_at.timestamp():
                 return None
-    if not still_current():
+    return flags, event_at
+
+
+def _valid_context_flag_value(key: str, value: object) -> bool:
+    """Check canonical schema types without inferring any language meaning."""
+    if key in _CONTEXT_ENUM_VALUES:
+        return type(value) is str and value in _CONTEXT_ENUM_VALUES[key]
+    return type(value) is bool
+
+
+def _commit_daily_resolution(
+    payload: object, rows: list[dict], expected: dict, *, allowed: set[str],
+    now: datetime, still_current: Callable[[], bool],
+) -> ContextExtractionResult | None:
+    """Reuse shared source validation and the canonical conditional writer."""
+    resolved = _validate_context_resolution(payload, rows, expected, allowed=allowed, now=now)
+    if resolved is None or not still_current():
         return None
+    flags, event_at = resolved
     updates = {key: (str(value).lower(), event_at.date().isoformat()) for key, value in flags.items()}
     if not set_context_states_if_unchanged(updates, expected, recorded_at=event_at):
         return None
@@ -465,6 +521,7 @@ def resolve_daily_context_before_question(
 
 def _persist_context_payload(
     payload: dict, valid_keys: set[str], today: str, expected: dict[str, dict | None],
+    *, recorded_at: datetime | None = None,
 ) -> frozenset[str] | None:
     """Preserve the shared flag-writing path for ordinary and clarification turns."""
     updates = {}
@@ -476,10 +533,23 @@ def _persist_context_payload(
         expiry = None if payload["kid1_absence_scope"] == "extended" else today
         updates["kid1_absence_scope"] = (payload["kid1_absence_scope"], expiry)
         updates["kid1_away_reason"] = ("", today)
-    for key in ("current_shift", "partner_work_mode"):
-        if key in payload:
+    for key in _CONTEXT_ENUM_VALUES:
+        if key in payload and key != "kid1_absence_scope":
             updates[key] = (payload[key], today)
-    if not set_context_states_if_unchanged(updates, expected):
+    if recorded_at is not None:
+        from services.routine_context_evidence import _recorded_time
+
+        # Consistency-derived updates must also respect newer canonical evidence.
+        for key in updates:
+            previous = expected.get(key)
+            if previous:
+                previous_at = _recorded_time(previous.get("updated_at"), recorded_at)
+                if previous_at is None or previous_at.timestamp() >= recorded_at.timestamp():
+                    return None
+        saved = set_context_states_if_unchanged(updates, expected, recorded_at=recorded_at)
+    else:
+        saved = set_context_states_if_unchanged(updates, expected)
+    if not saved:
         return None
     for key, (value, _) in updates.items():
         print(f"[ContextExtractor] Updated {key} = {value}")

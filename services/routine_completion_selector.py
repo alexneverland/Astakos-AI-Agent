@@ -89,6 +89,7 @@ def select_dated_routine(
     *, now: datetime, trusted: bool,
     pending_question: RoutineFeedbackQuestion | RoutineFeedbackGroupQuestion | None = None,
     conversation_context: list[dict] | None = None,
+    candidate_evidence: dict[int, dict] | None = None,
 ) -> DatedRoutineSelection:
     """Interpret trusted feedback with authoritative dates; remain inactive until wired.
 
@@ -133,7 +134,8 @@ def select_dated_routine(
                        "event_id": pending_question.event_id, "question": pending_question.question}
         data = {"now": now.isoformat(), "timezone": "Europe/Athens",
                 "candidates": [{"routine_id": rid, "name": candidates[rid],
-                                "allowed_dates": sorted(day.isoformat() for day in days)}
+                                "allowed_dates": sorted(day.isoformat() for day in days),
+                                "identity_evidence": (candidate_evidence or {}).get(rid, {})}
                                for rid, days in eligible.items()], "user_text": user_text,
                 "pending_question": pending, "conversation_context": conversation_context or []}
         prompt = load_prompt("routine_feedback_selector.md").replace(

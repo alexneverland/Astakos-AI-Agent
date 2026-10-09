@@ -1,5 +1,33 @@
 # Astakos: Current Tasks
 
+## Dated routine identity evidence (2026-10-09)
+
+- [x] Reproduce missing catalogue evidence before implementation (five failures).
+- [x] Supply snapshot-consistent schedule/conditions and bounded dated engagement
+  to the shared semantic selector; preserve explicit identity and ambiguity.
+- [x] Recheck the entire compared candidate set/outcomes before persistence.
+- [x] Final combined PR regression run: 470 passed, two dependency deprecation
+  warnings; Python compilation and diff review/check passed. Inference is mocked,
+  so live semantic interpretation remains an observation task.
+- [ ] Owner-controlled live identity interpretation observation; existing
+  supervisors automatically reload the changed Python sources.
+- [ ] Separately authorized correction of today's mistaken morning completion.
+- [ ] Git/PR lifecycle authorized on 2026-10-09, including reading review comments.
+
+## General related-state reassessment (2026-10-09)
+
+- [x] Ground ordinary semantic updates in current trusted source IDs/times and
+  reassess all related schema flags, including child presence and work context.
+- [x] Persisted-outcome regression, joint-travel/safety cases and future typed
+  schema entry coverage; 199 focused offline cases passed across two disjoint runs.
+- [x] Fix the stale clarification-test reader patch after reproducing it at HEAD;
+  source-age mutation caught, Python compilation and whitespace checks passed.
+- [x] Owner's 12:12 work-arrival observation persisted work=true, out-of-home=true,
+  partner-with-user=false, family-at-home=false and child-with-user=false.
+- [ ] Live interpretation observation of the original separate departure.
+- [ ] Git/PR lifecycle authorized together with the routine identity repair.
+  No manual live flag rewrite was performed.
+
 ## Current status (2026-10-08)
 
 See `handoff.md` before interpreting older checkpoints. PRs #227 through #236
