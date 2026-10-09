@@ -241,6 +241,45 @@ def test_closed_terminal_does_not_break_matrix_reply_or_saved_trace(tmp_path, mo
     assert load_traces()[0]["response"] == "Βλέπω το στίγμα σου."
 
 
+def test_closed_text_stream_does_not_interrupt_trace_lifecycle(tmp_path, monkeypatch):
+    """A real closed stream raises ValueError rather than BrokenPipeError."""
+    import io
+    import sys
+    from memory.execution_trace import ExecutionTrace, load_traces
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    stream.close()
+    with monkeypatch.context() as context:
+        context.setattr(sys, "stdout", stream)
+        trace = ExecutionTrace("web", "offline closed stream")
+        trace.mark_phase("graph_used", 0)
+        trace.finalize(response="ready")
+        trace.save()
+    assert load_traces()[0]["response"] == "ready"
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_telegram_photo_error_or_empty_response_retains_trace(monkeypatch, capsys, fail):
+    """Photo graph errors and empty replies both complete and persist their trace."""
+    from clients import telegram_bot as bot
+    from memory.execution_trace import load_traces
+    monkeypatch.setattr(bot, "_load_shared_context_messages", lambda _: [])
+    monkeypatch.setattr("tools.telegram.send_telegram_msg", lambda *args: 1)
+    def stream(*args, **kwargs):
+        yield {"Home_Agent": {"messages": [AIMessage(content="", tool_calls=[{
+            "name": "read_local_file", "id": "photo-pending", "args": {}}])]}}
+        if fail:
+            raise RuntimeError("offline photo failure")
+    monkeypatch.setattr(bot.graph, "stream", stream)
+    bot._process_photo_with_question("offline.png", "offline.png", "offline analysis", "offline question", "user123")
+    rows = load_traces()
+    assert len(rows) == 1
+    assert rows[0]["error"] == ("RuntimeError" if fail else "NoResponse")
+    assert rows[0]["tool_calls"][0]["status"] == "unresolved"
+    logs = [json.loads(line.removeprefix("[TelegramTrace]: "))
+        for line in capsys.readouterr().out.splitlines() if line.startswith("[TelegramTrace]: ")]
+    assert sum(row["event"] == "turn_finished" for row in logs) == 1
+
+
 def test_console_output_can_be_disabled_explicitly(capsys):
     """Offline callers may explicitly keep only the stored trace sink."""
     from memory.execution_trace import ExecutionTrace

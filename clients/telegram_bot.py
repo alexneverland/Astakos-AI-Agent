@@ -25,6 +25,7 @@ import re
 import threading
 import queue
 from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING
 from datetime import datetime
 from time import perf_counter
 from zoneinfo import ZoneInfo
@@ -42,6 +43,9 @@ import core.i18n
 from core.i18n import t
 from core.voice_delivery import build_voice_delivery_context
 from core.messaging_channel import resolve_external_channel
+
+if TYPE_CHECKING:
+    from memory.execution_trace import ExecutionTrace
 
 
 logger = logging.getLogger(__name__)
@@ -1463,6 +1467,8 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         content=user_log_msg,
         additional_kwargs=external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE]),
     )
+    _ptrace = None
+    trace_error = None
     try:
         from memory.execution_trace import ExecutionTrace
         _ptrace = ExecutionTrace(channel="telegram", user_message=user_log_msg)
@@ -1478,11 +1484,15 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
                         candidate = clean_message(msgs[-1].content).strip()
                         if candidate:
                             final_response = candidate
-        _ptrace.finalize(response=final_response or None)
-        _ptrace.save()
     except Exception as e:
+        trace_error = type(e).__name__
         send_telegram_msg(f"❌ Photo processing error: {e}")
         return
+    finally:
+        if _ptrace is not None:
+            _ptrace.finalize(response=final_response or None,
+                error=trace_error or ("NoResponse" if not final_response else None))
+            _ptrace.save()
 
     if not final_response:
         send_telegram_msg(t("clients.telegram_bot.bot_msg_226c6b"))
@@ -2048,21 +2058,29 @@ def _build_fast_chat_context(
     return context_msgs, current_msg
 
 def _run_fast_chat_path(
-    context_msgs,
-    current_msg,
+    context_msgs: list,
+    current_msg: HumanMessage,
     *,
     routine_draft_offer_authorized: bool = False,
-):
+    trace: "ExecutionTrace | None" = None,
+) -> list[dict]:
     """Run the compact Telegram graph path with room for bounded read-tool chains."""
     graph_state = {"messages": context_msgs[-6:] + [current_msg], "channel": "telegram"}
     if routine_draft_offer_authorized:
         graph_state["routine_draft_offer_authorized"] = True
-    return list(
-        graph.stream(
-            graph_state,
-            {"recursion_limit": 24},
-        )
-    )
+    return _collect_telegram_graph_events(graph_state, 24, trace)
+
+
+def _collect_telegram_graph_events(
+    graph_state: dict, limit: int, trace: "ExecutionTrace | None" = None,
+) -> list[dict]:
+    """Record events as they arrive, retaining evidence if the stream raises."""
+    events = []
+    for event in graph.stream(graph_state, {"recursion_limit": limit}):
+        if trace is not None:
+            trace.process_event(event)
+        events.append(event)
+    return events
 
 
 def _prepare_telegram_message(
@@ -2774,6 +2792,7 @@ def handle_message(
                 from memory.execution_trace import ExecutionTrace
                 _trace = ExecutionTrace(channel="telegram", user_message=clean_user_text)
                 _trace.mark_phase("messenger_intent_confirm_intercept_pending", 1)
+                _trace.finalize()
                 _trace.save()
             except Exception:
                 pass
@@ -2793,6 +2812,9 @@ def handle_message(
     typing_thread = threading.Thread(target=_typing_loop, daemon=True)
     typing_thread.start()
 
+    _trace = None
+    trace_response = None
+    trace_error = None
     try:
         # ── Context: shared mixed history from SQLite ────────────
         t_context_0 = perf_counter()
@@ -2865,29 +2887,20 @@ def handle_message(
                     context_msgs,
                     current_msg,
                     routine_draft_offer_authorized=routine_draft_offer_authorized,
+                    trace=_trace,
                 )
             elif medium_path_used:
                 provenance_messages_for_reply = context_msgs[-8:] + [current_msg]
                 graph_state = {"messages": context_msgs[-8:] + [current_msg], "channel": "telegram"}
                 if routine_draft_offer_authorized:
                     graph_state["routine_draft_offer_authorized"] = True
-                events = list(
-                    graph.stream(
-                        graph_state,
-                        {"recursion_limit": 24},
-                    )
-                )
+                events = _collect_telegram_graph_events(graph_state, 24, _trace)
             else:
                 provenance_messages_for_reply = context_msgs + [current_msg]
                 graph_state = {"messages": context_msgs + [current_msg], "channel": "telegram"}
                 if routine_draft_offer_authorized:
                     graph_state["routine_draft_offer_authorized"] = True
-                events = list(
-                    graph.stream(
-                        graph_state,
-                        {"recursion_limit": 100},
-                    )
-                )
+                events = _collect_telegram_graph_events(graph_state, 100, _trace)
         graph_call_ms = int((perf_counter() - graph_call_started) * 1000)
         _trace.mark_phase("graph_call_ms", graph_call_ms)
         _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
@@ -2899,9 +2912,6 @@ def handle_message(
             _trace.mark_phase("telegram_graph_budget", 24)
         else:
             _trace.mark_phase("telegram_graph_budget", 100)
-
-        for event in events:
-            _trace.process_event(event)
 
         # 2. graph_result_extract_ms
         extract_started = perf_counter()
@@ -3028,6 +3038,7 @@ def handle_message(
 
         if not final_ai_response:
             # [MASTRO-FIX]: Fallback when the agent did not generate text (e.g., loop/recursion)
+            trace_error = "NoResponse"
             send_telegram_msg(t("clients.telegram_bot.bot_msg_125f2d"))
             return
 
@@ -3046,7 +3057,7 @@ def handle_message(
         _trace.mark_phase("final_response_build_ms", final_response_build_ms)
 
         _trace.agent = handling_agent
-        _trace.finalize(response=final_ai_response or None)
+        trace_response = final_ai_response or None
 
         if final_ai_response:
             final_ai_response = _strip_existing_time_prefix(final_ai_response)
@@ -3119,11 +3130,16 @@ def handle_message(
             
             background_enqueue_ms = int((perf_counter() - t_bg_0) * 1000)
             _trace.mark_phase("background_enqueue_ms", background_enqueue_ms)
-            _trace.save()
-
     except Exception as e:
+        trace_error = type(e).__name__
         _typing_active["on"] = False  # We stop typing even on error
         send_telegram_msg(t("clients.telegram_bot.bot_msg_error", e=str(e)))
+    finally:
+        _typing_active["on"] = False
+        if _trace is not None:
+            _trace.finalize(response=trace_response,
+                error=trace_error or ("NoResponse" if not trace_response else None))
+            _trace.save()
 
 def _send_photo_to_telegram(photo_path: str, chat_id: str):
     """Sends a photo file to the Telegram chat."""

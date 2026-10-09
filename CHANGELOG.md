@@ -26,6 +26,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Web and Telegram graph traces complete and persist on exceptions and empty
+  responses, including Telegram photo failures and pending approval intercepts.
+  Telegram retains streamed tool evidence before a graph failure; closed terminal
+  streams cannot abort a turn through the trace console sink.
+
 - Execution trace previews redact private-key and passphrase fields and PEM key
   blocks. Text redaction avoids polynomial regex backtracking on long input.
 

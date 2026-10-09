@@ -175,7 +175,7 @@ class ExecutionTrace:
         }
         try:
             print(f"[{self.channel.title()}Trace]: " + json.dumps(record, ensure_ascii=False), flush=True)
-        except (OSError, UnicodeError):
+        except (OSError, UnicodeError, ValueError):
             # A closed/unsupported terminal must not change execution or persistence.
             pass
 

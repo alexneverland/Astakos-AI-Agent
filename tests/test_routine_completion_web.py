@@ -300,6 +300,30 @@ def test_web_failed_user_persistence_cannot_mutate_routine(client: TestClient) -
         mocks[key].assert_not_called()
 
 
+@pytest.mark.parametrize("outcome", ["error", "empty", "success"])
+def test_web_trace_is_finalized_and_saved_on_graph_exit(client, capsys, outcome):
+    """Real endpoint exits preserve a single completed trace with pending evidence."""
+    import json
+    from langchain_core.messages import AIMessage
+    from memory.execution_trace import load_traces
+    def run(messages, limit, trace):
+        trace.process_event({"Home_Agent": {"messages": [AIMessage(content="", tool_calls=[{
+            "name": "get_current_location", "id": "pending-web", "args": {}}])]}})
+        if outcome == "error":
+            raise RuntimeError("offline graph failure")
+        return {**_graph_result(), "final_ai_response": "" if outcome == "empty" else "ready"}
+    with patch("api.server._tool_results_fallback_response", return_value=""):
+        response, _ = _post_chat(client, graph_runner=MagicMock(side_effect=run))
+    assert response.status_code == (500 if outcome == "error" else 200)
+    rows = load_traces()
+    assert len(rows) == 1
+    assert rows[0]["error"] == {"error": "RuntimeError", "empty": "NoResponse", "success": None}[outcome]
+    assert rows[0]["tool_calls"][0]["status"] == "unresolved"
+    logs = [json.loads(line.removeprefix("[WebTrace]: "))
+        for line in capsys.readouterr().out.splitlines() if line.startswith("[WebTrace]: ")]
+    assert sum(row["event"] == "turn_finished" for row in logs) == 1
+
+
 @pytest.mark.parametrize("dated", [False, True])
 def test_web_photo_chat_cannot_complete_routine_before_asset_analysis(client, tmp_path, dated):
     """An attachment caption must not consume a routine before graph provenance exists."""

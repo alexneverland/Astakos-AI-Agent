@@ -56,6 +56,10 @@ correlation ID is supplied. Logging is on by default for these channels;
 offline callers can explicitly pass `console=False` to retain only stored traces.
 Tool arguments/results and final replies use the same bounded, credential-redacted
 previews as the stored traces. A failed terminal write does not interrupt a turn.
+Web and Telegram graph traces finalize and save from cleanup on success,
+exceptions and empty replies (`NoResponse`). Telegram records stream events as
+they arrive, so a later exception retains earlier pending tool calls. Awaiting
+approval is an intercepted, completed trace; it is not an executed tool call.
 These lines appear in each worker's console/container output; the durable
 record remains the shared day trace file. They describe observable execution,
 not private model reasoning or transport delivery confirmation.

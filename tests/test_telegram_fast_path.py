@@ -19,7 +19,7 @@ def isolated_routine_and_context_boundary(monkeypatch: pytest.MonkeyPatch) -> No
     import services.routine_context_clarification as clarification
 
     monkeypatch.setattr(bot, "pending_routine_confirmations", {})
-    monkeypatch.setattr(routine_db, "get_eligible_preemptive_routines_for_day", lambda: [])
+    monkeypatch.setattr(routine_db, "get_eligible_preemptive_routines_for_day", lambda *args, **kwargs: [])
     monkeypatch.setattr(routine_db, "get_active_routine_catalog", lambda: [])
     monkeypatch.setattr(pending_assets, "get_latest_pending_asset_any", lambda *_args: None)
     monkeypatch.setattr(clarification, "try_context_question_reply",
@@ -137,6 +137,66 @@ def test_handle_message_ultra_light_ack_sends_reply_without_graph(monkeypatch, c
     assert any(row["event"] == "turn_finished" and row["response"] == "ACK" for row in rows)
     assert not any(row["event"] in {"graph_step", "tool_called"} for row in rows)
     assert execution_trace.load_traces()[0]["response"] == "ACK"
+
+
+@pytest.mark.parametrize("mode", ["fast", "medium", "full"])
+@pytest.mark.parametrize("outcome", ["error", "empty", "success", "send_error", "pending"])
+def test_telegram_trace_completes_on_every_exit(monkeypatch, capsys, mode, outcome):
+    """Real handler failures and early returns retain one completed offline trace."""
+    import json
+    from langchain_core.messages import AIMessage, HumanMessage
+    import clients.telegram_bot as bot
+    import core.utils as utils
+    import memory.pending_assets as pending_assets
+    from memory.execution_trace import load_traces
+    from services.messenger_intent import MessengerIntentResult
+    sent = []
+    monkeypatch.setattr(bot, "pending_reflection_confirmations", {})
+    monkeypatch.setattr(bot, "pending_exec_command", None)
+    monkeypatch.setattr(bot, "pending_photo", None)
+    monkeypatch.setattr(bot, "_safe_active_draft_status", lambda: (True, "active", {"message": "draft", "target_name": "offline"}) if outcome == "pending" else (False, "missing", None))
+    monkeypatch.setattr(bot, "_safe_classify_messenger_intent", lambda *_args, **_kwargs:
+        MessengerIntentResult(intent="confirm_send", confidence=1) if outcome == "pending" else None)
+    monkeypatch.setattr("core.approval.save_pending", lambda *args, **kwargs: None)
+    monkeypatch.setattr("core.approval._notify_telegram", lambda *args: None)
+    monkeypatch.setattr(bot, "_build_fast_chat_context", lambda text, **kwargs: ([], HumanMessage(content=text)))
+    monkeypatch.setattr(bot, "_append_to_analytics_log", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(bot, "_cache_bot_message", lambda *args: None)
+    monkeypatch.setattr(bot, "_schedule_capability_gap_if_valid", lambda *args: None)
+    monkeypatch.setattr(bot, "enqueue_fast_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "enqueue_slow_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot.threading, "Thread", lambda *args, **kwargs: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(pending_assets, "clear_expired_pending_assets", lambda: None)
+    monkeypatch.setattr(pending_assets, "get_latest_pending_asset", lambda *args: None)
+    monkeypatch.setattr(utils, "is_ultra_light_ack", lambda _: False)
+    monkeypatch.setattr(utils, "is_simple_chat_fast_path_candidate", lambda _: mode == "fast")
+    monkeypatch.setattr(utils, "is_medium_web_chat_path_candidate", lambda _: mode == "medium")
+    monkeypatch.setattr(utils, "is_reply_to_recent_mail_prompt", lambda _: False)
+    monkeypatch.setattr(utils, "is_reply_to_recent_linkedin_prompt", lambda _: False)
+    monkeypatch.setattr(bot, "_tool_results_fallback_response", lambda *args: "")
+    def stream(*args, **kwargs):
+        yield {"Home_Agent": {"messages": [AIMessage(content="", tool_calls=[{
+            "name": "get_current_location", "id": "pending-telegram", "args": {}}])]}}
+        if outcome == "error":
+            raise RuntimeError("offline graph failure")
+        yield {"Home_Agent": {"messages": [AIMessage(content="" if outcome == "empty" else "ready")]}}
+    monkeypatch.setattr(bot.graph, "stream", stream)
+    def send(text):
+        sent.append(text)
+        if outcome == "send_error" and len(sent) == 1:
+            raise RuntimeError("offline send failure")
+        return 1
+    monkeypatch.setattr("tools.telegram.send_telegram_msg", send)
+    bot.handle_message("offline owner request", "user123")
+    rows = load_traces()
+    assert len(rows) == 1
+    assert rows[0]["error"] == {"error": "RuntimeError", "send_error": "RuntimeError", "empty": "NoResponse", "success": None, "pending": None}[outcome]
+    assert rows[0]["duration_ms"] >= 0
+    if outcome != "pending":
+        assert rows[0]["tool_calls"][0]["status"] == "unresolved"
+    logs = [json.loads(line.removeprefix("[TelegramTrace]: "))
+        for line in capsys.readouterr().out.splitlines() if line.startswith("[TelegramTrace]: ")]
+    assert sum(row["event"] == "turn_finished" for row in logs) == 1
 
 
 @patch("memory.pending_assets.get_latest_pending_asset", return_value=None)
