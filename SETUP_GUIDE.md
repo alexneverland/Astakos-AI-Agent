@@ -4,9 +4,14 @@ Run your own personal AI assistant on your computer without manually building a 
 
 The recommended installation uses **Docker Desktop**. Docker installs the Python dependencies, browser components, and runtime services inside an isolated container while your memories, settings, databases, and files remain on your computer: in the project folder for a source build or in a named Docker volume for the release image.
 
-This guide follows source `main` through PR #238 (2026-10-09). The latest
-published release is v2.7.0; newer routines, context and backup behavior may require
-source `main` and explicit setup. See [release readiness](docs/release-readiness.md).
+This guide covers **v2.8.0** (2026-10-09), including the guided Wizard and native
+Office provisioning. Optional services still require the explicit setup below.
+See [release verification and upgrade notes](docs/release-readiness.md).
+
+Use this guide with the v2.8.0 source/tag or verified release artifacts. Until
+its publishing workflow and GitHub release complete, `latest` may still deliver
+v2.7.0; confirm the [v2.8.0 release](https://github.com/alexneverland/Astakos-AI-Agent/releases/tag/v2.8.0)
+is available before using the release downloads.
 
 > **What you need:** Docker Desktop, one supported AI provider, and about 10 minutes for the first setup.
 

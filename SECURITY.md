@@ -6,8 +6,8 @@ Please always use the latest version of Astakos for security updates.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| v2.7.x  | :white_check_mark: |
-| < 2.7   | :x:                |
+| v2.8.x  | :white_check_mark: |
+| < 2.8   | :x:                |
 
 ## Deployment Boundary
 

@@ -21,13 +21,18 @@ Astakos remembers useful context, learns recurring routines, follows up naturall
 
 ## Documentation checkpoint
 
-This README describes merged `main` through PR #238 and the accompanying
-fresh-install readiness changes (2026-10-09). The latest
-published release remains **v2.7.0**; a source checkout can contain newer features
-than the release image or ZIP. See [Unreleased changes](CHANGELOG.md),
+This README describes **v2.8.0** (2026-10-09), including the fresh-install
+readiness changes from PR #240. Use the versioned release image or ZIP for this
+checkpoint; source `main` may later contain newer changes. See [release notes](CHANGELOG.md),
 [routines and context](docs/routines-and-context.md),
 [data backups](docs/daily-data-backup.md) and the
-[proposed v2.8.0 assessment](docs/release-readiness.md).
+[v2.8.0 verification and upgrade notes](docs/release-readiness.md).
+
+Release availability is separate from this documentation checkpoint. Until the
+v2.8.0 tag's publishing workflow succeeds and its GitHub release is published,
+`latest` downloads/images may still provide v2.7.0. Check the
+[v2.8.0 release](https://github.com/alexneverland/Astakos-AI-Agent/releases/tag/v2.8.0)
+before following this version's setup instructions.
 
 ## Recommended: Docker with Automatic Updates
 

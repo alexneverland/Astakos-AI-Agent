@@ -12,10 +12,10 @@
 - [Routines and Context](/docs/routines-and-context.md): Related flags, freshness, status, dated feedback and approvals
 - [Daily Data Backup](/docs/daily-data-backup.md): Windows cold snapshot inventory, scheduling and recovery limits
 - [Matrix Recovery](/docs/matrix-backup-recovery.md): Encrypted server/bot backup and dated restore evidence
-- [Release Readiness](/docs/release-readiness.md): Proposed v2.8.0; published VERSION remains 2.7.0
+- [Release Readiness](/docs/release-readiness.md): v2.8.0 verification and upgrade boundaries
 
 Web, Telegram and Matrix share history; one external transport is selected.
-Source main includes newer features than the latest published v2.7.0 release.
+The 2026-10-09 documentation checkpoint covers v2.8.0; later source main can contain newer features.
 Normal routine database setup provisions dated feedback storage without resetting
 existing records. The Wizard guides locations, Office provisioning and optional integrations. External actions retain approval; Matrix uses exact Reply.
 

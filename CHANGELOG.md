@@ -7,9 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-Scope: merged `main` through PR #238 plus fresh-install readiness, 2026-10-09. Proposed release: **v2.8.0**;
-`VERSION` and the published release remain **v2.7.0**. See
-[release readiness](docs/release-readiness.md) before publishing.
+## [v2.8.0] — 2026-10-09
+
+Headline: **Matrix/Element conversation, context-aware routines, behavioral
+conversation, native file tools and guided fresh-install configuration.**
 
 ### Added
 
@@ -34,6 +35,7 @@ Scope: merged `main` through PR #238 plus fresh-install readiness, 2026-10-09. P
 
 ### Fixed
 
+- Wizard readiness and execution verify the native Office artifact's pinned size/SHA-256; invalid local binaries cannot hide a verified Linux fallback. Explicitly cleared optional non-secret settings no longer retain stale values.
 - Fresh/legacy dated feedback activation during canonical startup, atomic rollback and history preservation; release updates no longer replace registered context flags or remove runtime JSON/Matrix crypto/media/backups.
 - Stale, unsaved or ungrounded reports replacing newer context; same-second latest saved reports now pass the ordinary grounded path while preserving history/version guards.
 - Morning/afternoon routine mix-ups after expired preparation engagement, and selector compatibility when injecting routine evidence.
@@ -41,9 +43,14 @@ Scope: merged `main` through PR #238 plus fresh-install readiness, 2026-10-09. P
 - Follow-up continuity, supplied-link research failures, redundant research work, proactive timing/quiet checks and fact provenance/deduplication.
 - Graceful external shutdown and backup supervisor recovery, including headless Windows Scheduler handle failures.
 
+### Security
+
+- Updated `pypdf` to 6.19.0 for the available PDF parsing runtime/memory exhaustion fixes.
+- ChromaDB remains embedded/local; its unpatched server API advisories remain open. Do not expose a Chroma HTTP server.
+
 ### Upgrade notes
 
-- Source `main` contains these changes before a versioned image is published. A repository merge alone does not update the release image.
+- Use the v2.8.0 release assets and image for these changes; a repository merge alone does not update the release image.
 - Normal routine startup provisions dated feedback storage transactionally for fresh/legacy installations, preserving routines, history and baselines without reset or backfill.
 - Release Docker runtime persistence uses named data/workspace volumes and a separate credentials mount. Selective data backups exclude credentials, `.env`, code and unindexed outputs; Matrix/Element recovery is separate.
 - Recorded backup capture, upload and isolated extraction do not prove full application or replacement-host/client recovery. Preserve the documented recovery limits.
