@@ -105,6 +105,16 @@ for index in range(20):
     '[UNTRUSTED TOOL RESULT] API key: private-preview-secret',
     '{"nested":{"passwordHash":"private-preview-secret"}}',
     'Authorization: Bearer private-preview-secret',
+    '{"private_key":"private-preview-secret"}',
+    '{"nested":{"passphrase":"private-preview-secret"}}',
+    '[UNTRUSTED TOOL RESULT] private_key: "private-preview-secret"',
+    "pass_phrase='private-preview-secret'",
+    'private_key="-----BEGIN PRIVATE KEY-----\nprivate-preview-secret\n-----END PRIVATE KEY-----"',
+    '-----BEGIN RSA PRIVATE KEY-----\nprivate-preview-secret\n-----END RSA PRIVATE KEY-----',
+    '-----BEGIN PRIVATE KEY-----\nprivate-preview-secret',
+    'private key: "private-preview-secret"',
+    'passphrase="escaped\\\"private-preview-secret"',
+    '[UNTRUSTED TOOL RESULT] {"private_key":"private-preview-secret"}',
 ])
 def test_persisted_tool_previews_redact_credentials_before_truncation(content):
     from memory.execution_trace import ExecutionTrace, load_traces
@@ -115,3 +125,41 @@ def test_persisted_tool_previews_redact_credentials_before_truncation(content):
     trace.save()
     assert "private-preview-secret" not in json.dumps(load_traces())
     assert "REDACTED" in load_traces()[0]["tool_calls"][0]["result"]
+
+
+def test_redaction_large_adversarial_input_finishes_within_budget():
+    """Use a process deadline so a backtracking regression cannot hang pytest."""
+    import subprocess
+    import sys
+    source = '''
+from memory.execution_trace import _truncate
+for value in ('-' * 20000, 'x' * 20000, ' ' * 20000):
+    assert len(_truncate(value)) == 301
+'''
+    result = subprocess.run([sys.executable, "-c", source], capture_output=True,
+                            text=True, timeout=3)
+    assert result.returncode == 0, result.stderr
+
+
+def test_redaction_preserves_safe_geometry_and_redacts_all_trace_previews():
+    """Persist argument, result, user and response previews through the recorder."""
+    from memory.execution_trace import ExecutionTrace, load_traces
+    trace = ExecutionTrace("matrix", 'passphrase="private-preview-secret"')
+    trace.process_event({"Home_Agent": {"messages": [AIMessage(content="", tool_calls=[{
+        "id": "keys", "name": "read_local_file",
+        "args": {"private_key": "private-preview-secret", "lat": 40.6449}}])]}})
+    trace.process_event({"tools": {"messages": [ToolMessage(name="read_local_file",
+        tool_call_id="keys", content='{"lat":40.6449,"private_key":"private-preview-secret"}')]}})
+    trace.finalize(response="passphrase=private-preview-secret")
+    trace.save()
+    rows = load_traces()
+    assert "private-preview-secret" not in json.dumps(rows)
+    assert '40.6449' in rows[0]["tool_calls"][0]["args"]
+    assert '40.6449' in rows[0]["tool_calls"][0]["result"]
+
+
+def test_redaction_retains_public_keys_and_ordinary_text():
+    """Nearby non-credential data remains useful diagnostic evidence."""
+    from memory.execution_trace import _redact_preview
+    value = '{"public_key":"synthetic-public-value","place":"Park","lat":40.6449}'
+    assert json.loads(_redact_preview(value)) == json.loads(value)

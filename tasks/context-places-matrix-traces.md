@@ -78,3 +78,20 @@ disconnects, no queue writes, and a successful subsequent authenticated fix.
 Final combined pre-PR verification: 384 tests passed across 18 related modules,
 with the same two dependency deprecation warnings; compilation and diff checks
 passed. All changes are published together in one pull request.
+
+## PR #245 review follow-up
+
+Confirmed both latest-commit findings: private_key/passphrase previews leaked
+synthetic secrets, and repeated hyphens triggered polynomial regex work. Nine
+new regression cases failed before repair (including the isolated process
+deadline). Use one credential-field recognizer for structured/text previews,
+forward-only token/value scans, and complete/interrupted PEM-block removal.
+Preserve non-secret geometry, public-key fields and normal text.
+
+Same synthetic timing command before/after: 4,000 hyphens took approximately
+543 ms / 0.18 ms. A separate process guards 20,000-character adversarial inputs
+with a three-second deadline, so regressions cannot hang the test runner.
+
+Final follow-up verification: 397 related offline tests passed (the same two
+dependency warnings); compilation and diff checks passed. Both review findings
+are addressed in the existing PR; historical traces are not rewritten.

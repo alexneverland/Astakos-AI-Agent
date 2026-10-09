@@ -22,6 +22,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Execution trace previews redact private-key and passphrase fields and PEM key
+  blocks. Text redaction avoids polynomial regex backtracking on long input.
+
 - Interrupted OwnTracks uploads are rejected without an unhandled traceback or
   accepting partial location data; subsequent authenticated uploads remain usable.
 

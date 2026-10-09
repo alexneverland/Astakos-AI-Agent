@@ -36,13 +36,84 @@ def _truncate(val, maxlen: int = _MAX_STR) -> str:
     return s[:maxlen] + ("…" if len(s) > maxlen else "")
 
 
+def _credential_field(key: str) -> bool:
+    """Recognize credential field names consistently in JSON and text."""
+    normalized = key.casefold().replace("_", "").replace("-", "").replace(" ", "")
+    return any(part in normalized for part in (
+        "token", "password", "secret", "apikey", "authorization", "credentials",
+        "privatekey", "passphrase"))
+
+
+def _redact_private_key_blocks(value: str) -> str:
+    """Remove complete or interrupted PEM private keys with forward-only scans."""
+    chunks: list[str] = []
+    cursor = 0
+    headers = re.finditer(r"-----BEGIN ([A-Z0-9 ]*PRIVATE KEY)-----", value)
+    for header in headers:
+        if header.start() < cursor:
+            continue
+        closing = "-----END " + header[1] + "-----"
+        end = value.find(closing, header.end())
+        end = len(value) if end < 0 else end + len(closing)
+        chunks.extend((value[cursor:header.start()], "[REDACTED]"))
+        cursor = end
+    chunks.append(value[cursor:])
+    return "".join(chunks)
+
+
+def _redact_text_fields(value: str) -> str:
+    """Scan field tokens once; consume quoted values without regex backtracking."""
+    chunks: list[str] = []
+    cursor = 0
+    for field in re.finditer(r"[\w-]+", value):
+        if field.start() < cursor:
+            continue
+        key, end = field[0], field.end()
+        # Preserve support for prose labels such as "API key" and "private key".
+        if key.casefold() in {"api", "private"}:
+            second = end
+            while second < len(value) and value[second] in " \t":
+                second += 1
+            if value[second:second + 3].casefold() == "key":
+                key += "key"
+                end = second + 3
+        if not _credential_field(key):
+            continue
+        if end < len(value) and value[end] in "\"'":
+            end += 1
+        while end < len(value) and value[end].isspace():
+            end += 1
+        if end == len(value) or value[end] not in ":=":
+            continue
+        end += 1
+        while end < len(value) and value[end].isspace():
+            end += 1
+        start = end
+        if end < len(value) and value[end] in "\"'":
+            quote = value[end]
+            end += 1
+            while end < len(value):
+                char = value[end]
+                end += 1
+                if char == "\\":
+                    end = min(end + 1, len(value))
+                elif char == quote:
+                    break
+        else:
+            while end < len(value) and not value[end].isspace() and value[end] not in ",;}<":
+                end += 1
+        chunks.extend((value[cursor:start], '"[REDACTED]"'))
+        cursor = end
+    chunks.append(value[cursor:])
+    return "".join(chunks)
+
+
 def _redact_preview(value: str) -> str:
     """Redact credential-shaped fields before truncating diagnostic previews."""
     def redact(data: object) -> object:
         """Walk structured previews without copying credential values."""
         if isinstance(data, dict):
-            return {key: ("[REDACTED]" if re.search(
-                r"token$|password|secret|api.?key|authorization|credentials", str(key), re.I)
+            return {key: ("[REDACTED]" if _credential_field(str(key))
                 else redact(item)) for key, item in data.items()}
         if isinstance(data, list):
             return [redact(item) for item in data]
@@ -53,10 +124,9 @@ def _redact_preview(value: str) -> str:
             value = json.dumps(redact(decoded), ensure_ascii=False)
     except (ValueError, TypeError):
         pass
+    value = _redact_private_key_blocks(value)
     value = re.sub(r"(?i)\bBearer\s+[^\s\"'<>]+", "Bearer [REDACTED]", value)
-    return re.sub(
-        r'''(?i)([\w-]*(?:token|password|secret|api[_ -]?key|authorization|credentials)[\w-]*["']?\s*[:=]\s*)("[^"\n]*"|'[^'\n]*'|[^\s,;}<]+)''',
-        lambda match: match[1] + '"[REDACTED]"', value)
+    return _redact_text_fields(value)
 
 
 class ExecutionTrace:

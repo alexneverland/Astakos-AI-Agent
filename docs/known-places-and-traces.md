@@ -48,8 +48,12 @@ they are not proof that an external operation failed or succeeded.
 
 The existing `/debug/traces` view can read both channels. Thread and process locks
 serialize Web/Matrix appends to the same day file. Credential-shaped fields and
-bearer tokens are redacted before previews are truncated. Previews are bounded
-local diagnostic data, not full transcripts or retroactive traces for old turns.
+bearer tokens are redacted before previews are truncated.
+Credential fields include private keys and passphrases; complete or interrupted
+PEM private-key blocks are also hidden. Text field values are scanned without
+backtracking, including quoted multiline values, before the preview limit applies.
+Previews are bounded local diagnostic data, not full transcripts or retroactive
+traces for old turns.
 Background context/memory queues have separate evidence; a graph trace does not
 claim to record their full lifecycle. A generated response also does not prove
 Matrix transport delivery: check the actual recorded external message receipt.
