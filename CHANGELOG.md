@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A new local reminder grounded in the owner's current request no longer requires
+  approval solely because unrelated external content remains in older history.
+  Ambiguous requests, failed validation and fresh external results retain their
+  safety gates.
+- Matrix confirmations after reminder approval include the actual tool result
+  and task, preserve returned errors, and persist the outcome with its original
+  external-source provenance.
+
 ## [v2.8.0] — 2026-10-09
 
 Headline: **Matrix/Element conversation, context-aware routines, behavioral

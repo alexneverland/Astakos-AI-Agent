@@ -15,6 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 def isolated_external_channel(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep legacy approval mocks independent of the owner's selected transport."""
     monkeypatch.setenv("ASTAKOS_EXTERNAL_CHANNEL", "telegram")
+    monkeypatch.setattr("services.reminder_intent.is_grounded_reminder_request", lambda *args: False)
 
 
 @pytest.mark.parametrize(

@@ -184,6 +184,13 @@ messages to another person. The release compose file starts Astakos, not a
 Matrix homeserver; operate and back up that server separately. See the
 [Matrix recovery runbook](docs/matrix-backup-recovery.md).
 
+In source versions after v2.8.0, a new local reminder grounded in your own current request follows the normal
+WARNING policy, even after an unrelated memory or web lookup. If its task or
+schedule depends on external content, is ambiguous, or cannot be validated,
+approval remains required. Fresh external tool results retain their safety gate.
+After an approved reminder runs, Matrix shows its actual result and task and
+records the outcome in the originating history; a tool error remains visible.
+
 The wizard's diagnostics show whether chat, semantic memory, and optional Google Workspace integrations are ready. A missing embeddings provider does not stop basic chat and tools, but long-term semantic recall remains unavailable until it is configured.
 
 ### Optional: declare your weekly routines

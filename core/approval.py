@@ -238,6 +238,28 @@ def _is_direct_user_meal_log(
         return is_meal_report(str(getattr(message, "content", "")))
     return False
 
+def _is_direct_user_reminder_request(
+    tool_call: ToolCall, prior_messages: Sequence[BaseMessage],
+) -> bool:
+    """Exempt grounded creation from old provenance, never same-turn blocks."""
+    if tool_call.get("name") != "set_local_reminder":
+        return False
+    from core.untrusted_content import external_content_source_names, is_direct_user_message
+    from services.reminder_intent import is_grounded_reminder_request
+
+    human_messages = [m for m in prior_messages if getattr(m, "type", "") == "human"]
+    if not human_messages or not is_direct_user_message(human_messages[-1]):
+        return False
+    latest = human_messages[-1]
+    if external_content_source_names(getattr(latest, "additional_kwargs", {})):
+        return False
+    context = [m.content for m in human_messages[:-1][-6:]
+        if is_direct_user_message(m)
+        and not external_content_source_names(getattr(m, "additional_kwargs", {}))
+        and isinstance(m.content, str)]
+    return is_grounded_reminder_request(latest.content, tool_call.get("args", {}), context)
+
+
 def is_critical(tc: dict) -> bool:
     return _effective_risk(tc) == "CRITICAL"
 
@@ -474,6 +496,7 @@ def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
         "status": "executed",
         "tool": tool_name,
         "result": result,
+        "reminder_task": invoke_args.get("task", "") if tool_name == "set_local_reminder" else "",
         "continuation_context": item.get("continuation_context"),
         "channel": item.get("channel", "telegram"),
     }
@@ -706,6 +729,7 @@ def approval_check_node(state):
             )
             and not _is_direct_user_meal_log(tc, prior_messages)
             and tc["id"] not in blocked_call_ids
+            and not _is_direct_user_reminder_request(tc, prior_messages)
         )
     }
 

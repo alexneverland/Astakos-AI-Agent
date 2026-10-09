@@ -213,6 +213,12 @@ def _approval_result_text(result: object | None) -> str | None:
             else "core.approval.messenger_send_failed"
         )
     if status == "executed":
+        if tool_name == "set_local_reminder":
+            output = getattr(result, "execution_result", None)
+            if isinstance(output, str) and output.strip():
+                task = getattr(result, "reminder_task", "")
+                return output[:10000] + ("\n" + task[:2048] if isinstance(task, str) and task.strip() else "")
+            return f"⚠️ `{tool_name}` returned no result."
         if tool_name == "run_terminal_command":
             from services.approved_terminal_continuation import approved_terminal_reply
             reply = approved_terminal_reply({"ok": True, "tool": tool_name,
@@ -227,7 +233,7 @@ def _approval_result_text(result: object | None) -> str | None:
 
 
 def _record_web_approval_result(result: object | None, text: str | None) -> None:
-    """Record Web outcomes, and terminal analysis in its originating history."""
+    """Record outcomes in originating Web/Matrix history, once per Matrix call."""
     if result is None or not text:
         return
     channel = getattr(result, "origin_channel", "")
@@ -238,11 +244,31 @@ def _record_web_approval_result(result: object | None, text: str | None) -> None
         record_terminal_reply(getattr(result, "continuation_context", None), channel, text,
                               str(getattr(result, "tool_call_id", "") or ""))
         return
+    if channel == "matrix":
+        try:
+            from hashlib import sha256
+            from memory.conversation_history import append_message
+            from core.untrusted_content import external_content_history_metadata
+            call_id = str(getattr(result, "tool_call_id", "") or "")
+            message_id = "approval-result-" + sha256(call_id.encode()).hexdigest() if call_id else None
+            metadata = external_content_history_metadata(getattr(result, "external_content_sources", ()))
+            metadata.update({"tool_name": getattr(result, "tool_name", ""), "tool_call_id": call_id})
+            append_message(role="assistant", content=text, channel="matrix", agent="approval_check",
+                metadata=metadata,
+                message_id=message_id)
+        except Exception as exc:
+            print(f"[Matrix Approval]: Result history failed ({type(exc).__name__})")
+        return
     if channel != "web":
         return
     try:
         from api.server import append_to_chat_history
-        append_to_chat_history("assistant", text, agent="Web_Agent")
+        from core.untrusted_content import external_content_history_metadata
+        metadata = external_content_history_metadata(getattr(result, "external_content_sources", ()))
+        if metadata:
+            append_to_chat_history("assistant", text, agent="Web_Agent", metadata=metadata)
+        else:
+            append_to_chat_history("assistant", text, agent="Web_Agent")
     except Exception as exc:
         print(f"[Matrix Approval]: Result history failed ({type(exc).__name__})")
 

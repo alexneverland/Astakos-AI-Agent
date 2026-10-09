@@ -39,6 +39,8 @@ class ApprovalReactionResult:
     error: str | None = None
     continuation_context: dict | None = None
     tool_call_id: str = ""
+    reminder_task: str = ""
+    external_content_sources: tuple[str, ...] = ()
 
 
 class MatrixApprovalReactionService:
@@ -104,6 +106,9 @@ class MatrixApprovalReactionService:
 
         execution = execute_approved_pending(tool_call_id, list(self._tools_provider()))
         if execution.get("ok"):
+            from core.untrusted_content import external_content_sources_from_json
+            sources = tuple(external_content_sources_from_json(
+                pending.get("tool_args", {}).get("external_content_sources_json", "")))
             if tool_name == "execute_local_pipeline":
                 from tools.web import messenger_send_result_succeeded
 
@@ -121,6 +126,8 @@ class MatrixApprovalReactionService:
                 execution_result=execution.get("result"),
                 continuation_context=execution.get("continuation_context"),
                 tool_call_id=tool_call_id,
+                reminder_task=execution.get("reminder_task", ""),
+                external_content_sources=sources,
             )
         return ApprovalReactionResult(
             status=str(execution.get("status") or "failed"),
