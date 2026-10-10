@@ -48,3 +48,11 @@ than adopting the internal diagnostic sentinel.
 Review repair checks: 190 real-storage/scheduler/note/condition cases and 103
 isolated legacy cases passed, plus four final empty-marker cases exercising the
 real note validation path. Compilation and diff checks passed.
+
+The second completed review (f0a6f69) identified an incident-specific production
+prompt example. Removed that paragraph while retaining the general temporal
+rule; the exact incident, a paraphrase and a conflicting-plan variant now remain
+only in provider-boundary test fixtures. All three failed before removal.
+These tests verify context propagation, not live model semantic accuracy.
+All 105 isolated legacy scheduler/completion cases and diff checks passed;
+combined with the previously verified 190 cases, 295 distinct cases are covered.

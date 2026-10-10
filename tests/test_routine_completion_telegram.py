@@ -1122,10 +1122,17 @@ def test_proactive_message_uses_structured_draft_offer_state() -> None:
     assert draft_offer is True
 
 
-def test_proactive_wording_receives_preparation_time_and_scheduled_slot() -> None:
-    """The real prompt/provider boundary distinguishes dinner history and sleep time."""
+@pytest.mark.parametrize("history", [
+    "[21:25] Τρώμε και χαίρεται την καρέκλα.",
+    "[21:25] Μόλις καθίσαμε για φαγητό, ο μικρός δοκιμάζει το νέο κάθισμα.",
+    "[21:25] Θα συνεχίσουμε την ταινία μέχρι αργά απόψε.",
+])
+def test_proactive_wording_receives_preparation_time_and_scheduled_slot(history: str) -> None:
+    """The provider receives supplied history and timing under generic policy."""
     from pathlib import Path
     prompt = (Path(__file__).resolve().parents[1] / "prompts" / "telegram_bot_craft_proactive.md").read_text(encoding="utf-8")
+    assert "21:25" not in prompt and "21:45" not in prompt and "22:00" not in prompt
+    assert "enjoying a chair" not in prompt
     captured = []
     timing = {"now": "2026-10-10T21:45:00+03:00", "slots": [
         {"id": "2", "name": "Ύπνος Αλέξανδρου", "at": "2026-10-10T22:00:00+03:00"}]}
@@ -1135,7 +1142,7 @@ def test_proactive_wording_receives_preparation_time_and_scheduled_slot() -> Non
         return types.SimpleNamespace(content='{"message":"Σε λίγο ώρα για ύπνο","offers_messenger_draft":false}')
     with (
         patch.object(bot.core.i18n, "load_prompt", return_value=prompt),
-        patch.object(bot, "_build_proactive_memory_context", return_value="[21:25] Τρώμε και χαίρεται την καρέκλα."),
+        patch.object(bot, "_build_proactive_memory_context", return_value=history),
         patch.object(bot, "_build_proactive_state_snapshot", return_value={}),
         patch.object(bot, "_force_proactive_skip_from_state", return_value=None),
         patch.object(bot, "_get_env_context", return_value=""),
@@ -1146,7 +1153,7 @@ def test_proactive_wording_receives_preparation_time_and_scheduled_slot() -> Non
     assert result == ("Σε λίγο ώρα για ύπνο", False)
     content = captured[-1].content
     assert timing["now"] in content and timing["slots"][0]["at"] in content
-    assert "[21:25]" in content
+    assert history in content
     assert "does not establish" in content and "Do not invent a postponement" in content
 
 

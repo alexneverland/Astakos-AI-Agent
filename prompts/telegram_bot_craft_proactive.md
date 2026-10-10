@@ -46,10 +46,5 @@ Examples of direct conflict:
 - A child sleep routine when the user explicitly says they just started a movie.
 - A home routine when the user explicitly says they are away from home.
 
-For example, eating at 21:25 and enjoying a chair does not cancel a 22:00 sleep
-routine assessed at 21:45. A normal preparation reminder remains appropriate
-unless there is explicit evidence of a conflicting plan covering that slot.
-Apply this temporal reasoning to every routine, not just this example.
-
 Never use either marker merely because the user is generally busy or chatting.
 When there are multiple due routines, never output CONTEXT_NOTE.
