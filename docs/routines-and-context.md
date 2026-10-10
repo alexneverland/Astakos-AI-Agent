@@ -74,6 +74,20 @@ A blocked routine may receive a relevant optional context note, subject to a
 does not encourage the blocked action, mark completion or create unanswered
 pressure. A work context is not a blanket ban on every conversational comment.
 
+In Unreleased source, a semantic context skip leaves the occurrence undelivered
+and eligible for reassessment within the existing fifteen-minute preparation window. Wording is
+evaluated once per five-minute stage (at most four stages, including the exact
+slot), with reservations surviving polling and restarts. Current time and the
+scheduled activity time are supplied separately: an earlier temporary activity
+does not itself cancel or postpone today's routine. Normal delivery, completion
+and current context checks still govern every attempted send.
+
+When wording already supplies a context note, the existing note delivery path
+reuses it rather than asking a second model to write another comment. The 30%
+chance and one-note-per-occurrence limit still apply, including freshness,
+silence, channel, budget and uncertain-delivery guards. A skipped comment is
+not evidence that a reminder was delivered or the activity completed.
+
 Behavioral observations are a separate feature: recurring trusted reports can
 support comments in ordinary replies and occasional spontaneous openers. Events,
 pattern candidates and actual opener delivery are different evidence layers.

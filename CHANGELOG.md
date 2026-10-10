@@ -26,6 +26,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Temporary semantic routine skips retain bounded reassessment during the
+  preparation window instead of consuming the entire day. Wording distinguishes
+  the reminder time from the scheduled activity; generated context notes reuse
+  canonical guarded delivery without a second wording model.
+
 - Web and Telegram graph traces complete and persist on exceptions and empty
   responses, including Telegram photo failures and pending approval intercepts.
   Telegram retains streamed tool evidence before a graph failure; closed terminal

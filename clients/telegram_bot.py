@@ -4308,6 +4308,8 @@ def _get_env_context() -> str:
 def _maybe_send_routine_context_note(
     candidate: "RoutineCandidate", context: dict, evidence: dict,
     store: "ClarificationStore", reason: str, *, budget_reserved: bool = False,
+    prepared_message: str | None = None,
+    prepared_history_marker: str | None = None,
 ) -> str:
     """Comment on a held action through the same canonical freshness gates."""
     from memory.routine_context_clarification import ATHENS
@@ -4328,7 +4330,8 @@ def _maybe_send_routine_context_note(
     try:
         channel = _current_external_runtime_channel()
         baseline = PollSnapshot((candidate,), context, evidence,
-                                str(get_max_rowid())).fingerprint()
+                                prepared_history_marker if prepared_history_marker is not None
+                                else str(get_max_rowid())).fingerprint()
 
         def fresh() -> bool:
             """Recheck silence, receipt-aware eligibility, history and GPS/state."""
@@ -4349,6 +4352,7 @@ def _maybe_send_routine_context_note(
                         "conditions": list(candidate.conditions)[:5]},
             "context": context, "reason": reason[:800], "channel": channel,
         }, store=store, now=clock(), fresh=fresh,
+            classify=(lambda _: {"message": prepared_message}) if prepared_message is not None else None,
             deliver=lambda text: deliver_external_assistant_text(
                 text, agent="Routine_Agent", target_channel=channel),
             queue_history_repair=enqueue_fast_task,
@@ -4372,6 +4376,7 @@ def _craft_proactive_msg(
     *,
     allow_messenger_draft_offer: bool = True,
     routine_context: dict | None = None,
+    routine_timing: dict | None = None,
 ) -> tuple[str, bool]:
     """Create one proactive message and its fail-closed structured draft-offer state."""
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -4419,6 +4424,8 @@ def _craft_proactive_msg(
         language=config.RESPONSE_LANGUAGE,
         user_name=config.USER_NAME,
         allow_messenger_draft_offer=str(allow_messenger_draft_offer).lower(),
+        timing_block=format_untrusted_tool_result("routine schedule", json.dumps(routine_timing, default=str))
+            if routine_timing is not None else "",
     )
 
     try:
@@ -5255,6 +5262,8 @@ def job_check_routines():
                         if _should_log_routine_skip(r_id, "routine_cooldown_skip", skip_reason):
                             log_event("routines", "routine_cooldown_skip", routine_id=r_id, event=event_name, cooldown_hours=cd_hours, debug_type="scheduler_decision", debug_source="scheduler", debug_effect="cooldown_skip")
                         continue
+                    if not clarification_store.claim_routine_wording(candidate.id, candidate.slot_at, now=aware_now):
+                        continue
                     due_routines.append((r_id, event_name, confidence))
                     due_context_candidates.append(candidate)
                     triggered_conflict_groups.add(conflict_group)
@@ -5273,6 +5282,11 @@ def job_check_routines():
                     conn.close()
                     return
 
+                routine_timing = {"now": aware_now.isoformat(), "slots": [
+                    {"id": item.id, "name": item.name, "at": item.slot_at.isoformat()}
+                    for item in due_context_candidates]}
+                from memory.conversation_history import get_max_rowid
+                wording_history_marker = str(get_max_rowid())
                 # ── Batching: multiple routines → one message ──────────────────
                 if len(due_routines) > 1:
                     dated_batch_sender = _dated_batch_routine_sender
@@ -5289,8 +5303,11 @@ def job_check_routines():
                         count=len(due_routines),
                         allow_messenger_draft_offer=False,
                         routine_context=rt_context,
+                        routine_timing=routine_timing,
                     )
                     dispatch_now = datetime.now()
+                    if str(get_max_rowid()) != wording_history_marker:
+                        return
                     if not dispatch_context_current(tuple(due_context_candidates), rt_context,
                             clarification_store, dispatch_now.replace(tzinfo=ATHENS)
                             if dispatch_now.tzinfo is None else dispatch_now):
@@ -5357,7 +5374,8 @@ def job_check_routines():
                         elif not is_context_skip and not _send_and_record_assistant(msg, agent="Routine_Agent"):
                             return
                         for r_id, event_name, confidence in due_routines:
-                            cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                            if not is_context_skip:
+                                cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                             if is_context_skip:
                                 _clear_routine_pending_confirmation(r_id)
                                 muted_until = None
@@ -5410,8 +5428,11 @@ def job_check_routines():
                         confidence,
                         allow_messenger_draft_offer=can_offer_messenger_draft,
                         routine_context=rt_context,
+                        routine_timing=routine_timing,
                     )
                     dispatch_now = datetime.now()
+                    if str(get_max_rowid()) != wording_history_marker:
+                        return
                     if not dispatch_context_current(tuple(due_context_candidates), rt_context,
                             clarification_store, dispatch_now.replace(tzinfo=ATHENS)
                             if dispatch_now.tzinfo is None else dispatch_now):
@@ -5453,9 +5474,9 @@ def job_check_routines():
                         if is_context_skip:
                             _maybe_send_routine_context_note(due_context_candidates[0], rt_context,
                                 context_evidence, clarification_store, context_skip_preview,
-                                budget_reserved=True)
-                            cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
-                            conn.commit()
+                                budget_reserved=True,
+                                prepared_message=context_skip_preview if is_context_note else None,
+                                prepared_history_marker=wording_history_marker if is_context_note else None)
                             _clear_routine_pending_confirmation(r_id)
                             muted_until = None
                             log_event(

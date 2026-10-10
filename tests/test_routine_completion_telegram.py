@@ -119,6 +119,7 @@ def _stub_modules():
     sm._maybe_trigger_auto_session_summary = MagicMock()
 
     sys.modules["memory.execution_trace"].ExecutionTrace = MagicMock()
+    sys.modules["memory.execution_trace"]._TRACES_DIR = "unused-test-traces"
 
     pf = sys.modules["memory.pending_followups"]
     pf.ensure_pending_followups_table = lambda: None
@@ -1119,6 +1120,34 @@ def test_proactive_message_uses_structured_draft_offer_state() -> None:
 
     assert message == "Shall I prepare a draft?"
     assert draft_offer is True
+
+
+def test_proactive_wording_receives_preparation_time_and_scheduled_slot() -> None:
+    """The real prompt/provider boundary distinguishes dinner history and sleep time."""
+    from pathlib import Path
+    prompt = (Path(__file__).resolve().parents[1] / "prompts" / "telegram_bot_craft_proactive.md").read_text(encoding="utf-8")
+    captured = []
+    timing = {"now": "2026-10-10T21:45:00+03:00", "slots": [
+        {"id": "2", "name": "Ύπνος Αλέξανδρου", "at": "2026-10-10T22:00:00+03:00"}]}
+    def provider(model, messages):
+        """Stub inference only; verify the prompt passed to the provider."""
+        captured.extend(messages)
+        return types.SimpleNamespace(content='{"message":"Σε λίγο ώρα για ύπνο","offers_messenger_draft":false}')
+    with (
+        patch.object(bot.core.i18n, "load_prompt", return_value=prompt),
+        patch.object(bot, "_build_proactive_memory_context", return_value="[21:25] Τρώμε και χαίρεται την καρέκλα."),
+        patch.object(bot, "_build_proactive_state_snapshot", return_value={}),
+        patch.object(bot, "_force_proactive_skip_from_state", return_value=None),
+        patch.object(bot, "_get_env_context", return_value=""),
+        patch.object(bot, "safe_llm_invoke", side_effect=provider),
+    ):
+        result = bot._craft_proactive_msg("Ύπνος Αλέξανδρου", 1.0,
+            routine_timing=timing, allow_messenger_draft_offer=False)
+    assert result == ("Σε λίγο ώρα για ύπνο", False)
+    content = captured[-1].content
+    assert timing["now"] in content and timing["slots"][0]["at"] in content
+    assert "[21:25]" in content
+    assert "does not establish" in content and "Do not invent a postponement" in content
 
 
 def test_proactive_unstructured_message_uses_safe_fallback() -> None:
