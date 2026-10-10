@@ -5467,6 +5467,7 @@ def job_check_routines():
                         if is_context_skip:
                             marker = "[CONTEXT_NOTE]" if is_context_note else "[CONTEXT_SKIP]"
                             context_skip_preview = msg.replace(marker, "").strip()
+                            prepared_context_note = context_skip_preview if is_context_note else None
                             if not context_skip_preview:
                                 context_skip_preview = "context_skip_without_explanation"
                             msg = context_skip_preview
@@ -5475,7 +5476,7 @@ def job_check_routines():
                             _maybe_send_routine_context_note(due_context_candidates[0], rt_context,
                                 context_evidence, clarification_store, context_skip_preview,
                                 budget_reserved=True,
-                                prepared_message=context_skip_preview if is_context_note else None,
+                                prepared_message=prepared_context_note,
                                 prepared_history_marker=wording_history_marker if is_context_note else None)
                             _clear_routine_pending_confirmation(r_id)
                             muted_until = None

@@ -8,8 +8,9 @@ second model discarded it and last_triggered consumed the whole day.
 Acceptance and implementation order:
 1. Reproduce the skip with temporary real routine/feedback stores and mocked
    inference/transport. A temporary skip leaves the occurrence undelivered and
-   eligible for reassessment, at most once per five-minute stage in its existing
-   fifteen-minute lead window. Durable claims prevent repeated polling/restarts.
+   eligible for reassessment, at most once per lead-window stage in its existing
+   fifteen-minute window (five-minute stages initially, final-minute recheck).
+   Durable claims prevent repeated polling/restarts.
 2. Supply current time and scheduled slots to wording. Semantic instructions
    distinguish a preparation reminder from an activity happening immediately;
    unrelated earlier activity is not cancellation or rescheduling evidence.
@@ -38,3 +39,12 @@ Verification:
   context reach the real prompt; semantic inference itself remains mocked.
 - Python compilation and git diff --check passed. No live delivery or ledger
   correction was performed. Work remains local on codex/routine-context-recheck.
+
+PR #247 review on 360294a: both inline findings reproduced (six failing cases).
+The fourth stage now covers the final minute instead of requiring an exact
+scheduled instant; offset-clock single/batch tests verify persisted delivery.
+Empty CONTEXT_NOTE payloads remain empty through canonical validation rather
+than adopting the internal diagnostic sentinel.
+Review repair checks: 190 real-storage/scheduler/note/condition cases and 103
+isolated legacy cases passed, plus four final empty-marker cases exercising the
+real note validation path. Compilation and diff checks passed.

@@ -86,7 +86,7 @@ def test_work_block_can_have_note_without_question(tmp_path, channel):
 
 
 @pytest.mark.parametrize("channel", ["matrix", "telegram"])
-@pytest.mark.parametrize("gate", [None, "chance", "quiet", "muted", "silence", "recent"])
+@pytest.mark.parametrize("gate", [None, "chance", "quiet", "muted", "silence", "recent", "empty"])
 def test_generated_note_uses_canonical_delivery_without_second_model(scheduler_note, monkeypatch, channel, gate):
     """A selected warm note survives the existing reservation and delivery gates."""
     from clients import telegram_bot as bot
@@ -99,6 +99,8 @@ def test_generated_note_uses_canonical_delivery_without_second_model(scheduler_n
                                  tuple(db.get_routine_conditions(rid)))
     projected = context.project_routine_context({"user_at_work": True}, state["evidence"])
     message = "Καλή όρεξη, θα τα πούμε μετά!"
+    if gate == "empty":
+        message = ""
     if gate == "chance":
         monkeypatch.setattr(notes.random, "random", lambda: 0.9)
     elif gate == "silence":
@@ -111,7 +113,7 @@ def test_generated_note_uses_canonical_delivery_without_second_model(scheduler_n
         return bot._maybe_send_routine_context_note(candidate, projected,
             state["evidence"].copy(), store, "temporary conflict", prepared_message=message)
     if gate is not None:
-        assert send() == ("chance_skip" if gate == "chance" else "deferred")
+        assert send() == ({"chance": "chance_skip", "empty": "no_note"}.get(gate, "deferred"))
         assert not sent and not history.load_messages(db_path=path) and not dated.occurrences(rid)
         return
     db._setup_pending_table()

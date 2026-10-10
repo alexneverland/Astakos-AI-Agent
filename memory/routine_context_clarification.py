@@ -244,7 +244,8 @@ class ClarificationStore:
         """Reserve one of four lead-window stages across polls and restarts.
 
         A context skip remains undelivered and can be reassessed in the next
-        five-minute stage. Reservations use the occurrence date across midnight
+        stage, with a reachable final stage throughout the last minute.
+        Reservations use the occurrence date across midnight
         and cannot be evicted by unrelated dependency evaluations.
         """
         current, slot = _aware(now), _aware(slot_at)
@@ -253,7 +254,7 @@ class ClarificationStore:
         seconds_to_slot = (slot - current).total_seconds()
         if not 0 <= seconds_to_slot <= 900:
             return False
-        stage = int((900 - seconds_to_slot) // 300)
+        stage = 3 if seconds_to_slot <= 60 else int((900 - seconds_to_slot) // 300)
         identity = f"{int(routine_id)}:{slot.isoformat()}:{stage}"
         key = "wording-" + sha256(identity.encode()).hexdigest()
         with self._lock():
