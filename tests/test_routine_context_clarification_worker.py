@@ -10,6 +10,110 @@ from services.routine_context_evidence import ContextEvidence
 NOW = datetime(2026, 10, 6, 10, tzinfo=ATHENS)
 
 
+@pytest.mark.parametrize("channel", ["matrix", "telegram"])
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize("later", ["reminder", "continued_conflict", "away", "complete", "late_clear", "empty_note"])
+@pytest.mark.parametrize("routine_name", ["Ύπνος Αλέξανδρου"])
+def test_temporary_dinner_context_skip_rechecks_without_consuming_day(environment, monkeypatch, channel, batch, later, routine_name):
+    """Dinner at 21:25 cannot consume the 22:00 occurrence at 21:45."""
+    from clients import telegram_bot as bot
+    from memory import conversation_history as history
+    from memory.routine_feedback import RoutineFeedbackStore
+    from services.routine_feedback_dispatch import DatedRoutineSender
+    from services.external_delivery import DeliveryReceipt
+    worker, db, rid, state, _, _, history_path, root = environment
+    state["channel"] = channel
+    state["now"] = NOW.replace(hour=21, minute=45)
+    if later == "late_clear":
+        state["now"] = state["now"].replace(second=17, microsecond=123000)
+    state["evidence"] = {"user_out_of_home": ContextEvidence(effective_value=False, status="known")}
+    ids = [row["id"] for row in db.get_routines_for_day("Tuesday")]
+    for member in ids:
+        db.update_routine_db(member, new_time="22:00")
+    history.append_message(role="user", channel=channel,
+        content="[21:25] Τρώμε, ο Αλέξανδρος χαίρεται την καινούργια καρέκλα.")
+    monkeypatch.setattr(bot, "datetime", db.datetime)
+    monkeypatch.setattr(bot, "is_quiet_hours", lambda: False)
+    monkeypatch.setattr(bot, "is_proactive_muted", lambda: False)
+    monkeypatch.setattr(bot, "_active_routine_pause_until", lambda: None)
+    monkeypatch.setattr(bot, "pending_routine_confirmations", {})
+    monkeypatch.setattr(bot, "_external_background_runtime_channel", channel)
+    monkeypatch.setattr(bot, "resolve_external_channel", lambda: channel)
+    monkeypatch.setattr(worker, "schedule_context_clarification", lambda _: None)
+    monkeypatch.setattr(bot, "_is_partner_messenger_routine", lambda _: False)
+    note_options = []
+    note_results = []
+    real_note_sender = bot._maybe_send_routine_context_note
+    def note_sender(*args, **kwargs):
+        """Retain real malformed-note validation while exposing scheduler wiring."""
+        note_options.append(kwargs)
+        result = real_note_sender(*args, **kwargs) if later == "empty_note" else "no_note"
+        note_results.append(result)
+        return result
+    monkeypatch.setattr(bot, "_maybe_send_routine_context_note", note_sender)
+    if later == "empty_note":
+        from services import routine_context_notes as notes
+        monkeypatch.setattr(notes.random, "random", lambda: 0.1)
+        monkeypatch.setattr(notes, "classify_context_note", lambda _: pytest.fail("An empty prepared note must fail closed"))
+        monkeypatch.setattr(bot, "should_skip_proactive_for_recent_activity", lambda **kw: False)
+    monkeypatch.setattr(bot, "_build_proactive_memory_context", lambda _: "Dinner at 21:25")
+    wording = []
+    def craft(*args, **kwargs):
+        wording.append(kwargs)
+        marker = "[CONTEXT_SKIP]" if batch else "[CONTEXT_NOTE]"
+        payload = "" if later == "empty_note" else "Temporary dinner conflict"
+        return (f"{marker} {payload}"
+                if len(wording) == 1 or later == "continued_conflict"
+                or (later == "late_clear" and len(wording) < 4) else "Ώρα για ύπνο", False)
+    monkeypatch.setattr(bot, "_craft_proactive_msg", craft)
+    store = RoutineFeedbackStore(db.get_connection)
+    store.initialize()
+    sent = []
+    sender = DatedRoutineSender(store, lambda: state["now"],
+        lambda text: sent.append(text) or DeliveryReceipt(channel, "$sleep"))
+    monkeypatch.setattr(bot, "_dated_single_routine_sender", sender)
+    monkeypatch.setattr(bot, "_dated_batch_routine_sender", sender)
+    bot.job_check_routines()
+    assert not sent and not store.occurrences(rid)
+    if not batch:
+        assert len(note_options) == 1
+        assert note_options[0]["budget_reserved"] is True
+        assert note_options[0]["prepared_message"] == ("" if later == "empty_note" else "Temporary dinner conflict")
+        assert note_options[0]["prepared_history_marker"] is not None
+        assert note_results == ["no_note"]
+    bot.job_check_routines()  # Same stage must not hammer the model or send.
+    assert len(wording) == 1 and not sent
+    state["now"] += timedelta(minutes=5)
+    if later == "away":
+        state["evidence"] = {"user_out_of_home": ContextEvidence(effective_value=True, status="known")}
+    elif later == "complete":
+        for member in ids:
+            store.record_feedback(member, state["now"].date(), "complete", at=state["now"])
+    bot.job_check_routines()
+    if later == "late_clear":
+        assert not sent and len(wording) == 2
+        state["now"] += timedelta(minutes=5)
+        bot.job_check_routines()
+        assert not sent and len(wording) == 3
+        state["now"] += timedelta(minutes=4)
+        bot.job_check_routines()
+    if later not in {"reminder", "late_clear", "empty_note"}:
+        assert not sent
+        assert len(wording) == (2 if later in {"continued_conflict", "complete"} else 1)
+        if later == "continued_conflict":
+            for minutes in (1, 4, 0, 5, 0, 1):
+                state["now"] += timedelta(minutes=minutes)
+                bot.job_check_routines()
+            assert len(wording) == 4 and not sent and not store.occurrences(rid)
+        return
+    assert sent == ["Ώρα για ύπνο"]
+    assert wording[-1]["routine_timing"]["slots"][0]["at"].endswith("22:00:00+03:00")
+    assert all(store.occurrences(member)[0].delivered_at == state["now"] for member in ids)
+    assert all(store.occurrences(member)[0].feedback is None for member in ids)
+    bot.job_check_routines()
+    assert len(wording) == (4 if later == "late_clear" else 2) and sent == ["Ώρα για ύπνο"]
+
+
 def test_today_completion_keeps_tomorrows_midnight_candidate(environment):
     """A daily routine has independent occurrences on either side of midnight."""
     from memory.routine_feedback import RoutineFeedbackStore
@@ -202,7 +306,8 @@ def environment(monkeypatch, tmp_path, request):
     monkeypatch.setattr(db, "DB_PATH", config.ROUTINES_DB)
     db.setup_db()
     db._setup_pending_table()
-    declared = [{"day": "Everyday", "time": "10:12", "event": "Home activity", "type": "daily"}]
+    params = request.node.callspec.params if getattr(request.node, "callspec", None) else {}
+    declared = [{"day": "Everyday", "time": "10:12", "event": params.get("routine_name", "Home activity"), "type": "daily"}]
     if getattr(request.node, "callspec", None) and request.node.callspec.params.get("batch"):
         declared.append({"day": "Everyday", "time": "10:12", "event": "School preparation", "type": "daily"})
     db.import_declared_routines(declared)

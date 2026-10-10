@@ -203,14 +203,14 @@ class ClarificationStore:
 
     @staticmethod
     def _append_evaluation(state: dict[str, Any], row: dict[str, str], current: datetime) -> bool:
-        """Keep today's note reservations under bounded dependency-cache churn."""
+        """Keep current occurrence reservations under bounded dependency-cache churn."""
         retained = [item for item in state["evaluations"]
-                    if item["fingerprint"].startswith("note-")
+                    if item["fingerprint"].startswith(("note-", "wording-"))
                     and item["day"] >= current.date().isoformat()]
         if len(retained) >= 128:
             return False  # Never evict a held send to make room for another evaluation.
         ordinary = [item for item in state["evaluations"] if item not in retained]
-        if row["fingerprint"].startswith("note-"):
+        if row["fingerprint"].startswith(("note-", "wording-")):
             retained.append(row)
         else:
             ordinary.append(row)
@@ -236,6 +236,33 @@ class ClarificationStore:
             if any(item["fingerprint"] == key for item in state["evaluations"]):
                 return False
             if not self._append_evaluation(state, {"fingerprint": key, "day": day}, current):
+                return False
+            self._save(state)
+            return True
+
+    def claim_routine_wording(self, routine_id: str, slot_at: datetime, *, now: datetime) -> bool:
+        """Reserve one of four lead-window stages across polls and restarts.
+
+        A context skip remains undelivered and can be reassessed in the next
+        stage, with a reachable final stage throughout the last minute.
+        Reservations use the occurrence date across midnight
+        and cannot be evicted by unrelated dependency evaluations.
+        """
+        current, slot = _aware(now), _aware(slot_at)
+        if not isinstance(routine_id, str) or not routine_id.isdecimal() or int(routine_id) <= 0:
+            raise ValueError("A canonical routine identity is required")
+        seconds_to_slot = (slot - current).total_seconds()
+        if not 0 <= seconds_to_slot <= 900:
+            return False
+        stage = 3 if seconds_to_slot <= 60 else int((900 - seconds_to_slot) // 300)
+        identity = f"{int(routine_id)}:{slot.isoformat()}:{stage}"
+        key = "wording-" + sha256(identity.encode()).hexdigest()
+        with self._lock():
+            state = self._load()
+            if any(item["fingerprint"] == key for item in state["evaluations"]):
+                return False
+            if not self._append_evaluation(state, {"fingerprint": key,
+                    "day": slot.date().isoformat()}, current):
                 return False
             self._save(state)
             return True

@@ -105,6 +105,7 @@ def _stub_modules():
 
     sys.modules["memory.vector_store"].memory = MagicMock()
     sys.modules["memory.execution_trace"].ExecutionTrace = MagicMock()
+    sys.modules["memory.execution_trace"]._TRACES_DIR = "unused-test-traces"
 
     wm = sys.modules["memory.working_memory"]
     wm.update_working_memory             = MagicMock()

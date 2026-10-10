@@ -85,6 +85,89 @@ def test_work_block_can_have_note_without_question(tmp_path, channel):
     assert run_note(tmp_path, channel=channel)[0] == "already_evaluated"
 
 
+@pytest.mark.parametrize("channel", ["matrix", "telegram"])
+@pytest.mark.parametrize("gate", [None, "chance", "quiet", "muted", "silence", "recent", "empty"])
+def test_generated_note_uses_canonical_delivery_without_second_model(scheduler_note, monkeypatch, channel, gate):
+    """A selected warm note survives the existing reservation and delivery gates."""
+    from clients import telegram_bot as bot
+    from services.routine_context_clarification import RoutineCandidate
+    from services import routine_context as context
+    _, state, sent, dated, rid, store, path, notes, db, history = scheduler_note
+    state["channel"] = channel
+    monkeypatch.setattr(notes, "classify_context_note", lambda _: pytest.fail("Prepared note must not invoke another model"))
+    candidate = RoutineCandidate(str(rid), "Πάρκο με τον Αλέξανδρο", NOW + timedelta(minutes=5),
+                                 tuple(db.get_routine_conditions(rid)))
+    projected = context.project_routine_context({"user_at_work": True}, state["evidence"])
+    message = "Καλή όρεξη, θα τα πούμε μετά!"
+    if gate == "empty":
+        message = ""
+    if gate == "chance":
+        monkeypatch.setattr(notes.random, "random", lambda: 0.9)
+    elif gate == "silence":
+        db.set_sentimental_silenced(rid, True)
+    elif gate == "recent":
+        state["recent"] = True
+    elif gate in {"quiet", "muted"}:
+        monkeypatch.setattr(bot, "is_quiet_hours" if gate == "quiet" else "is_proactive_muted", lambda: True)
+    def send():
+        return bot._maybe_send_routine_context_note(candidate, projected,
+            state["evidence"].copy(), store, "temporary conflict", prepared_message=message)
+    if gate is not None:
+        assert send() == ({"chance": "chance_skip", "empty": "no_note"}.get(gate, "deferred"))
+        assert not sent and not history.load_messages(db_path=path) and not dated.occurrences(rid)
+        return
+    db._setup_pending_table()
+    assert send() == "sent"
+    assert sent == [message]
+    assert history.load_messages(db_path=path)[0]["content"] == message
+    assert not dated.occurrences(rid) and not db.load_pending_confirmations()
+    assert send() == "already_evaluated" and sent == [message]
+
+
+def test_wording_stages_survive_restart_dependency_churn_and_midnight(tmp_path):
+    """Each occurrence has four bounded stages, including a cross-midnight slot."""
+    path = tmp_path / "questions.json"
+    slot = NOW.replace(hour=0, minute=5) + timedelta(days=1)
+    store = ClarificationStore(path)
+    assert store.claim_routine_wording("3", slot, now=slot - timedelta(minutes=15))
+    for number in range(200):
+        store.claim_evaluation(f"dependency-{number}", now=slot - timedelta(minutes=14))
+    assert not ClarificationStore(path).claim_routine_wording("3", slot, now=slot - timedelta(minutes=14))
+    assert store.claim_routine_wording("3", slot, now=slot - timedelta(minutes=6))
+    assert store.claim_routine_wording("3", slot, now=slot - timedelta(minutes=5))
+    assert not ClarificationStore(path).claim_routine_wording("3", slot, now=slot - timedelta(minutes=4))
+    assert store.claim_routine_wording("3", slot, now=slot)
+    assert not ClarificationStore(path).claim_routine_wording("3", slot, now=slot)
+    assert not store.claim_routine_wording("3", slot, now=slot + timedelta(seconds=1))
+    assert not store.claim_routine_wording("3", slot, now=slot - timedelta(minutes=16))
+
+
+def test_wording_stage_has_one_claim_under_competing_workers(tmp_path):
+    """Parallel workers cannot both generate wording for the same stage."""
+    path = tmp_path / "questions.json"
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: ClarificationStore(path).claim_routine_wording(
+            "3", NOW + timedelta(minutes=5), now=NOW), range(4)))
+    assert results.count(True) == 1
+
+
+def test_prepared_note_rejects_history_changed_since_wording(scheduler_note, monkeypatch):
+    """A prepared comment cannot adopt a newer conversation as its own evidence."""
+    from clients import telegram_bot as bot
+    from services import routine_context as context
+    from services.routine_context_clarification import RoutineCandidate
+    _, state, sent, dated, rid, store, path, notes, db, history = scheduler_note
+    marker = str(history.get_max_rowid())
+    history.append_message(role="user", channel="web", content="Η κατάσταση άλλαξε.")
+    candidate = RoutineCandidate(str(rid), "Πάρκο με τον Αλέξανδρο", NOW + timedelta(minutes=5),
+                                 tuple(db.get_routine_conditions(rid)))
+    projected = context.project_routine_context({"user_at_work": True}, state["evidence"])
+    result = bot._maybe_send_routine_context_note(candidate, projected, state["evidence"].copy(), store,
+        "temporary conflict", prepared_message="Old comment", prepared_history_marker=marker)
+    assert result == "deferred" and not sent and not store.path.exists()
+    assert not dated.occurrences(rid)
+
+
 def test_chance_skip_is_not_rerolled_after_restart(tmp_path):
     assert run_note(tmp_path, draw=0.30)[0] == "chance_skip"
     result, sent, _ = run_note(tmp_path, draw=0.0)
