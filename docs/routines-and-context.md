@@ -97,6 +97,24 @@ pattern candidates and actual opener delivery are different evidence layers.
 Identity resolution preserves specific entities and actions without reclassifying
 old records automatically. Initial opener limits include one per day, a seven-day
 topic cooldown and at least 15 minutes idle, plus existing delivery safeguards.
+Both conversation selectors compare up to twelve qualifying patterns from the
+last thirty days; an ordinary reply receives at most one selected observation.
+A cached skipped initiative decision is reconsidered when its evidence changes,
+including completed background intake,
+but unchanged polls do not invoke the model again. An opener can express neutral
+or positive interest without requiring a problem or advice opportunity.
+Prior entity references include distinct-date support and stable source ordering
+to help semantic extraction reuse established identities across languages. This
+does not merge historical labels or let past classifications override a source.
+
+Follow-ups are a different path: a conversation exchange creates a pending topic
+that is checked later for a relevant continuation. Behavioral initiative needs
+repeated observations on at least three distinct dates and starts a new topic;
+it neither creates nor completes a pending follow-up. Both respect recent activity.
+Both behavioral selectors read pending follow-up subjects and topics sent in
+the last seven days, with bounded owner context, to avoid equivalent questions.
+The initiative pins that snapshot through its pre-send freshness check. Reading
+these topics does not initialize, modify or complete the follow-up queue.
 
 Goals also remain separate. Conversational partial updates preserve recorded
 activity and provenance; milestone scores do not invent completion percentages.

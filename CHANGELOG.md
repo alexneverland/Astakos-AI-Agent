@@ -26,6 +26,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Behavioral reply and initiative selectors consider a broader bounded topic
+  pool and avoid equivalent pending/recent follow-up questions through shared
+  read-only topic context. Initiative skips are reconsidered when background
+  evidence changes. Prior identity references expose dated support for semantic
+  reuse; historical observations and delivery safety limits remain intact.
+
 - Temporary semantic routine skips retain bounded reassessment during the
   preparation window instead of consuming the entire day. Wording distinguishes
   the reminder time from the scheduled activity; generated context notes reuse

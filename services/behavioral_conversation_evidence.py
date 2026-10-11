@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+import json
 from typing import Any
 
 from core.untrusted_content import external_content_source_names
@@ -17,11 +18,35 @@ from services.behavioral_pattern_aggregator import aggregate_behavioral_pattern_
 
 _logger = logging.getLogger(__name__)
 MAX_PATTERN_PACKETS = 3
+MAX_CONVERSATION_PATTERN_PACKETS = 12
 MAX_SOURCE_REFS = 12
 
 
+def load_followup_topic_context(now: datetime | None = None) -> list[dict[str, Any]]:
+    """Expose reserved/recent topics to both consumers without changing their queue."""
+    from memory.pending_followups import load_followup_conversation_topics
+    topics = []
+    for row in load_followup_conversation_topics(now or datetime.now()):
+        metadata = json.loads(row.get("metadata_json") or "{}")
+        if not isinstance(metadata, dict) or external_content_source_names(metadata):
+            continue
+        if row.get("source_channel") not in {"web", "matrix", "telegram"}:
+            continue
+        if any(len(str(row.get(key) or "")) > maximum for key, maximum in
+               (("topic", 160), ("subject", 160), ("source_user_text", 500))):
+            continue
+        topics.append({key: row.get(key) for key in (
+            "id", "topic", "subject", "status", "source_user_text",
+            "followup_after_ts", "expires_at", "sent_at",
+        )})
+        if len(topics) == 20:
+            break
+    return topics
+
+
 def build_behavioral_evidence(
-    events: Iterable[Mapping[str, Any]], *, today: date, window_days: int
+    events: Iterable[Mapping[str, Any]], *, today: date, window_days: int,
+    max_patterns: int = MAX_PATTERN_PACKETS,
 ) -> list[dict[str, Any]]:
     """Reuse canonical validation/grouping within an explicit inclusive window.
 
@@ -31,6 +56,8 @@ def build_behavioral_evidence(
     """
     if type(window_days) is not int or not 1 <= window_days <= 366:
         raise ValueError("window_days must be an integer between 1 and 366")
+    if type(max_patterns) is not int or not 1 <= max_patterns <= MAX_CONVERSATION_PATTERN_PACKETS:
+        raise ValueError("max_patterns must be an integer between 1 and 12")
     start = today - timedelta(days=window_days - 1)
     eligible: list[dict[str, Any]] = []
     seen_sources: set[str] = set()
@@ -79,11 +106,12 @@ def build_behavioral_evidence(
         candidate["source_refs"] = candidate["source_refs"][-MAX_SOURCE_REFS:]
         candidate["window_start"] = start.isoformat()
         candidate["window_end"] = today.isoformat()
-    return candidates[:MAX_PATTERN_PACKETS]
+    return candidates[:max_patterns]
 
 
 def load_behavioral_evidence(
-    *, today: date, window_days: int, db_path: str | None = None
+    *, today: date, window_days: int, db_path: str | None = None,
+    max_patterns: int = MAX_PATTERN_PACKETS,
 ) -> list[dict[str, Any]]:
     """Read the existing observation store without initialization or migration."""
     from memory.behavioral_event_state import list_events
@@ -94,4 +122,5 @@ def load_behavioral_evidence(
     except Exception as exc:
         _logger.warning("Behavioral evidence unavailable (%s)", type(exc).__name__)
         return []
-    return build_behavioral_evidence(events, today=today, window_days=window_days)
+    return build_behavioral_evidence(events, today=today, window_days=window_days,
+                                     max_patterns=max_patterns)

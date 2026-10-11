@@ -102,3 +102,19 @@ def test_packet_limits_sources_without_fabricating_frequency():
 def test_explicit_window_is_validated(window):
     with pytest.raises(ValueError):
         evidence.build_behavioral_evidence([], today=date(2026, 10, 2), window_days=window)
+
+
+def test_initiative_pool_is_bounded_and_reply_default_is_unchanged():
+    """The broader initiative pool does not expand ordinary reply context."""
+    rows = [event(day, item=f"entity {i}", source_message_id=f"{i}:{day}")
+            for i in range(15) for day in (20, 22, 24)]
+    kwargs = dict(today=date(2026, 10, 2), window_days=30)
+    assert len(evidence.build_behavioral_evidence(rows, **kwargs)) == 3
+    assert len(evidence.build_behavioral_evidence(rows, max_patterns=12, **kwargs)) == 12
+
+
+@pytest.mark.parametrize("limit", [0, 13, True, 1.5])
+def test_invalid_topic_pool_limit_fails_closed(limit):
+    with pytest.raises(ValueError):
+        evidence.build_behavioral_evidence([], today=date(2026, 10, 2),
+                                          window_days=30, max_patterns=limit)

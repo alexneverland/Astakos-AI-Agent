@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta
 import pytest
 
+pytestmark = pytest.mark.usefixtures("offline_behavioral_io")
+
 from memory.behavioral_conversation_preferences import PreferenceStore
 from memory.behavioral_initiative_state import InitiativeStore
 from memory.conversation_history import append_message, load_messages
@@ -160,6 +162,50 @@ def test_unchanged_skipped_context_does_not_spend_model_calls_each_poll(tmp_path
     assert run_initiative(**kw) == "skip"
     assert len(calls) == 1
     assert not sent
+
+
+def test_completed_background_intake_reopens_skipped_evaluation(tmp_path):
+    """A new qualifying packet matters even if the shared history is unchanged."""
+    kw, sent, db = setup(tmp_path)
+    load = kw["evidence_loader"]
+    packets = load(today=NOW.date(), window_days=30)
+    kw["evidence_loader"] = lambda **options: packets
+    calls = []
+    def decide(payload):
+        calls.append(payload)
+        return dict(selected_index=0 if len(calls) > 1 else None, blocked=False,
+                    recently_discussed=False, message="Χαίρομαι που βρίσκεις χρόνο για αυτά.")
+    kw["classify"] = decide
+    assert run_initiative(**kw) == "skip"
+    packets[0] = dict(packets[0], occurrence_count=4, distinct_date_count=4,
+                      event_dates=packets[0]["event_dates"] + ["2026-10-01"])
+    kw["store"] = InitiativeStore(kw["store"].path)
+    assert run_initiative(**kw) == "delivered"
+    assert len(calls) == 2 and len(sent) == 1
+    assert load_messages(db_path=db)[-1]["agent"] == "Behavioral_Agent"
+
+
+def test_lower_ranked_qualifying_topic_can_open_a_conversation(tmp_path):
+    """Strong generic repetitions must not hide every lower-ranked topic."""
+    from tests.test_behavioral_conversation_evidence import event
+    from memory.behavioral_event_state import record_event
+    from services.behavioral_conversation_evidence import load_behavioral_evidence
+    kw, sent, db = setup(tmp_path)
+    rows = [event(day, item=f"entity {i}", source_message_id=f"{i}:{day}")
+            for i in range(6) for day in range(20, 27-i//2)]
+    observations = str(tmp_path / "observations.db")
+    for row in rows:
+        record_event(dict(row, negated=False, hypothetical=False, reported_by_user=True), db_path=observations)
+    kw["evidence_loader"] = lambda **options: load_behavioral_evidence(db_path=observations, **options)
+    def choose(payload):
+        evidence = payload["evidence"]
+        selected = next((i for i, p in enumerate(evidence) if p["item"] == "entity 5"), None)
+        return dict(selected_index=selected, blocked=False, recently_discussed=False,
+                    message="Πώς πάει αυτή η ασχολία σου;" if selected is not None else "")
+    kw["classify"] = choose
+    assert run_initiative(**kw) == "delivered"
+    assert len(sent) == 1
+    assert load_messages(db_path=db)[-1]["agent"] == "Behavioral_Agent"
 
 
 def test_pending_retry_does_not_ignore_changed_family_context(tmp_path):

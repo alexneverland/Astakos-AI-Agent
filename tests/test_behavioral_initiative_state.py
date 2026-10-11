@@ -63,3 +63,25 @@ def test_corrupt_telemetry_is_not_a_delivery_failure_or_exposed_payload(tmp_path
     assert store.load_diagnostics()["error"] == "diagnostics_unavailable"
     assert "secret" not in str(store.load_diagnostics())
     assert store.load()["pending"] is None
+
+
+def test_legacy_evaluation_and_new_evidence_digest_are_read_compatible(tmp_path):
+    """Upgrading the cache key never resets a delivery receipt or a pending send."""
+    store = InitiativeStore(tmp_path / "state.json")
+    state = store.load()
+    state["evaluated"] = dict(day="2026-10-02", snapshot=[], preferences=[], context={})
+    store.save(state)
+    assert store.load() == state
+    state["evaluated"]["evidence"] = "a" * 64
+    store.save(state)
+    assert InitiativeStore(store.path).load() == state
+
+
+@pytest.mark.parametrize("digest", [True, "", "x" * 64, "a" * 65])
+def test_malformed_evidence_cache_key_is_rejected(tmp_path, digest):
+    store = InitiativeStore(tmp_path / "state.json")
+    state = store.load()
+    state["evaluated"] = dict(day="2026-10-02", snapshot=[], preferences=[],
+                              context={}, evidence=digest)
+    with pytest.raises(ValueError):
+        store.save(state)

@@ -13,6 +13,7 @@ from core.untrusted_content import external_content_source_names
 from memory.behavioral_conversation_preferences import PreferenceStore
 from memory.behavioral_initiative_state import InitiativeStore
 from services.behavioral_pattern_aggregator import _event_pattern_key
+from services.behavioral_conversation_evidence import MAX_CONVERSATION_PATTERN_PACKETS
 
 _logger = logging.getLogger(__name__)
 
@@ -121,13 +122,16 @@ def run_initiative(
                 recent = [item for item, stamp in zip(delivered, delivered_times)
                           if instant - stamp.astimezone(timezone.utc) < timedelta(days=7)]
                 diagnostic["stage"] = "evidence"
-                packets = evidence_loader(today=now.date(), window_days=30)
+                packets = evidence_loader(today=now.date(), window_days=30,
+                                          max_patterns=MAX_CONVERSATION_PATTERN_PACKETS)
                 evidence = [packet for packet in packets
                             if _topic(packet) not in {item["topic"] for item in recent}]
                 diagnostic["candidate_count"] = len(evidence)
                 if not evidence:
                     return outcome("skip", "topic_cooldown" if packets else "no_eligible_patterns")
-                evaluation = dict(day=now.date().isoformat(), snapshot=_snapshot(rows), preferences=prefs, context=context)
+                evidence_digest = sha256(json.dumps(evidence, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+                evaluation = dict(day=now.date().isoformat(), snapshot=_snapshot(rows),
+                                  preferences=prefs, context=context, evidence=evidence_digest)
                 if state["evaluated"] == evaluation:
                     return outcome("skip", "already_evaluated")
                 state["evaluated"] = evaluation

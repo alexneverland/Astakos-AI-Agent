@@ -25,6 +25,14 @@ write a concise canonical English item label including its semantic role or
 distinctive identity when necessary. Use that same identity consistently within
 the batch. Keep item_detail descriptive; it does not determine pattern identity.
 
+When multiple supplied labels semantically identify the SAME entity, prefer
+the suitable reference supported on more distinct dates; break a tie with the
+earliest first_source_rowid. Select its item_ref consistently across languages.
+Support counts guide stability, not truth: never let a frequent incorrect
+classification override the source or merge distinct entities. Historical
+aliases remain reference data; do not propagate a less-supported spelling just
+because it resembles the current wording.
+
 event_type describes the specific behavior, using a concise canonical English
 label. A broad action kind alone cannot equate different behaviors: cleaning,
 feeding, repairing and preparing are different actions even on the same object.

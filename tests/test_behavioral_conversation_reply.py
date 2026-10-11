@@ -4,6 +4,8 @@ from datetime import date
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 import pytest
 
+pytestmark = pytest.mark.usefixtures("offline_behavioral_io")
+
 from memory.behavioral_conversation_preferences import PreferenceStore
 from services import behavioral_conversation_reply as reply
 
@@ -33,6 +35,55 @@ def test_relevant_evidence_in_normal_reply_not_extra_message(tmp_path, packet, c
     assert "2026-09-20" in context and "beer" in context
     assert "not proof of consumption" in context.lower()
     assert not (tmp_path / "prefs.json").exists()
+
+
+def test_current_plan_can_reference_lower_ranked_completed_behavior(tmp_path):
+    """Repeated behavior remains visible when stronger unrelated patterns exist."""
+    from tests.test_behavioral_conversation_evidence import event
+    from services.behavioral_conversation_evidence import build_behavioral_evidence
+    rows = [event(day, item=item, source_message_id=f"{item}:{day}")
+            for item in ("z", "y", "x", "beer") for day in (20, 22, 24)]
+    def choose(payload):
+        selected = next((i for i, p in enumerate(payload["evidence"]) if p["item"] == "beer"), None)
+        return decision(selected_index=selected)
+    context = reply.prepare_behavioral_reply_context([HumanMessage(content="Πάω για μπύρα")],
+        channel="matrix", today=date(2026, 10, 2), store=PreferenceStore(tmp_path / "prefs.json"),
+        evidence_loader=lambda **kw: build_behavioral_evidence(rows, **kw), classify=choose)
+    assert '"item": "beer"' in context
+    assert "not proof of consumption" in context.lower()
+
+
+def test_followup_topics_are_shared_with_reply_selection(tmp_path, packet):
+    """A follow-up's equivalent question must not become optional reply commentary."""
+    topics = [{"subject": "drinking", "status": "sent"}]
+    def choose(payload):
+        assert payload["followup_topics"] == topics
+        return decision(recently_discussed=True)
+    context = reply.prepare_behavioral_reply_context([HumanMessage(content="Πάω για μπύρα")],
+        channel="web", store=PreferenceStore(tmp_path / "prefs.json"),
+        evidence_loader=lambda **kw: [packet], followup_loader=lambda: topics, classify=choose)
+    assert "OPTIONAL BEHAVIORAL CONTEXT" not in context
+
+
+def test_distinct_behavioral_reflection_is_not_blocked_by_shared_followup_subject(tmp_path, packet):
+    """Meaning/purpose decides duplication; the entity label is not a deny-list."""
+    context = reply.prepare_behavioral_reply_context([HumanMessage(content="Πάω για μπύρα")],
+        channel="matrix", store=PreferenceStore(tmp_path / "prefs.json"),
+        evidence_loader=lambda **kw: [packet], classify=lambda payload: decision(),
+        followup_loader=lambda: [{"subject": "beer", "status": "sent"}])
+    assert "OPTIONAL BEHAVIORAL CONTEXT" in context
+
+
+def test_followup_changes_during_reply_selection_discard_optional_comment(tmp_path, packet):
+    topics = []
+    def choose(payload):
+        topics.append({"subject": "beer", "status": "pending"})
+        return decision()
+    context = reply.prepare_behavioral_reply_context([HumanMessage(content="Πάω για μπύρα")],
+        channel="web", store=PreferenceStore(tmp_path / "prefs.json"),
+        evidence_loader=lambda **kw: [packet], classify=choose,
+        followup_loader=lambda: [dict(topic) for topic in topics])
+    assert "OPTIONAL BEHAVIORAL CONTEXT" not in context
 
 
 def test_semantic_opt_out_before_pattern_survives_channel_restart(tmp_path, packet):

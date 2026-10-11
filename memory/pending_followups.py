@@ -1325,6 +1325,34 @@ def find_pending_followups(limit: int = 20, *, active_only: bool = True) -> list
         conn.close()
 
 
+def load_followup_conversation_topics(now: datetime, *, limit: int = 40) -> list[dict]:
+    """Read active pending and seven-day sent topics without initializing storage."""
+    from pathlib import Path
+    path = Path(STATE_DB)
+    if not path.is_file():
+        return []
+    if type(limit) is not int or not 1 <= limit <= 40:
+        raise ValueError("Follow-up context limit must be between 1 and 40")
+    now = _coerce_local_dt(now)
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA query_only=ON")
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pending_followups'").fetchone() is None:
+            return []
+        rows = conn.execute("""
+            SELECT id, topic, subject, status, source_user_text, source_channel,
+                   followup_after_ts, expires_at, sent_at, metadata_json
+            FROM pending_followups
+            WHERE (status='pending' AND julianday(expires_at)>julianday(?))
+               OR julianday(sent_at)>=julianday(?)
+            ORDER BY id DESC LIMIT ?
+        """, (now.isoformat(), (now-timedelta(days=7)).isoformat(), limit)).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
 def has_recent_sent_followup(within_minutes: int = 90) -> bool:
     conn = _conn()
     try:

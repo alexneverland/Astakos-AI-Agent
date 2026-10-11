@@ -13,7 +13,9 @@ from core.untrusted_content import (
     has_untrusted_result_in_active_history, UNTRUSTED_EXTERNAL_TOOL_RESULT_MARKER,
 )
 from memory.behavioral_conversation_preferences import PreferenceStore
-from services.behavioral_conversation_evidence import load_behavioral_evidence
+from services.behavioral_conversation_evidence import (
+    load_behavioral_evidence, load_followup_topic_context, MAX_CONVERSATION_PATTERN_PACKETS,
+)
 
 _logger = logging.getLogger(__name__)
 _PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
@@ -76,6 +78,7 @@ def prepare_behavioral_reply_context(
     today: date | None = None, store: PreferenceStore | None = None,
     evidence_loader: Callable[..., list[dict[str, Any]]] = load_behavioral_evidence,
     classify: Callable[[dict[str, Any]], Any] = _classify,
+    followup_loader: Callable[[], list[dict[str, Any]]] = load_followup_topic_context,
 ) -> str:
     """Select dated evidence or persist explicit preferences without sending.
 
@@ -100,9 +103,12 @@ def prepare_behavioral_reply_context(
             from config import BASE_DIR
             store = PreferenceStore(Path(BASE_DIR) / "behavioral_conversation_preferences.json")
         prefs = store.load()
-        evidence = evidence_loader(today=today or date.today(), window_days=30)
+        evidence = evidence_loader(today=today or date.today(), window_days=30,
+                                   max_patterns=MAX_CONVERSATION_PATTERN_PACKETS)
+        followups = followup_loader()
         payload = {
             "current_user": text[:4000], "preferences": prefs, "evidence": evidence,
+            "followup_topics": followups,
             "recent_history": [
                 {"role": getattr(message, "type", ""), "text": str(getattr(message, "content", ""))[:1000]}
                 for message in history[-7:-1]
@@ -120,7 +126,7 @@ def prepare_behavioral_reply_context(
             if updated is None:
                 return _UNAVAILABLE
             return _preference_context(updated) + "\n[BEHAVIORAL PREFERENCE STATUS]\nThe explicit commentary preference was saved. Acknowledge naturally; no pattern comment this turn.\n"
-        if store.load() != prefs:
+        if store.load() != prefs or followup_loader() != followups:
             return _UNAVAILABLE
         index = raw["selected_index"]
         if index is None or raw["blocked"] or raw["recently_discussed"]:
