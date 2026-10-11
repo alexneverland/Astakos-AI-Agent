@@ -1,5 +1,7 @@
 """Offline real adapter and scheduler integration for initiative delivery."""
 import pytest
+
+pytestmark = pytest.mark.usefixtures("offline_behavioral_io")
 from clients.matrix_delivery import MatrixExternalTransport
 from services.external_delivery import ExternalDeliveryRouter, ExternalDeliveryError
 
@@ -47,7 +49,7 @@ def test_scheduler_only_enqueues_one_slow_worker(monkeypatch):
         service._reset_for_tests()
 
 
-@pytest.mark.parametrize("reminder_phase", ["none", "before", "during"])
+@pytest.mark.parametrize("reminder_phase", ["none", "before", "during", "followup"])
 def test_real_worker_delivers_and_records_via_shared_boundaries(tmp_path, monkeypatch, reminder_phase):
     """Run the production worker with real temp stores and real Matrix adapter."""
     from datetime import datetime, timedelta
@@ -74,6 +76,12 @@ def test_real_worker_delivers_and_records_via_shared_boundaries(tmp_path, monkey
     monkeypatch.setattr(history, "load_messages", lambda **kw: original_load(db_path=db, **kw))
     monkeypatch.setattr(history, "append_message", lambda **kw: original_append(db_path=db, **kw))
     monkeypatch.setattr(context, "build_runtime_routine_context", lambda: {})
+    import memory.pending_followups as followups
+    monkeypatch.setattr(followups, "STATE_DB", str(tmp_path / "followups.db"))
+    if reminder_phase == "followup":
+        followups.create_pending_followup(source_channel="matrix", source_agent="Chat_Agent",
+            topic="exercise", subject="walking", source_user_text="Went walking",
+            source_ai_text="Nice", followup_after_ts=(now+timedelta(hours=1)).isoformat(), confidence=.95)
     events = [dict(event_type="activity", category="exercise", subject="user", item="walking",
                    action_kind="participate", status="completed", record_state="confirmed",
                    event_date=(now - timedelta(days=day)).date().isoformat(), confidence=.95,
@@ -83,10 +91,13 @@ def test_real_worker_delivers_and_records_via_shared_boundaries(tmp_path, monkey
     from memory.event_log import log_event
     if reminder_phase == "before":
         log_event("reminders", "sent", task="A reminder missing from conversation history")
-    def classify(_):
+    def classify(payload):
         if reminder_phase == "during":
             log_event("reminders", "sent", task="Reminder delivered during classification")
-        return dict(selected_index=0, blocked=False, recently_discussed=False, message="Πώς πάνε οι βόλτες σου;")
+        covered = reminder_phase == "followup"
+        if covered:
+            assert payload["current_context"]["followup_topics"][0]["subject"] == "walking"
+        return dict(selected_index=0, blocked=False, recently_discussed=covered, message="Πώς πάνε οι βόλτες σου;")
     monkeypatch.setattr(worker, "_classify", classify)
     delivered = []
     transport = MatrixExternalTransport(send_text=lambda _: pytest.fail("Wrong sender"),

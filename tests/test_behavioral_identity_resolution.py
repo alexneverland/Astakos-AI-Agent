@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("offline_behavioral_io")
+
 from memory import behavioral_event_state as store
 from memory import conversation_history as history
 from services import behavioral_event_extractor as extractor
@@ -195,6 +197,51 @@ def test_catalog_bounds_uniqueness_and_rejects_untrusted_or_later_observations()
     assert len(references) == 40
     assert [reference["idx"] for reference in references] == list(range(40))
     assert len({reference["item"] for reference in references}) == 40
+
+
+def test_prior_alias_references_expose_support_without_merging_history():
+    """The semantic resolver can prefer an established identity over a new alias."""
+    events = [dict(proposal(item=item), record_state="confirmed", source_rowid=rowid,
+                   source_channel="matrix", event_date=f"2026-10-{day:02}")
+              for item, rowid, day in (("κουνέλος", 9, 9), ("rabbit", 8, 8),
+                                      ("rabbit", 7, 7), ("rabbit", 6, 6),
+                                      ("κουνέλος", 10, 9))]
+    original = [dict(row) for row in events]
+    refs = extractor._identity_references(events, before_rowid=11)
+    assert refs[0]["item"] == "rabbit"
+    assert refs[0]["distinct_date_count"] == 3
+    assert refs[1]["distinct_date_count"] == 1
+    assert events == original
+
+
+@pytest.mark.parametrize("canonical,alias", [("rabbit", "κουνέλος"), ("basil plant", "βασιλικός")])
+def test_supported_reference_reuse_persists_without_rewriting_aliases(tmp_path, monkeypatch, canonical, alias):
+    """The production intake retains semantic selections and untouched old rows."""
+    path = str(tmp_path / "events.db")
+    for rowid, item, day in ((1, canonical, 1), (2, canonical, 2),
+                             (3, canonical, 3), (4, alias, 4)):
+        store.record_event(extractor.normalize_extracted_event(proposal(item=item),
+            dict(id=f"old{rowid}", rowid=rowid, channel="web", date=f"2026-10-{day:02}")), db_path=path)
+    old = store.list_events(db_path=path, initialize=False)
+    captured = []
+    def decision(messages):
+        payload = json.loads(messages[-1].content)
+        captured.append(payload)
+        # Only semantic classification is simulated; actual resolution/persistence is real.
+        selected = next(ref for ref in payload["references"] if ref["item"] == canonical)
+        assert selected["distinct_date_count"] == 3
+        return [proposal(item=alias, item_ref=selected["idx"], behavior_ref=selected["idx"])]
+    install_provider(monkeypatch, decision)
+    result = extractor.run_behavioral_event_intake(db_path=path, initialization_rowid=5,
+        max_rowid_loader=lambda: 5, context_loader=lambda before: [],
+        message_loader=lambda after: [dict(id="new", rowid=5, channel="matrix",
+            role="user", date="2026-10-05", content=f"Καθάρισα τον {alias}")])
+    assert result["confirmed"] == 1
+    rows = store.list_events(db_path=path, initialize=False)
+    assert [row for row in rows if row["source_rowid"] < 5] == old
+    assert rows[0]["item"] == canonical
+    packet = load_behavioral_evidence(today=date(2026, 10, 5), window_days=30, db_path=path)[0]
+    assert packet["item"] == canonical and packet["distinct_date_count"] == 4
 
 
 def test_ambiguous_null_classification_creates_no_event_and_consumes_source(tmp_path, monkeypatch):

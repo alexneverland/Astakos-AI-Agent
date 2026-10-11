@@ -52,7 +52,7 @@ def run_behavioral_initiative_job() -> None:
         from memory.behavioral_initiative_state import InitiativeStore
         from memory.conversation_history import append_message, load_messages
         from memory.event_log import has_recent_reminder_delivery
-        from services.behavioral_conversation_evidence import load_behavioral_evidence
+        from services.behavioral_conversation_evidence import load_behavioral_evidence, load_followup_topic_context
         from services.behavioral_conversation_initiative import run_initiative
         from services.external_delivery import external_delivery_router as router
         from services.routine_context import build_runtime_routine_context
@@ -77,12 +77,17 @@ def run_behavioral_initiative_job() -> None:
                 return router.send_idempotent_matrix_text(text, transaction_id=identity)
             return router.send_text_to(channel, text)
 
+        def current_context() -> dict[str, Any]:
+            """Pin pending/sent follow-ups alongside routine state during selection."""
+            return {**build_runtime_routine_context(),
+                    "followup_topics": load_followup_topic_context(datetime.now())}
+
         run_initiative(store=InitiativeStore(Path(BASE_DIR) / "behavioral_initiative_state.json"),
             preferences=PreferenceStore(Path(BASE_DIR) / "behavioral_conversation_preferences.json"),
             history_loader=lambda: load_messages(limit=20), evidence_loader=load_behavioral_evidence,
             classify=_classify, sender=send, record=append_message, clock=datetime.now,
             selected_channel=resolve_external_channel, unavailable=unavailable,
-            budget=bot.can_send_proactive, current_context=build_runtime_routine_context)
+            budget=bot.can_send_proactive, current_context=current_context)
     except Exception as exc:
         _logger.warning("Behavioral initiative worker skipped (%s)", type(exc).__name__)
     finally:

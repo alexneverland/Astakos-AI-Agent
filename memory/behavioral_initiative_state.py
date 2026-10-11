@@ -76,8 +76,16 @@ class InitiativeStore:
             raise ValueError("Invalid behavioral initiative state")
         evaluation = state["evaluated"]
         if evaluation is not None:
-            if not isinstance(evaluation, dict) or set(evaluation) != {"day", "snapshot", "preferences", "context"}:
+            if not isinstance(evaluation, dict) or set(evaluation) not in (
+                {"day", "snapshot", "preferences", "context"},
+                {"day", "snapshot", "preferences", "context", "evidence"},
+            ):
                 raise ValueError("Invalid initiative evaluation")
+            if "evidence" in evaluation and (
+                not isinstance(evaluation["evidence"], str) or len(evaluation["evidence"]) != 64
+                or any(character not in "0123456789abcdef" for character in evaluation["evidence"])
+            ):
+                raise ValueError("Invalid evaluation evidence digest")
             from datetime import date
             date.fromisoformat(evaluation["day"])
             if not isinstance(evaluation["snapshot"], list) or not isinstance(evaluation["preferences"], list) or not isinstance(evaluation["context"], dict):

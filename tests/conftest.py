@@ -120,3 +120,14 @@ def offline_fact_storage(monkeypatch):
     monkeypatch.setattr(vs.embeddings, "embed_query", lambda text: [0.1, 0.2, 0.3])
     monkeypatch.setattr(vs.embeddings, "embed_documents", lambda texts: [[0.1, 0.2, 0.3] for _ in texts])
     monkeypatch.setattr(vs.AstakosMemoryManager, "_trigger_routine_reconciler", lambda *a, **k: None)
+
+
+@pytest.fixture
+def offline_behavioral_io(monkeypatch):
+    """Fail loudly if an offline behavioral test reaches any network transport."""
+    import socket
+    def deny(*args, **kwargs):
+        raise AssertionError("Outbound network is forbidden in behavioral tests")
+    monkeypatch.setattr(socket.socket, "connect", deny)
+    monkeypatch.setattr(socket.socket, "connect_ex", deny)
+    monkeypatch.setattr(socket, "create_connection", deny)

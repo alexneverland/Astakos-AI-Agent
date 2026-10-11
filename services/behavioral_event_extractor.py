@@ -165,8 +165,8 @@ def _identity_references(
     events: list[Mapping[str, Any]], *, before_rowid: int,
 ) -> list[dict[str, Any]]:
     """Bound prior confirmed identities without trusting their taxonomy as fact."""
-    references: list[dict[str, Any]] = []
-    seen: set[tuple[str, ...]] = set()
+    catalog: dict[tuple[str, ...], dict[str, Any]] = {}
+    dates: dict[tuple[str, ...], set[str]] = {}
     for event in events:
         rowid = event.get("source_rowid")
         if (type(rowid) is not int or not 0 < rowid < before_rowid
@@ -182,13 +182,20 @@ def _identity_references(
                 or any(len(value) > MAX_IDENTITY_FIELD_CHARS for value in fields.values())):
             continue
         key = tuple(fields[field].casefold() for field in ("subject", "item", "action_kind", "event_type"))
-        if key in seen:
-            continue
-        seen.add(key)
-        references.append({"idx": len(references), **fields})
-        if len(references) == MAX_IDENTITY_REFERENCES:
-            break
-    return references
+        if key not in catalog:
+            catalog[key] = {**fields, "first_source_rowid": rowid}
+            dates[key] = set()
+        catalog[key]["first_source_rowid"] = min(catalog[key]["first_source_rowid"], rowid)
+        event_date = _nonempty_text(event.get("event_date"))
+        if _valid_event_date(event_date):
+            dates[key].add(event_date)
+    for key, reference in catalog.items():
+        reference["distinct_date_count"] = len(dates[key])
+    ranked = sorted(catalog.values(), key=lambda reference: (
+        -reference["distinct_date_count"], reference["first_source_rowid"],
+    ))
+    return [{"idx": index, **reference} for index, reference in
+            enumerate(ranked[:MAX_IDENTITY_REFERENCES])]
 
 
 def _identity_context(rows: list[Mapping[str, Any]], *, before_rowid: int) -> list[dict[str, Any]]:
