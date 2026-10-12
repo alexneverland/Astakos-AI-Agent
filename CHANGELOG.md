@@ -26,6 +26,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Routine context clarification can reuse semantically grounded, explicit
+  current-day durations beyond the momentary two-hour presence window. Separate
+  expiring evidence preserves source timestamps, invalidates on owner-history or
+  canonical-state changes, and keeps normal questions for ambiguous situations.
+
 - Behavioral reply and initiative selectors consider a broader bounded topic
   pool and avoid equivalent pending/recent follow-up questions through shared
   read-only topic context. Initiative skips are reconsidered when background

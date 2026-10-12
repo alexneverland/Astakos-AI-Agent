@@ -25,17 +25,29 @@ def build_routine_context_evidence(
 ) -> dict[str, ContextEvidence]:
     """Expose channel-neutral, read-only evidence without altering routine dispatch."""
     from services.routine_context_evidence import build_evidence_snapshot, load_gps_point
+    canonical_reader = state_reader is None
     if state_reader is None:
         from memory.routine_db import get_context_state
         state_reader = get_context_state
     if location_resolver is None:
         from services.location_update import location_is_home
         location_resolver = location_is_home
-    return build_evidence_snapshot(
+    evidence = build_evidence_snapshot(
         now=now, state_reader=state_reader,
         gps_loader=gps_loader if gps_loader is not None else lambda: load_gps_point(GPS_STORAGE_FILE),
         location_resolver=location_resolver,
     )
+    if canonical_reader:
+        from memory.conversation_history import get_latest_trusted_user_rowid
+        from services.routine_duration_context import DURATION_KEY, apply_duration_evidence
+        from config import CONVERSATION_DB_FILE
+        try:
+            if state_reader(DURATION_KEY) is not None:
+                evidence = apply_duration_evidence(evidence, now=now, state_reader=state_reader,
+                    history_marker=get_latest_trusted_user_rowid(db_path=CONVERSATION_DB_FILE))
+        except Exception:
+            pass  # A failed optional proof read never changes ordinary evidence.
+    return evidence
 
 
 def _recent_gps_status(now: datetime | None = None) -> str | None:
@@ -73,6 +85,7 @@ def _recent_gps_status(now: datetime | None = None) -> str | None:
     return "home" if dist_home <= HOME_RADIUS_M else "away"
 
 def build_runtime_routine_context(now: datetime | None = None) -> dict:
+    from services.routine_duration_context import DURATION_KEY
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
     away_state = resolve_kid1_away_state(current)
@@ -87,6 +100,8 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
         c.execute("SELECT key, value, expires_at FROM context_state")
         for row in c.fetchall():
             k, v, exp = row[0], row[1], row[2]
+            if k == DURATION_KEY:
+                continue
             if exp and exp < today:
                 continue
             if str(v).lower() == "true":

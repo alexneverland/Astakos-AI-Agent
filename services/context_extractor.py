@@ -216,6 +216,9 @@ def extract_and_update_context_flags(
             daily_rows = []
         expected = {key: get_context_state(key) for key in
                     _CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES) | {"kid1_away_reason"}}
+        if daily_resolution_flags is not None:
+            from services.routine_duration_context import DURATION_KEY
+            expected[DURATION_KEY] = get_context_state(DURATION_KEY)
         prompt = _CONTEXT_EXTRACTION_PROMPT.format(
             bot_name=config.BOT_NAME,
             user_name=config.USER_NAME,
@@ -513,6 +516,11 @@ def _commit_daily_resolution(
     now: datetime, still_current: Callable[[], bool],
 ) -> ContextExtractionResult | None:
     """Reuse shared source validation and the canonical conditional writer."""
+    if isinstance(payload, dict) and "valid_until" in payload:
+        from services.routine_duration_context import commit_duration_resolution
+        applied = commit_duration_resolution(payload, rows, expected, allowed=allowed,
+            now=now, still_current=still_current)
+        return ContextExtractionResult("related", applied) if applied else None
     resolved = _validate_context_resolution(payload, rows, expected, allowed=allowed, now=now)
     if resolved is None or not still_current():
         return None
