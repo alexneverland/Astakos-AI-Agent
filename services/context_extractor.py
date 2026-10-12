@@ -24,6 +24,7 @@ _CONTEXT_ENUM_VALUES = {
     "current_shift": {"morning", "afternoon", "night"},
     "partner_work_mode": {"office", "remote"},
     "kid1_absence_scope": {"extended", "temporary", "home"},
+    "state:kid1:outing": {"in_progress", "done"},
 }
 
 _CONTEXT_EXTRACTION_PROMPT = """
@@ -43,6 +44,7 @@ Available flags:
 10. "partner_work_mode": "office" or "remote" only when the user directly states that the partner is working at their workplace or remotely/from home.
 11. "quiet_hours": (boolean) The user requests quiet or no interruptions now, or clearly says the child is already asleep now. A future bedtime does not activate quiet hours.
 12. "kid1_absence_scope": "extended" when the child is explicitly away from the family for a stay/overnight period and cannot take part in their routines; "temporary" for school or a short outing; "home" when the child has returned or is with the user. Do not infer an extended absence merely from being outside the house. Omit this key when the new message does not establish a different absence scope.
+13. "state:kid1:outing": "in_progress" only when a current report establishes that an outing with the child has actually begun; "done" when the outing ended or the current report clearly places them back home. Playing together at home plus a later outing plan is not an outing in progress. Resolve each clause's time and subjects separately; omit ambiguous changes. This state is not a routine completion.
 
 Rules:
 - Return ONLY a JSON object.
@@ -454,7 +456,7 @@ def reconcile_context_message(user_text: str) -> None:
         inferred = infer_routine_reconciliation_directives(
             user_text, category="family", reason="live_message_context", now=datetime.now(),
         )
-        live_keys = _CONTEXT_BOOLEAN_FLAGS | {"kid1_absence_scope"}
+        live_keys = _CONTEXT_BOOLEAN_FLAGS | {"kid1_absence_scope", "state:kid1:outing"}
         directives = [item for item in inferred if not (
             item.get("kind") == "context_state_set" and item.get("key") in live_keys)]
         if directives:

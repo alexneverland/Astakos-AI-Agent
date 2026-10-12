@@ -35,7 +35,15 @@ def build_dated_routine_feedback_context(result: FeedbackTurnResult) -> SystemMe
             if successful and selection.occurrence_date is not None else None
         ),
     }
+    if successful and result.selections:
+        payload = {"status": result.status, "outcomes": [
+            {"action": item.action, "routine_id": item.routine_id,
+             "occurrence_date": item.occurrence_date.isoformat()} for item in result.selections]}
     content = json.dumps(payload) + "\n" + load_prompt("routine_feedback_context.md")
+    if successful and result.routine_names:
+        from core.untrusted_content import format_untrusted_tool_result
+        content += "\n" + format_untrusted_tool_result("recorded routine display names",
+            json.dumps([name[:200] for name in result.routine_names], ensure_ascii=False))
     if successful and isinstance(result.routine_name, str) and result.routine_name.strip():
         from core.untrusted_content import format_untrusted_tool_result
         content += "\n" + format_untrusted_tool_result(

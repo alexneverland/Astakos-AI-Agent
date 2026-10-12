@@ -7,8 +7,8 @@ from datetime import date, datetime
 from core.i18n import load_prompt
 from services.gemini import safe_gemini_call
 from services.routine_completion_helper import (
-    CandidatePool, DatedRoutineSelection, RoutineFeedbackQuestion, RoutineFeedbackGroupQuestion,
-    RoutineSelection, validate_dated_selection,
+    CandidatePool, DatedRoutineSelection, DatedRoutineBatch, RoutineFeedbackQuestion, RoutineFeedbackGroupQuestion,
+    RoutineSelection, validate_dated_feedback,
 )
 from services.routine_feedback import aware
 
@@ -90,7 +90,7 @@ def select_dated_routine(
     pending_question: RoutineFeedbackQuestion | RoutineFeedbackGroupQuestion | None = None,
     conversation_context: list[dict] | None = None,
     candidate_evidence: dict[int, dict] | None = None,
-) -> DatedRoutineSelection:
+) -> DatedRoutineSelection | DatedRoutineBatch:
     """Interpret trusted feedback with authoritative dates; remain inactive until wired.
 
     Callers supply known occurrence dates and the authoritative calendar. An
@@ -143,6 +143,6 @@ def select_dated_routine(
         response = safe_gemini_call(prompt)
         parsed = json.loads(_strip_json_fence(str(response.text).strip()),
                             object_pairs_hook=_strict_object)
-        return validate_dated_selection(parsed, eligible, today=now.date())
+        return validate_dated_feedback(parsed, eligible, today=now.date())
     except Exception:
         return none

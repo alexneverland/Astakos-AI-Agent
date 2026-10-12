@@ -61,6 +61,10 @@ class _BatchDeliveryRejected(Exception):
     """Rollback shared receipt staging when any reserved member conflicts."""
 
 
+class _BatchFeedbackRejected(Exception):
+    """Rollback every completion when any selected occurrence rejects feedback."""
+
+
 class RoutineFeedbackStore:
     """Serialize dated receipts/feedback across processes using SQLite writes."""
 
@@ -470,6 +474,34 @@ class RoutineFeedbackStore:
                         or is_current is None or is_current() is not True):
                     return False
             return self._record_feedback(connection, routine_id, occurrence_date, feedback, at=at)
+
+    def record_completions(
+        self, completions: tuple[tuple[int, date], ...], *, at: datetime,
+        expected_revisions: dict[int, str], is_current: Callable[[], bool],
+    ) -> bool:
+        """Commit all explicitly selected completions atomically, with no sends."""
+        if (not isinstance(completions, tuple) or not 2 <= len(completions) <= 5
+                or any(not isinstance(item, tuple) or len(item) != 2 for item in completions)
+                or len({item[0] for item in completions}) != len(completions)
+                or any(item[0] not in expected_revisions for item in completions)):
+            raise ValueError("A bounded distinct completion batch is required")
+        for rid, day in completions:
+            at = self._identity(rid, day, at)
+        try:
+            with self._write() as connection:
+                if (is_current() is not True or any(self._revision(connection, rid) != revision
+                        for rid, revision in expected_revisions.items())):
+                    return False
+                for rid, day in completions:
+                    existing = connection.execute("SELECT feedback FROM routine_occurrences "
+                        "WHERE routine_id=? AND occurrence_date=?", (rid, day.isoformat())).fetchone()
+                    if existing and existing[0] == "complete":
+                        continue
+                    if not self._record_feedback(connection, rid, day, "complete", at=at):
+                        raise _BatchFeedbackRejected()
+            return True
+        except _BatchFeedbackRejected:
+            return False
 
     def record_draft_acknowledgement(self, connection: sqlite3.Connection,
                                     routine_id: int, *, offered_at: datetime,

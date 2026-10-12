@@ -11,7 +11,8 @@ from functools import partial
 from inspect import signature
 
 from services.routine_completion_helper import (
-    DatedRoutineSelection, RoutineFeedbackQuestion, RoutineFeedbackGroupQuestion, validate_dated_selection,
+    DatedRoutineSelection, DatedRoutineBatch, RoutineFeedbackQuestion, RoutineFeedbackGroupQuestion,
+    validate_dated_selection, validate_dated_feedback,
 )
 from services.routine_feedback import aware
 
@@ -33,13 +34,16 @@ def _context_question_store() -> ClarificationStore:
 
 def _feedback_conversation_reference(*, now: datetime, rowid: int, db_path: str) -> list[dict]:
     """Keep expired questions as meaning references, never active permissions."""
-    from memory.conversation_history import load_recent_state_messages
-    rows = load_recent_state_messages(now=now, through_rowid=rowid, db_path=db_path)
+    from memory.conversation_history import load_recent_state_messages, load_daily_state_messages
+    rows = [row for row in load_recent_state_messages(now=now, through_rowid=rowid, db_path=db_path)
+            if row["role"] == "assistant"]
+    rows += [row for row in load_daily_state_messages(now=now, db_path=db_path) if row["rowid"] < rowid]
+    rows.sort(key=lambda row: (row["timestamp"], row["rowid"]))
     requests = None
     references = []
     for row in rows:
         item = {key: row.get(key) for key in ("timestamp", "channel", "role")}
-        item["content"] = str(row.get("content") or "")[:500]
+        item["content"] = str(row.get("content") or "")
         if row["role"] == "assistant":
             if requests is None:
                 requests = {q["id"]: q for q in _context_question_store().snapshot()["requests"]}
@@ -63,6 +67,8 @@ class FeedbackTurnResult:
     status: Literal["applied", "stale", "clarify", "none", "error"]
     selection: DatedRoutineSelection = DatedRoutineSelection("none")
     routine_name: str | None = None
+    selections: tuple[DatedRoutineSelection, ...] = ()
+    routine_names: tuple[str, ...] = ()
 
 
 class PersistedRoutineFeedbackHandler:
@@ -76,7 +82,7 @@ class PersistedRoutineFeedbackHandler:
 
     def __init__(
         self, *, store: RoutineFeedbackStore,
-        selector: Callable[..., DatedRoutineSelection], clock: Callable[[], datetime],
+        selector: Callable[..., DatedRoutineSelection | DatedRoutineBatch], clock: Callable[[], datetime],
         channel: str, conversation_db_path: str, trusted_owner: bool,
         draft_loader: Callable[[], Mapping[int, object]] | None = None,
         draft_selector: Callable[..., RoutineSelection] | None = None,
@@ -136,11 +142,12 @@ class PersistedRoutineFeedbackHandler:
                 and item.get("external_id") == reply_event_id for item in reference)
             if expired_reply:
                 original_selector = selector
-                def select_execution(*args, **kwargs) -> DatedRoutineSelection:
+                def select_execution(*args, **kwargs) -> DatedRoutineSelection | DatedRoutineBatch:
                     """An expired state question permits only explicit execution feedback."""
                     selection = original_selector(*args, **kwargs)
-                    return (selection if isinstance(selection, DatedRoutineSelection)
-                            and selection.action in {"complete", "none", "clarify"}
+                    return (selection if isinstance(selection, DatedRoutineBatch)
+                            or (isinstance(selection, DatedRoutineSelection)
+                                and selection.action in {"complete", "none", "clarify"})
                             else DatedRoutineSelection("none"))
                 selector = select_execution
             result = process_catalog_feedback_turn(user_text, store=self._store,
@@ -238,7 +245,7 @@ def make_feedback_freshness(
 
 def process_stored_feedback_turn(
     user_text: str, candidates: dict[int, str], allowed_dates: dict[int, frozenset[date]],
-    *, store: RoutineFeedbackStore, selector: Callable[..., DatedRoutineSelection],
+    *, store: RoutineFeedbackStore, selector: Callable[..., DatedRoutineSelection | DatedRoutineBatch],
     now: datetime, clock: Callable[[], datetime], trusted: bool,
     user_rowid: int, conversation_db_path: str,
     reply_channel: str | None = None, reply_event_id: str | None = None,
@@ -287,7 +294,7 @@ def process_stored_feedback_turn(
 
 def process_catalog_feedback_turn(
     user_text: str, *, store: RoutineFeedbackStore,
-    selector: Callable[..., DatedRoutineSelection], now: datetime,
+    selector: Callable[..., DatedRoutineSelection | DatedRoutineBatch], now: datetime,
     clock: Callable[[], datetime], trusted: bool, user_rowid: int,
     conversation_db_path: str, reply_channel: str | None = None,
     reply_event_id: str | None = None,
@@ -330,7 +337,7 @@ def process_catalog_feedback_turn(
 
 def process_feedback_turn(
     user_text: str, candidates: dict[int, str], allowed_dates: dict[int, frozenset[date]],
-    *, store: RoutineFeedbackStore, selector: Callable[..., DatedRoutineSelection],
+    *, store: RoutineFeedbackStore, selector: Callable[..., DatedRoutineSelection | DatedRoutineBatch],
     now: datetime, trusted: bool, is_current: Callable[[], bool],
     pending_question: RoutineFeedbackQuestion | RoutineFeedbackGroupQuestion | None = None,
     expected_revisions: dict[int, str] | None = None,
@@ -357,6 +364,20 @@ def process_feedback_turn(
             revisions = {rid: expected_revisions[rid] for rid in candidates}
         selection = selector(user_text, candidates, dates, now=now, trusted=True,
                              pending_question=pending_question)
+        if isinstance(selection, DatedRoutineBatch):
+            if not isinstance(selection.selections, tuple):
+                return FeedbackTurnResult("none")
+            validated = validate_dated_feedback({"selections": [
+                {"action": item.action, "routine_id": item.routine_id,
+                 "occurrence_date": item.occurrence_date.isoformat() if item.occurrence_date else None}
+                for item in selection.selections if isinstance(item, DatedRoutineSelection)]}, dates, today=now.date())
+            if (not isinstance(validated, DatedRoutineBatch)
+                    or len(validated.selections) != len(selection.selections)):
+                return FeedbackTurnResult("none")
+            applied = store.record_completions(tuple((item.routine_id, item.occurrence_date)
+                for item in validated.selections), at=now, expected_revisions=revisions, is_current=is_current)
+            return FeedbackTurnResult("applied", selections=validated.selections,
+                routine_names=tuple(candidates[item.routine_id] for item in validated.selections)) if applied else FeedbackTurnResult("stale")
         if not isinstance(selection, DatedRoutineSelection):
             return FeedbackTurnResult("none")
         selection = validate_dated_selection({"action": selection.action,

@@ -1699,9 +1699,7 @@ def infer_routine_reconciliation_candidates(
         ("seasonal_football",              _rule_seasonal_football,              (normalized_fact, dates, current)),
         ("football_season",                _rule_football_season,                (normalized_fact, dates, current)),
         ("camp_absence",                   _rule_camp_absence,                   (normalized_fact, dates, current)),
-        ("family_outing_in_progress",      _rule_family_outing_in_progress,      (normalized_fact, dates, current)),
         ("return_home",                    _rule_return_home,                    (normalized_fact,)),
-        ("return_home_from_outing",        _rule_return_home_from_outing,        (normalized_fact, dates, current)),
         ("kid1_away_general",        _rule_kid1_away_general,        (normalized_fact, dates, current)),
         ("school_break",                   _rule_school_break,                   (normalized_fact, dates, current)),
         ("child_activity_pause",           _rule_child_activity_pause,           (normalized_fact, dates, current)),
@@ -1720,7 +1718,12 @@ def infer_routine_reconciliation_candidates(
     for d in llm_candidates:
         d.setdefault("rule_name", "llm_extracted")
 
-    return _merge_candidate_lists(llm_candidates, rule_candidates)
+    # Live outings belong to source-timed semantic context extraction. Memory
+    # summaries cannot activate them or install persistent suppression rules.
+    return [item for item in _merge_candidate_lists(llm_candidates, rule_candidates)
+            if not (item.get("kind") == "context_state_set" and item.get("key") == "state:kid1:outing")
+            and not (isinstance(item.get("condition_payload"), dict)
+                     and item["condition_payload"].get("flag") == "state:kid1:outing")]
 
 
 def infer_routine_reconciliation_directives(
