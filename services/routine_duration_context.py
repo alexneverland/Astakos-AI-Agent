@@ -52,7 +52,9 @@ def commit_duration_resolution(
         prior = expected.get(flag)
         if prior:
             prior_at = _recorded_time(prior.get("updated_at"), now)
-            if prior_at is None or prior_at.timestamp() > event_at.timestamp():
+            if (prior_at is None or prior_at.timestamp() > event_at.timestamp()
+                    or (prior_at.timestamp() == event_at.timestamp()
+                        and prior.get("value") != str(flags[flag]).lower())):
                 return None
     proof = {"version": 1, "flags": flags, "event_at": event_at.isoformat(),
         "valid_until": until.isoformat(), "history_marker": max(sources),

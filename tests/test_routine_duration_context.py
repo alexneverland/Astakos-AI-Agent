@@ -112,6 +112,36 @@ def test_uncertain_duration_keeps_normal_question(tmp_path, monkeypatch, scenari
     assert db.get_context_state("routine_context_duration_proof") is None
 
 
+@pytest.mark.parametrize("stored_value,accepted", [("true", False), ("false", True)])
+def test_equal_timestamp_duration_requires_agreeing_canonical_value(tmp_path, monkeypatch, stored_value, accepted):
+    """Second-resolution collisions cannot let a proof invert canonical evidence."""
+    from memory import conversation_history as history, routine_db as db
+    from services import context_extractor as extractor
+    from services.routine_context import build_routine_context_evidence
+    from services.routine_duration_context import DURATION_KEY
+    path = str(tmp_path / "history.db")
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "routines.db"))
+    monkeypatch.setattr(extractor.config, "CONVERSATION_DB_FILE", path)
+    db.setup_db()
+    event_at = NOW-timedelta(hours=3)
+    source = history.append_message(role="user", channel="web", timestamp=event_at,
+        content="Σήμερα είμαστε χωριστά στις δουλειές μας μέχρι τις 14:00", db_path=path)
+    db.set_context_states_if_unchanged({"partner_with_user": (stored_value, NOW.date().isoformat())},
+        {"partner_with_user": None}, recorded_at=event_at)
+    original = db.get_context_state("partner_with_user")
+    monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=json.dumps({
+        "flags": {"partner_with_user": False}, "event_rowid": source["rowid"],
+        "support_rowids": [source["rowid"]], "duration_source_rowids": [source["rowid"]],
+        "valid_until": NOW.replace(hour=14, minute=0).isoformat()})))
+    result = extractor.resolve_daily_context_before_question(("partner_with_user",), now=NOW,
+        still_current=lambda: True, channel="matrix", conversation_db_path=path)
+    assert result is accepted
+    assert db.get_context_state("partner_with_user") == original
+    assert (db.get_context_state(DURATION_KEY) is not None) is accepted
+    effective = build_routine_context_evidence(NOW, gps_loader=lambda: None)["partner_with_user"].effective_value
+    assert effective is (False if accepted else None)
+
+
 @pytest.mark.parametrize("damage", ["json", "bool_version", "bool_flag", "naive_end", "missing_anchor", "old_marker"])
 def test_corrupt_persisted_duration_fails_closed(tmp_path, monkeypatch, damage):
     """A malformed proof never becomes effective presence or renews old flags."""

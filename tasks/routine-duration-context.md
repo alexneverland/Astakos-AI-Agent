@@ -51,3 +51,11 @@ Final new-test group: 24 passed, including exact end-time expiry. An in-memory
 mutation removing the trusted-history marker guard failed its regression as
 expected; production source was never mutated. Compilation/diff checks passed.
 Two existing dependency deprecation warnings appeared in the broader group.
+
+PR #249 review repair: an equal-time canonical true and duration false was
+reproduced offline, including proof persistence and eventual effective false.
+Duration commit now requires equal-time canonical evidence to agree with the
+proposed value. The conflicting regression failed before repair; agreeing
+equal-time evidence remains usable without renewing its source. 121 affected
+duration/daily/evidence cases passed, including both new regressions. Compilation
+and diff checks passed; one existing Google dependency warning remains.
