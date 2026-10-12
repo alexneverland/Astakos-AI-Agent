@@ -26,6 +26,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Routine feedback can atomically record multiple clearly reported completions,
+  retaining prior receipts and truthful acknowledgements. Bounded owner-day
+  references distinguish earlier participation from a later activity or plan;
+  canonical semantic context owns child outing state instead of legacy memory
+  outing rules. Ambiguous identities, future intentions and unsafe batch actions
+  remain blocked.
+
 - Routine context clarification can reuse semantically grounded, explicit
   current-day durations beyond the momentary two-hour presence window. Separate
   expiring evidence preserves source timestamps, invalidates on owner-history or

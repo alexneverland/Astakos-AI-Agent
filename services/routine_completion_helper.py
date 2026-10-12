@@ -47,6 +47,29 @@ class DatedRoutineSelection:
 
 
 @dataclass(frozen=True)
+class DatedRoutineBatch:
+    """Bounded independent completions; never batch refusals or external actions."""
+
+    selections: tuple[DatedRoutineSelection, ...]
+
+
+def validate_dated_feedback(
+    payload: object, allowed_dates: dict[int, frozenset[date]], *, today: date,
+) -> DatedRoutineSelection | DatedRoutineBatch:
+    """Reuse canonical per-item validation and reject an entire invalid batch."""
+    if not isinstance(payload, dict) or set(payload) != {"selections"}:
+        return validate_dated_selection(payload, allowed_dates, today=today)
+    items = payload["selections"]
+    if not isinstance(items, list) or not 2 <= len(items) <= 5:
+        return DatedRoutineSelection("none")
+    selections = tuple(validate_dated_selection(item, allowed_dates, today=today) for item in items)
+    if (any(item.action != "complete" for item in selections)
+            or len({item.routine_id for item in selections}) != len(selections)):
+        return DatedRoutineSelection("none")
+    return DatedRoutineBatch(selections)
+
+
+@dataclass(frozen=True)
 class RoutineFeedbackQuestion:
     """A caller-authenticated, exact reminder correlation, not arbitrary history."""
 

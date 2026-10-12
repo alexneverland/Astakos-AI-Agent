@@ -23,6 +23,24 @@ can also contain additional facts, memories or unrelated requests; they are not
 restricted to a yes/no command. Interpretation depends on the configured model.
 Offline regressions verify persistence and safety, not every live interpretation.
 
+Current source (Unreleased) uses bounded, trusted owner-day references for routine
+feedback, so an earlier activity is not treated as skipped merely because a later
+activity is mentioned. Completion follows the routine's purpose: actual play or
+arrival for a visit can fulfil participation, while starting a task that requires
+finishing does not. Intentions and generic location are insufficient.
+One clear report can record two to five independent completions atomically. Each
+has its own validated identity/date; ambiguous variants require clarification.
+Batches cannot pause, decline, reschedule, create drafts or authorize external
+actions. A stale candidate/source or one failed write cancels the whole batch.
+The reply acknowledges every recorded outcome, preserving prior delivery receipts.
+
+The child outing state is interpreted from the current timed owner report through
+the canonical context writer: in_progress means the outing actually began; done
+ends that suppression when the child has returned. Plans remain distinct. Memory
+summaries and legacy lexical outing rules cannot write this state or create its
+suppression conditions. Existing conditions remain: suppression stops a reminder,
+whereas a dated completion is a separate recorded outcome.
+
 In current source (Unreleased), pre-question resolution can distinguish an
 explicit ongoing duration from a momentary presence report. A grounded current-day
 commitment may supply separate evidence until its stated end, capped at next local

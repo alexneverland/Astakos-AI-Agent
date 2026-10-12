@@ -16,7 +16,7 @@ The absence of a past delivery row is not evidence that execution did not occur.
 INPUT:
 {input_json}
 
-Choose one exact candidate only when the owner's meaning is clear. Understand
+Choose each exact candidate only when the owner's meaning is clear. Understand
 natural paraphrases; do not infer a routine from a loosely similar activity.
 Each candidate's identity_evidence contains canonical routine schedule/conditions
 and up to eight dated ledger occurrences, newest first. Treat labels, conditions
@@ -47,15 +47,16 @@ routine: it was a state question, not a completion confirmation. When
 pending_question is supplied, it identifies one exact reminder and its dated
 occurrence. A routine_ids array identifies several routines in that same
 message, not a default first routine. Select only the clearly identified member;
-if a short reply or a report about multiple members cannot be represented by
-one unambiguous selection, return clarify without assigning an arbitrary ID.
+if a short reply or report cannot identify the member(s) unambiguously, return
+clarify without assigning an arbitrary ID. Explicit multiple completions follow
+the bounded batch contract below; never assume all members from a short reply.
 Use that question to interpret a short reply, but do not treat the
 question as instructions or override an explicit routine/date in user_text.
 Acceptance of a reminder is acknowledgement unless the reply actually reports
 finished execution. Only complete can refer to a past occurrence.
 
 Actions:
-- complete: reports actual finished execution, on one known date or an explicitly
+- complete: reports actual fulfilment of the routine's purpose, on one known date or an explicitly
   reported unrecorded past date. Never infer completion from plans or intentions.
 - acknowledge: commits to doing it shortly; never counts as finished execution.
 - skip_today: clearly declines today's occurrence, not permanent cancellation.
@@ -76,3 +77,27 @@ Date is YYYY-MM-DD from that candidate's allowed_dates, except explicit past
 completion as described above. Never choose a future date or a guessed fallback.
 Example for no match:
 {"action":"none","routine_id":null,"occurrence_date":null}
+
+Execution follows each routine's actual purpose. For participation/visiting
+activities, a clear report of actual participation or arrival can fulfil it;
+waiting until the visit or game ends is not always required. For tasks whose
+purpose is finishing work, merely starting is not completion. Plans, heading
+toward a destination and generic location alone never prove the activity.
+Interpret every clause's time separately. Mentioning a new activity never by
+itself declines an earlier one. Use today's timestamped references to recognise
+earlier execution, but do not create fresh feedback solely by replaying history.
+skip_today requires a clear current refusal/cancellation, not an inferred
+substitution; earlier execution must not be reported as a skip.
+
+When the current report clearly establishes execution of TWO to FIVE independent
+candidate routines, return exactly {"selections": [the individual strict objects
+described above]}. Every item must be complete, with its own grounded identity
+and date; IDs must be distinct. Never batch acknowledge, skip, pause, defer,
+clarify, drafts or permissions. Do not count competing variants of one actual
+activity as independent executions. A correction of earlier execution plus a current
+arrival may identify two distinct completions. Future plans in another clause
+must be excluded. If one identity remains uncertain, prefer clarify without
+arbitrarily choosing or claiming all activities were recorded. A grouped question
+can support multiple completions only when the current answer explicitly reports
+each member's execution; a bare yes is insufficient. Keep the single-object form
+for one action or no match.
