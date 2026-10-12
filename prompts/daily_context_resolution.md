@@ -14,3 +14,20 @@ For a grounded resolution, flags maps allowed identifiers to booleans,
 event_rowid identifies the actual recent owner event, and support_rowids lists
 its source plus the explicit daily-plan/other relevant source IDs. No actions,
 routine completion, messages, tool use, invented source IDs or new permissions.
+
+Explicit-duration alternative: a current-day statement about an ongoing situation
+can remain applicable beyond the two-hour observation limit when the owner gives
+a duration or a clear day-scoped commitment. Assess this semantically, across all
+people and all later sources. Return the same three fields plus exactly
+"duration_source_rowids": [IDs of explicit duration sources] and "valid_until":
+an offset-aware ISO end time supported by those sources, no later than next local
+midnight. Do not invent shift end hours from morning/afternoon labels. A mere
+arrival, old presence, habit, or intention does not qualify. A plan alone cannot
+prove execution: connect it with an actual completed/current transition.
+Both people working does not alone establish separate workplaces; remote work
+or a shared workplace may mean they are together. Infer separation only when the
+sources support it. Later contrary or ambiguous reports require omitting the
+flag, even if a plan previously covered today. Prefer the ordinary three-field
+form for recent momentary evidence, and the empty form whenever uncertain.
+This alternative records a separate expiring proof; it must never pretend the
+old event happened now or refresh its original presence timestamp.

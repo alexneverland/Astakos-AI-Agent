@@ -23,6 +23,19 @@ can also contain additional facts, memories or unrelated requests; they are not
 restricted to a yes/no command. Interpretation depends on the configured model.
 Offline regressions verify persistence and safety, not every live interpretation.
 
+In current source (Unreleased), pre-question resolution can distinguish an
+explicit ongoing duration from a momentary presence report. A grounded current-day
+commitment may supply separate evidence until its stated end, capped at next local
+midnight. The model must connect the duration to an actual current/completed
+transition and consider every later report; a plan or two people working alone
+does not prove separate locations. Shift names do not invent shift end times.
+Ordinary presence still expires after two hours. The original observation and its
+timestamp stay unchanged; an internal proof uses the canonical conditional writer
+without a schema migration. New trusted owner history or changed canonical state
+(including GPS flag refreshes) invalidates the proof conservatively and requires
+reassessment. Missing, corrupt or expired proof leaves ordinary clarification in
+place. External action approval requirements are unaffected.
+
 ## Read the routine status correctly
 
 | Debug field | Meaning |
