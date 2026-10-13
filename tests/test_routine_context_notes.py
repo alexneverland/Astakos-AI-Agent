@@ -221,7 +221,7 @@ def test_confirmed_delivery_history_failure_does_not_resend(tmp_path):
 
 
 @pytest.fixture
-def scheduler_note(tmp_path, monkeypatch):
+def scheduler_note(tmp_path, monkeypatch, request):
     """Use real canonical routine/history ledgers, blocking all network calls."""
     import socket
     import config
@@ -234,13 +234,16 @@ def scheduler_note(tmp_path, monkeypatch):
     from services.external_delivery import external_delivery_router
     from core import messaging_channel
 
+    now = NOW.replace(hour=request.param, minute=15) if hasattr(request, "param") else NOW
+    slot = now + timedelta(minutes=5)
+
     def denied(*args, **kwargs):
         pytest.fail("An offline note test attempted a network call")
     monkeypatch.setattr(socket.socket, "connect", denied)
     monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "routines.db"))
     db.setup_db()
-    db.import_declared_routines([{"day": "Everyday", "time": "10:05",
+    db.import_declared_routines([{"day": "Everyday", "time": slot.strftime("%H:%M"),
                                 "event": "Πάρκο με τον Αλέξανδρο", "type": "daily"}])
     rid = db.get_routines_for_day("Thursday")[0]["id"]
     db.set_routine_condition(rid, condition_type="context_flag",
@@ -249,16 +252,16 @@ def scheduler_note(tmp_path, monkeypatch):
     dated = RoutineFeedbackStore(db.get_connection)
     dated.initialize()
     candidate = RoutineCandidate(str(rid), "Πάρκο με τον Αλέξανδρο",
-                                NOW + timedelta(minutes=5), tuple(db.get_routine_conditions(rid)))
+                                slot, tuple(db.get_routine_conditions(rid)))
     state = {"channel": "matrix", "recent": False, "evidence": {
         "user_out_of_home": ContextEvidence(effective_value=True, status="known",
-                                            recorded_at=NOW, valid_until=NOW + timedelta(hours=2))}}
+                                            recorded_at=now, valid_until=now + timedelta(hours=2))}}
     runtime = {"user_at_work": True}
     projected = context.project_routine_context(runtime, state["evidence"])
     class Clock(datetime):
         @classmethod
         def now(cls, tz=None):
-            return NOW if tz else NOW.replace(tzinfo=None)
+            return now if tz else now.replace(tzinfo=None)
     monkeypatch.setattr(bot, "datetime", Clock)
     monkeypatch.setattr(bot, "is_quiet_hours", lambda: False)
     monkeypatch.setattr(bot, "is_proactive_muted", lambda: False)
@@ -287,9 +290,34 @@ def scheduler_note(tmp_path, monkeypatch):
     monkeypatch.setattr(external_delivery_router, "_transports",
                         {"matrix": Transport(), "telegram": Transport()})
     store = ClarificationStore(tmp_path / "questions.json")
-    call = lambda: bot._maybe_send_routine_context_note(candidate, projected,
-        state["evidence"].copy(), store, "user_out_of_home=true")
+    call = lambda **kwargs: bot._maybe_send_routine_context_note(candidate, projected,
+        state["evidence"].copy(), store, "user_out_of_home=true", **kwargs)
     return call, state, sent, dated, rid, store, path, notes, db, history
+
+
+@pytest.mark.parametrize("scheduler_note", [6, 10], indirect=True)
+@pytest.mark.parametrize("channel", ["matrix", "telegram"])
+@pytest.mark.parametrize("prepared", [False, True])
+def test_optional_note_keeps_default_quiet_hours(scheduler_note, monkeypatch, channel, prepared):
+    """Optional comments cannot inherit the required scheduled-reminder exemption."""
+    from clients import telegram_bot as bot
+    from services.routine_context import resolve_quiet_hours
+    call, state, sent, dated, rid, store, path, notes, _, history = scheduler_note
+    state["channel"] = channel
+    now = bot.datetime.now()
+    monkeypatch.setattr(bot, "is_quiet_hours", lambda: resolve_quiet_hours(bot.datetime.now()))
+    options = {"prepared_message": "Prepared comment", "budget_reserved": True} if prepared else {}
+    if now.hour == 6:
+        assert resolve_quiet_hours(now) and not resolve_quiet_hours(now, scheduled=True)
+        outcome = call(**options)
+        assert outcome == "deferred"
+        assert not sent and not store.path.exists()
+        assert history.load_messages(db_path=path) == []
+    else:
+        assert call(**options) == "sent"
+        assert len(sent) == len(history.load_messages(db_path=path)) == 1
+        assert call(**options) == "already_evaluated"
+    assert dated.occurrences(rid) == []
 
 
 @pytest.mark.parametrize("channel", ["matrix", "telegram"])

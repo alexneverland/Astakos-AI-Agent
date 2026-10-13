@@ -137,8 +137,8 @@ def dispatch_context_current(
     """Revalidate canonical gates; late recovery requires an explicit grace window."""
     from clients import telegram_bot as bot
     from memory import routine_db as db
-    from services.routine_context import build_runtime_routine_context, build_routine_context_evidence, project_routine_context
-    if bot.is_quiet_hours() or bot.is_proactive_muted() or bot._active_routine_pause_until():
+    from services.routine_context import build_runtime_routine_context, build_routine_context_evidence, project_routine_context, resolve_quiet_hours
+    if resolve_quiet_hours(now, scheduled=True) or bot.is_proactive_muted() or bot._active_routine_pause_until():
         return False
     evidence = build_routine_context_evidence(now)
     current = project_routine_context(build_runtime_routine_context(now), evidence)
@@ -265,9 +265,11 @@ def clarification_unavailable() -> bool | str:
     from core.messaging_channel import resolve_external_channel
     from memory.event_log import has_recent_reminder_delivery
     from services.routine_context_clarification import context_confirmation_conflict
+    from services.routine_context import resolve_quiet_hours
+    from memory.routine_context_clarification import ATHENS
     if bot.shutdown_event.is_set() or bot._external_background_runtime_channel != resolve_external_channel():
         return "inactive_runtime"
-    if bot.is_quiet_hours():
+    if resolve_quiet_hours(datetime.now(ATHENS), scheduled=True):
         return "quiet"
     if bot.is_proactive_muted():
         return "muted"
