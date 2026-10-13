@@ -48,7 +48,7 @@ class DatedRoutineSelection:
 
 @dataclass(frozen=True)
 class DatedRoutineBatch:
-    """Bounded independent completions; never batch refusals or external actions."""
+    """Bounded independent completions/cancellations, never external actions."""
 
     selections: tuple[DatedRoutineSelection, ...]
 
@@ -63,7 +63,7 @@ def validate_dated_feedback(
     if not isinstance(items, list) or not 2 <= len(items) <= 5:
         return DatedRoutineSelection("none")
     selections = tuple(validate_dated_selection(item, allowed_dates, today=today) for item in items)
-    if (any(item.action != "complete" for item in selections)
+    if (any(item.action not in {"complete", "skip_today"} for item in selections)
             or len({item.routine_id for item in selections}) != len(selections)):
         return DatedRoutineSelection("none")
     return DatedRoutineBatch(selections)
