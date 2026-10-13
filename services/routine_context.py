@@ -302,7 +302,12 @@ def resolve_user_out_of_home(now: datetime | None = None) -> bool:
             return stored_value
     return False
 
-def resolve_quiet_hours(now: datetime | None = None) -> bool:
+def resolve_quiet_hours(now: datetime | None = None, *, scheduled: bool = False) -> bool:
+    """Honor explicit quiet state; default window does not cancel scheduled slots.
+
+    Only bounded routine dispatch/clarification callers may opt into scheduled
+    policy. Spontaneous proactive flows retain the ordinary default window.
+    """
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
     from memory.routine_db import get_context_state
@@ -310,8 +315,12 @@ def resolve_quiet_hours(now: datetime | None = None) -> bool:
     if state_data:
         expires_at = state_data.get("expires_at")
         if not expires_at or expires_at >= today:
+            if scheduled and str(state_data.get("value")).lower() not in {"true", "false"}:
+                return True
             return str(state_data.get("value")).lower() == "true"
 
+    if scheduled:
+        return False
     from clients.telegram_bot import QUIET_HOURS
     h = current.hour
     start, end = QUIET_HOURS
