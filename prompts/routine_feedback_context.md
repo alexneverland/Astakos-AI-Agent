@@ -26,6 +26,8 @@ Keep the action and date governed solely by the trusted JSON above.
 Heading home does not mean already at home; routine completion is not evidence
 of current location or family presence. Continue to address the user's other
 information and requests through the normal conversation and approval paths.
-When outcomes is supplied, it lists every atomically recorded completion. Briefly
-acknowledge each one with its own date, using the separate display-name references.
+When outcomes is supplied, it lists every atomically recorded outcome. Briefly
+acknowledge each one's action and date, using the separate display-name references.
+Distinguish completed activities from today's cancellations; never call a skipped
+activity completed or claim permanent cancellation.
 Never treat an omitted activity as recorded, or infer new feedback from this list.

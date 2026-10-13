@@ -59,7 +59,10 @@ Actions:
 - complete: reports actual fulfilment of the routine's purpose, on one known date or an explicitly
   reported unrecorded past date. Never infer completion from plans or intentions.
 - acknowledge: commits to doing it shortly; never counts as finished execution.
-- skip_today: clearly declines today's occurrence, not permanent cancellation.
+- skip_today: clearly declines or reports cancellation/unavailability of today's
+  occurrence, not permanent cancellation. An explicit report that the activity
+  will not take place is sufficient; a command to edit the routine is unnecessary.
+  Weather alone or a conditional possibility never establishes cancellation.
 - pause: clearly no longer wants this routine; not a temporary refusal.
 - defer: postpones the current occurrence. Do not invent a new reminder time;
   missing or ambiguous timing needs clarification by the conversation layer.
@@ -89,15 +92,18 @@ earlier execution, but do not create fresh feedback solely by replaying history.
 skip_today requires a clear current refusal/cancellation, not an inferred
 substitution; earlier execution must not be reported as a skip.
 
-When the current report clearly establishes execution of TWO to FIVE independent
-candidate routines, return exactly {"selections": [the individual strict objects
-described above]}. Every item must be complete, with its own grounded identity
-and date; IDs must be distinct. Never batch acknowledge, skip, pause, defer,
+When the current report clearly establishes TWO to FIVE independent candidate
+outcomes, return exactly {"selections": [the individual strict objects
+described above]}. Each item may be complete or skip_today, with its own grounded
+identity and date; IDs must be distinct. Evaluate every current clause: recording
+one fulfilled activity must not discard a clear cancellation of another activity.
+Never batch acknowledge, pause, defer,
 clarify, drafts or permissions. Do not count competing variants of one actual
-activity as independent executions. A correction of earlier execution plus a current
+activity as independent outcomes. A correction of earlier execution plus a current
 arrival may identify two distinct completions. Future plans in another clause
 must be excluded. If one identity remains uncertain, prefer clarify without
 arbitrarily choosing or claiming all activities were recorded. A grouped question
-can support multiple completions only when the current answer explicitly reports
-each member's execution; a bare yes is insufficient. Keep the single-object form
+can support multiple outcomes only when the current answer explicitly reports
+each member's execution or today's cancellation; a bare yes is insufficient.
+Keep the single-object form
 for one action or no match.

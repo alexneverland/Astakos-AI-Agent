@@ -145,7 +145,8 @@ class PersistedRoutineFeedbackHandler:
                 def select_execution(*args, **kwargs) -> DatedRoutineSelection | DatedRoutineBatch:
                     """An expired state question permits only explicit execution feedback."""
                     selection = original_selector(*args, **kwargs)
-                    return (selection if isinstance(selection, DatedRoutineBatch)
+                    return (selection if (isinstance(selection, DatedRoutineBatch)
+                                and all(item.action == "complete" for item in selection.selections))
                             or (isinstance(selection, DatedRoutineSelection)
                                 and selection.action in {"complete", "none", "clarify"})
                             else DatedRoutineSelection("none"))
@@ -374,7 +375,7 @@ def process_feedback_turn(
             if (not isinstance(validated, DatedRoutineBatch)
                     or len(validated.selections) != len(selection.selections)):
                 return FeedbackTurnResult("none")
-            applied = store.record_completions(tuple((item.routine_id, item.occurrence_date)
+            applied = store.record_outcomes(tuple((item.routine_id, item.occurrence_date, item.action)
                 for item in validated.selections), at=now, expected_revisions=revisions, is_current=is_current)
             return FeedbackTurnResult("applied", selections=validated.selections,
                 routine_names=tuple(candidates[item.routine_id] for item in validated.selections)) if applied else FeedbackTurnResult("stale")

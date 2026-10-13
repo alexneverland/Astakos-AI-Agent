@@ -28,9 +28,12 @@ feedback, so an earlier activity is not treated as skipped merely because a late
 activity is mentioned. Completion follows the routine's purpose: actual play or
 arrival for a visit can fulfil participation, while starting a task that requires
 finishing does not. Intentions and generic location are insufficient.
-One clear report can record two to five independent completions atomically. Each
-has its own validated identity/date; ambiguous variants require clarification.
-Batches cannot pause, decline, reschedule, create drafts or authorize external
+One clear report can record two to five independent completions or today's
+cancellations atomically. A completion in one clause does not discard a clear
+cancellation in another. Weather alone or conditional plans cannot cancel a
+routine. Each has its own validated identity/date; ambiguous variants require
+clarification.
+Batches cannot pause, acknowledge, reschedule, create drafts or authorize external
 actions. A stale candidate/source or one failed write cancels the whole batch.
 The reply acknowledges every recorded outcome, preserving prior delivery receipts.
 

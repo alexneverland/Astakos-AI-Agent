@@ -26,6 +26,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- A single owner report can atomically record completed activities alongside
+  explicit cancellations for today, so recording one outcome does not discard
+  the other and leave a cancelled routine eligible for a context question.
+  Batches retain identity/date, freshness, rollback and completion protection;
+  pause, deferral, acknowledgement, drafts and external permissions stay separate.
+
 - Early explicitly scheduled routines and their required context questions no
   longer stall behind the default quiet-hour window. Current explicit quiet
   requests, mute/pause, context and final dispatch guards still apply; spontaneous

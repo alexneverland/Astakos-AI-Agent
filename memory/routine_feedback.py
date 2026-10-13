@@ -62,7 +62,7 @@ class _BatchDeliveryRejected(Exception):
 
 
 class _BatchFeedbackRejected(Exception):
-    """Rollback every completion when any selected occurrence rejects feedback."""
+    """Rollback every outcome when any selected occurrence rejects feedback."""
 
 
 class RoutineFeedbackStore:
@@ -475,29 +475,33 @@ class RoutineFeedbackStore:
                     return False
             return self._record_feedback(connection, routine_id, occurrence_date, feedback, at=at)
 
-    def record_completions(
-        self, completions: tuple[tuple[int, date], ...], *, at: datetime,
+    def record_outcomes(
+        self, outcomes: tuple[tuple[int, date, Feedback], ...], *, at: datetime,
         expected_revisions: dict[int, str], is_current: Callable[[], bool],
     ) -> bool:
-        """Commit all explicitly selected completions atomically, with no sends."""
-        if (not isinstance(completions, tuple) or not 2 <= len(completions) <= 5
-                or any(not isinstance(item, tuple) or len(item) != 2 for item in completions)
-                or len({item[0] for item in completions}) != len(completions)
-                or any(item[0] not in expected_revisions for item in completions)):
-            raise ValueError("A bounded distinct completion batch is required")
-        for rid, day in completions:
+        """Commit bounded completion/today-cancellation outcomes atomically."""
+        if (not isinstance(outcomes, tuple) or not 2 <= len(outcomes) <= 5
+                or any(not isinstance(item, tuple) or len(item) != 3 for item in outcomes)
+                or any(item[2] not in {"complete", "skip_today"} for item in outcomes)
+                or len({item[0] for item in outcomes}) != len(outcomes)
+                or any(item[0] not in expected_revisions for item in outcomes)):
+            raise ValueError("A bounded distinct completion/cancellation batch is required")
+        for rid, day, action in outcomes:
             at = self._identity(rid, day, at)
+            if action == "skip_today" and day != at.date():
+                raise ValueError("A cancellation must concern today")
         try:
             with self._write() as connection:
                 if (is_current() is not True or any(self._revision(connection, rid) != revision
                         for rid, revision in expected_revisions.items())):
                     return False
-                for rid, day in completions:
-                    existing = connection.execute("SELECT feedback FROM routine_occurrences "
+                for rid, day, action in outcomes:
+                    existing = connection.execute("SELECT feedback, feedback_at FROM routine_occurrences "
                         "WHERE routine_id=? AND occurrence_date=?", (rid, day.isoformat())).fetchone()
-                    if existing and existing[0] == "complete":
+                    if (existing and existing[0] == action and existing[1]
+                            and aware(datetime.fromisoformat(existing[1])) <= at):
                         continue
-                    if not self._record_feedback(connection, rid, day, "complete", at=at):
+                    if not self._record_feedback(connection, rid, day, action, at=at):
                         raise _BatchFeedbackRejected()
             return True
         except _BatchFeedbackRejected:
