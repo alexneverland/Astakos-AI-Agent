@@ -80,6 +80,8 @@ spontaneous conversation. A current explicit quiet request, mute or pause wins;
 context, eligibility, delivery budgets and final currentness checks remain in
 force. Missing context is not assumed false, and clarification does not ask after
 the scheduled slot. A greeting alone does not establish the owner's location.
+Optional context notes retain the ordinary quiet-hour policy, including notes
+already prepared by reminder wording; they do not receive the scheduled exemption.
 
 The dated policy records each routine occurrence separately. Actual delivery,
 acknowledgement, refusal and completion have different meanings. A preparation

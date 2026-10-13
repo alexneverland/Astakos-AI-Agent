@@ -45,3 +45,17 @@ Live model interpretation still requires natural observation.
 No real messages were sent or live ledger/context/config/runtime data repaired.
 This does not recover today's missed occurrence or prove future model wording.
 Owner requested a pull request on codex/early-routine-context after verification.
+
+## PR #251 review correction (2026-10-13)
+
+Codex comment 4254826958 correctly identified that optional context notes also
+reuse final scheduled dispatch validation. Their freshness predicate now checks
+ordinary quiet hours both before reservation and after wording, preserving the
+scheduled exemption only for required questions and actual reminders.
+
+Eight new cases exercise real optional-note delivery/history on both channels,
+at 06:15 and outside quiet hours, with newly generated and already prepared notes.
+Before the fix, all four quiet-window cases incorrectly sent; the four outside
+quiet cases passed. Final context/note/worker/scheduler group: 238 passed, one
+existing google.genai deprecation warning. Existing post-inference quiet tests
+also pass. Compilation and git diff --check passed. No live data was changed.

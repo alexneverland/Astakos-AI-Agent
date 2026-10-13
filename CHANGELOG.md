@@ -29,7 +29,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Early explicitly scheduled routines and their required context questions no
   longer stall behind the default quiet-hour window. Current explicit quiet
   requests, mute/pause, context and final dispatch guards still apply; spontaneous
-  proactive messages retain their quiet-hour policy.
+  proactive messages and optional routine context notes retain their quiet-hour
+  policy, including checks after note generation.
 
 - Routine feedback can atomically record multiple clearly reported completions,
   retaining prior receipts and truthful acknowledgements. Bounded owner-day

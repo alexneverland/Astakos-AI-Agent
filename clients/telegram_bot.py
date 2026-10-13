@@ -4338,6 +4338,7 @@ def _maybe_send_routine_context_note(
             at = clock()
             if (channel != resolve_external_channel() or channel != _current_external_runtime_channel()
                     or get_sentimental_info(int(candidate.id)).get("sentimental_silenced")
+                    or is_quiet_hours()
                     or should_skip_proactive_for_recent_activity(quiet=True)
                     or not dispatch_context_current((candidate,), context, store, at)):
                 return False
