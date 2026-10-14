@@ -1,9 +1,10 @@
 """Compound owner reports retain goal milestones alongside local drafts."""
 from types import SimpleNamespace
+from typing import Any
 import json
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, BaseMessage
 
 from tests.test_goal_agent_updates import goal_store
 
@@ -11,16 +12,19 @@ pytestmark = pytest.mark.usefixtures("offline_behavioral_io")
 REPORT = "ΝΑΙ ΦΙΛΕ ΤΟ ΠΡΟΤΖΕΚΤ KAGGLE ΤΟ ΠΡΟΧΩΡΑΩ ΤΩΡΑ ΕΙΜΑΙ 0.12. ΤΩΡΑ ΓΙΑ ΤΟ ΜΗΝΥΜΑ ΣΤΗΝ ΣΟΦΙΑ ΦΤΙΑΞΕ ΕΝΑ ΓΛΥΚΟ ΜΗΝΥΜΑ"
 
 
-def bindings(monkeypatch, role, mode):
+def bindings(monkeypatch: pytest.MonkeyPatch, role: str, mode: str) -> dict[str, Any]:
     """Use the real agent's tool gates with model/history boundaries offline."""
     import core.agents as agents
     import services.messenger_intent as intent
-    captured = {}
+    captured: dict[str, Any] = {}
     class Model:
-        def bind_tools(self, tools):
+        """Capture actual bindings without contacting a provider."""
+        def bind_tools(self, tools: list[Any]) -> "Model":
+            """Record tools supplied by the production agent."""
             captured.update({tool.name: tool for tool in tools})
             return self
-        def invoke(self, messages):
+        def invoke(self, messages: list[BaseMessage]) -> AIMessage:
+            """Return offline wording without executing tools."""
             return AIMessage(content="Offline draft ready")
     monkeypatch.setattr(agents, "llm", Model())
     monkeypatch.setattr(agents, "build_prompt", lambda *a, **k: "offline")
@@ -41,7 +45,9 @@ def bindings(monkeypatch, role, mode):
 
 @pytest.mark.parametrize("role", ["Chat_Agent", "Web_Agent"])
 @pytest.mark.parametrize("mode", ["create", "accepted"])
-def test_compound_report_reaches_native_goal_persistence_and_readers(goal_store, monkeypatch, role, mode):
+def test_compound_report_reaches_native_goal_persistence_and_readers(
+    goal_store: dict[str, Any], monkeypatch: pytest.MonkeyPatch, role: str, mode: str,
+) -> None:
     """A score milestone reaches Debug/followup without resetting the goal."""
     tools = bindings(monkeypatch, role, mode)
     assert set(tools) == {"relay_local_payload", "update_goal_milestones_tool"}
@@ -70,12 +76,12 @@ def test_compound_report_reaches_native_goal_persistence_and_readers(goal_store,
 
 
 @pytest.mark.parametrize("role", ["Chat_Agent", "Web_Agent"])
-def test_existing_draft_revision_remains_isolated(monkeypatch, role):
+def test_existing_draft_revision_remains_isolated(monkeypatch: pytest.MonkeyPatch, role: str) -> None:
     """An edit cannot mutate goals or execute registry-injected external tools."""
     assert set(bindings(monkeypatch, role, "edit")) == {"relay_local_payload"}
 
 
-def test_ordinary_web_turn_can_update_existing_goal_without_creation_tools(monkeypatch):
+def test_ordinary_web_turn_can_update_existing_goal_without_creation_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     """Other Web requests can retain an independent milestone report."""
     tools = bindings(monkeypatch, "Web_Agent", "general")
     assert "update_goal_milestones_tool" in tools
@@ -83,7 +89,9 @@ def test_ordinary_web_turn_can_update_existing_goal_without_creation_tools(monke
 
 
 @pytest.mark.parametrize("failure", ["unknown_project", "storage_failed"])
-def test_bound_goal_update_cannot_claim_success_on_failure(goal_store, monkeypatch, failure):
+def test_bound_goal_update_cannot_claim_success_on_failure(
+    goal_store: dict[str, Any], monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     """A partial update neither creates a goal nor falsely reports a saved result."""
     tools = bindings(monkeypatch, "Web_Agent", "create")
     before = json.dumps(goal_store, sort_keys=True)
@@ -94,7 +102,9 @@ def test_bound_goal_update_cannot_claim_success_on_failure(goal_store, monkeypat
     assert result.startswith("❌") and json.dumps(goal_store, sort_keys=True) == before
 
 
-def test_external_goal_claim_still_requires_approval(goal_store, monkeypatch):
+def test_external_goal_claim_still_requires_approval(
+    goal_store: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Draft preparation cannot make externally derived goal writes trusted."""
     from langchain_core.messages import ToolMessage
     from core.approval import approval_check_node

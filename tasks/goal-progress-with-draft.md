@@ -45,10 +45,10 @@ bound tool test is not evidence of every future provider's semantic choice.
   dependency deprecation warnings. Python compilation and diff checks passed.
 - A broader run added test_draft_authorization.py: 206 passed, seven failed.
   That file alone reproduces the same seven failures (14 passed), and its
-  core/approval.py implementation is byte-for-byte identical to main. Its old
+  core/approval.py implementation at the initial PR head was byte-for-byte identical to main. Its old
   transport mocks cannot deliver through the selected external approval router;
   the secure runtime correctly blocks when delivery fails. No approval-source
-  changes or unrelated test repairs were bundled into this goal fix.
+  changes or unrelated test repairs were bundled into the initial goal fix.
 - In-memory mutation removing post-registry filtering failed the active-edit
   regression, exposing milestone and external-extra tools. Source was unchanged.
 - README and Unreleased describe milestone readback and the retained boundaries.
@@ -60,3 +60,42 @@ the followup formatter expose the new milestone. Original description, status,
 percentage, goal date and creation metadata were verified unchanged. No other
 live data was changed. Future reports use the same partial updater. PR creation
 is authorized; merge, branch deletion and review monitoring are not requested.
+
+## Review repair (2026-10-14)
+
+Owner authorized addressing completed Codex review 5515567505 at head 21084e2.
+Inline 4268836322: all new test functions and nested model methods now have type
+hints and docstrings. Inline 4268836328: older external provenance can defer the
+milestone update while the independently authorized local draft is safe. The
+existing graph stopped before ToolNode, dropping that draft entirely.
+
+Reproduced with the actual graph, canonical approval policy, temporary native
+draft/pending persistence and the native goal updater: disabling the new helper
+in memory made both call orders fail with only the goal queued and no draft.
+Production source and live stores were not mutated during this reproduction.
+
+After the full batch passes existing blocking gates, preserve only the exact
+two-call draft/milestone pair with distinct IDs and only the milestone critical.
+Recheck the draft with the canonical approval policy and execute it through the
+native ToolNode. The milestone stays pending with external provenance; later
+approval executes only that milestone. Report actual draft preparation/error and
+pending approval separately. Consume a routine offer only on the native success
+receipt. Other tool batches, sends, fresh external actions and read-only diagnosis
+retain the existing stop behavior. Tests isolate provider classification and
+transport boundaries; they verify final persisted outcomes, not live inference.
+
+Ten additional graph cases cover both call orders, final receipt IDs/text, later
+approval, fresh external content, missing owner request, a third send, read-only
+diagnosis, duplicate IDs, local storage failure, approval delivery failure and
+accepted-offer consumption. AST inspection confirms annotations/docstrings for
+every new function; Python source compilation and diff checks pass.
+
+The affected approval/goal/draft group passed 207 distinct cases. Twenty failures
+in test_plan_mode_approval.py reproduce against main's approval implementation
+loaded in memory, with network denied: the old tests mock _notify_telegram instead
+of the selected-channel boundary and expect pending after delivery failure.
+They remain outside scope, alongside the seven previously documented draft-test
+failures. A fully socket-guarded run passed 206 cases; the Windows spawn test
+requires a real pytest entry point rather than a stdin-hosted pytest harness.
+It is verified separately through the normal venv pytest command. No live store
+was changed during these review repairs.

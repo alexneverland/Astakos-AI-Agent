@@ -9,7 +9,7 @@ import os
 import json
 import tempfile
 from datetime import datetime, timedelta
-from typing import Sequence
+from typing import Any, Sequence
 from filelock import FileLock
 from langchain_core.messages import BaseMessage
 from langchain_core.messages.tool import ToolCall
@@ -910,10 +910,61 @@ def approval_check_node(state):
             name=tc["name"],
         ))
 
-    return {
+    result = {
         "approval_status": "blocked" if delivery_failed else "pending",
         "messages": tool_messages,
     }
+    result.update(_prepare_draft_with_deferred_goal(
+        state, tool_calls, critical_calls, tool_messages,
+    ))
+    return result
+
+
+def _prepare_draft_with_deferred_goal(
+    state: dict[str, Any],
+    calls: list[ToolCall],
+    critical_calls: list[ToolCall],
+    pending_messages: list[BaseMessage],
+) -> dict[str, Any]:
+    """Preserve only a separately authorized local draft beside a deferred goal.
+
+    Reach this after the complete batch passed all blocking gates. Never execute
+    other noncritical siblings, sends or the pending milestone. Recheck the draft
+    through the same approval policy, then reuse the native ToolNode and receipt
+    consumer. Both original call IDs retain their separate terminal results.
+    """
+    if (
+        len(calls) != 2
+        or len({call["id"] for call in calls}) != 2
+        or {call["name"] for call in calls} != {"relay_local_payload", "update_goal_milestones_tool"}
+        or len(critical_calls) != 1
+        or critical_calls[0]["name"] != "update_goal_milestones_tool"
+    ):
+        return {}
+    draft_call = next(call for call in calls if call["name"] == "relay_local_payload")
+    isolated = {
+        **state,
+        "messages": [
+            *state["messages"][:-1],
+            state["messages"][-1].model_copy(update={"tool_calls": [draft_call]}),
+        ],
+    }
+    if approval_check_node(isolated).get("approval_status") != "ok":
+        return {}
+    from langgraph.prebuilt import ToolNode
+    from langchain_core.messages import AIMessage
+    from tools.web import relay_local_payload
+    from core.utils import clean_message
+    draft_results = ToolNode([relay_local_payload], handle_tool_errors=True).invoke(isolated)["messages"]
+    terminal_results = [*pending_messages, *draft_results]
+    receipt_state = {**state, "messages": [*state["messages"], *terminal_results]}
+    consumed = consume_successful_routine_draft_authorization(receipt_state)
+    # Display actual local preparation/error and pending approval separately;
+    # don't ask the model to repeat the deferred goal or imply it was persisted.
+    content = "\n\n".join(
+        clean_message(message.content) for message in [*draft_results, *pending_messages]
+    )
+    return {**consumed, "messages": [*terminal_results, AIMessage(content=content)]}
 
 
 def consume_successful_routine_draft_authorization(state: dict) -> dict:

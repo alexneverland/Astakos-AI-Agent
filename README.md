@@ -186,6 +186,9 @@ Astakos combines memory, agents, schedulers, approvals, analytics, and tools int
   milestone updater for an independent owner progress report in the same message.
   Scores are milestone results, not completion percentages; Debug and goal
   follow-ups read those updated milestones alongside the original goal description.
+  If earlier external content requires approval for the goal update, an
+  independently authorized local draft can still be prepared; its confirmation
+  and the pending goal approval are reported separately.
   Editing an active Messenger draft remains isolated, and sending keeps its
   separate approval boundary.
 
