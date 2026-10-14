@@ -26,6 +26,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Compound owner reports can update an existing goal's milestones while preparing
+  a local Messenger draft through Chat/Web. Web also exposes the existing
+  milestone updater for ordinary turns. Scores retain prior results without
+  resetting completion percentage, status or the original goal description;
+  active draft edits and external send/provenance guards remain isolated.
+  An independently authorized local draft is preserved when earlier external
+  context defers the accompanying goal update for approval, with separate actual
+  preparation and pending-approval results.
+
 - A single owner report can atomically record completed activities alongside
   explicit cancellations for today, so recording one outcome does not discard
   the other and leave a cancelled routine eligible for a context question.

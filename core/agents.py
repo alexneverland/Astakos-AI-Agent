@@ -701,13 +701,14 @@ def chat_agent_node(state: AgentState):
     if draft_tool_reason:
         print(f"[Messenger Tool Gate]: Chat_Agent enabled relay_local_payload ({draft_tool_reason}).")
         if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
-            static_chat_tools = [relay_local_payload]
+            static_chat_tools = [relay_local_payload, update_goal_milestones_tool]
         else:
             static_chat_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     chat_tools = get_registered_tools_for_agent("Chat_Agent", static_chat_tools)
     if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
-        chat_tools = _draft_edit_tools_only(chat_tools)
+        chat_tools = _draft_edit_tools_only(chat_tools, include_goal_milestones=(
+            draft_tool_reason != "active_draft_edit" and not active_draft_edit_context_isolated))
 
     bind_started = perf_counter()
     bound_llm = llm.bind_tools(chat_tools)
@@ -1044,12 +1045,15 @@ def _isolate_active_draft_edit_history(history: list[Any]) -> list[Any]:
     return isolated_history
 
 
-def _draft_edit_tools_only(tools: list[Any]) -> list[Any]:
-    """Keep only the reversible Messenger draft writer after registry expansion."""
+def _draft_edit_tools_only(tools: list[Any], *, include_goal_milestones: bool = False) -> list[Any]:
+    """Keep draft preparation narrow; active revisions never update goals."""
+    allowed = {"relay_local_payload"}
+    if include_goal_milestones:
+        allowed.add("update_goal_milestones_tool")
     return [
         tool
         for tool in tools
-        if getattr(tool, "name", "") == "relay_local_payload"
+        if getattr(tool, "name", "") in allowed
     ]
 
 
@@ -1197,7 +1201,7 @@ def web_agent_node(state: AgentState):
         search_memory, get_navigation_info, retrieve_photo, retrieve_document, read_local_file,
         post_to_linkedin, generate_image_tool, update_pending_linkedin_post,
         process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices,
-        morning_briefing, hn_briefing,
+        morning_briefing, hn_briefing, update_goal_milestones_tool,
     ]
     draft_tool_reason = None
     if is_create_draft_intent(latest_user_text):
@@ -1227,13 +1231,14 @@ def web_agent_node(state: AgentState):
     if draft_tool_reason:
         print(f"[Messenger Tool Gate]: Web_Agent enabled relay_local_payload ({draft_tool_reason}).")
         if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
-            static_web_tools = [relay_local_payload]
+            static_web_tools = [relay_local_payload, update_goal_milestones_tool]
         else:
             static_web_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)
     if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
-        web_tools = _draft_edit_tools_only(web_tools)
+        web_tools = _draft_edit_tools_only(web_tools, include_goal_milestones=(
+            draft_tool_reason != "active_draft_edit" and not active_draft_edit_context_isolated))
     elif _research_web_filled_requested_limit(history):
         web_tools = [
             tool
