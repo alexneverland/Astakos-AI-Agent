@@ -4,9 +4,17 @@ Chroma cleanup is a reviewed operation on specific record IDs. Age alone does
 not make a memory disposable: dated family events, sessions, goals, documents
 and photos retain their historical value.
 
+Maintenance requires control of all writer launchers for the entire operation:
+do not manually start another CLI, supervisor or container, and ensure no scheduled
+launcher can start one. If this cannot be ensured, do not copy or mutate Chroma.
+The cooperative pause covers its original participant snapshot; it is not a
+global exclusion lock that prevents later launchers from starting writers.
+
 Before inspecting Chroma, use the existing cooperative backup pause
 (`services.daily_backup_runtime.cold_pause`) to drain registered writers. Capture
-and hash-verify a private cold copy. Resume the supervisors before analysis and
+and hash-verify a private cold copy, calling the existing `assert_quiescent()`
+immediately before and after capture. A newly detected writer aborts the capture;
+do not accept a copy from a failed capture. Resume the supervisors before analysis and
 inspect a disposable copy through Chroma's supported API; opening a client on
 the original is not a read-only inspection.
 
@@ -18,7 +26,11 @@ LLM summaries. Record the selected IDs and reasons in a private local plan.
 
 For an owner-authorized application, take another verified cold backup, recheck
 each selected record and its retained counterpart, and use the existing memory
-writer API while other writers remain paused. Verify the exact remaining ID set
+writer API while other writers remain paused and new launches remain excluded.
+Recheck `assert_quiescent()` immediately before each read/delete and after
+verification; abort on an unexpected writer rather than trying to pause or kill
+it implicitly. Preserve the pre-apply backup if application cannot be verified.
+Verify the exact remaining ID set
 and every retained document/metadata pair, record the deletion in the native
 memory audit, close the managed store, and resume the existing supervisors.
 Never publish the private report or backup in Git. A Chroma cleanup does not

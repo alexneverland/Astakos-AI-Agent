@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
+import os
+import pytest
 
 from scripts.rotate_memory_audit import main, rotate_memory_audit_logs
 
@@ -53,3 +55,50 @@ def test_audit_cli_previews_by_default_and_applies_only_explicitly(tmp_path: Pat
     assert not old_file.exists()
     assert recent_file.exists()
     assert notes.exists()
+
+
+def test_rotation_preserves_noncanonical_date_names(tmp_path: Path) -> None:
+    """A parseable date is not enough to identify a logger-created daily file."""
+    unrelated = tmp_path / "2020-1-2.json"
+    canonical = tmp_path / "2020-01-02.json"
+    _touch(unrelated)
+    _touch(canonical)
+    assert main(["--audit-dir", str(tmp_path), "--apply"]) == 0
+    assert unrelated.exists()
+    assert not canonical.exists()
+
+
+def test_rotation_returns_failure_when_directory_metadata_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preflight permission failures preserve logs and return the CLI failure status."""
+    old_file = tmp_path / "2020-01-02.json"
+    _touch(old_file)
+    original_lstat = Path.lstat
+
+    def denied_lstat(path: Path, *args: object, **kwargs: object) -> os.stat_result:
+        if path == tmp_path:
+            raise PermissionError("synthetic preflight failure")
+        return original_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", denied_lstat)
+    assert main(["--audit-dir", str(tmp_path), "--apply"]) == 1
+    assert old_file.exists()
+
+
+def test_rotation_succeeds_when_another_rotator_removes_the_selected_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent successful removal must not turn this rotation into failure."""
+    old_file = tmp_path / "2020-01-02.json"
+    _touch(old_file)
+    original_unlink = Path.unlink
+
+    def concurrent_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        if path == old_file:
+            original_unlink(path, missing_ok=True)
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", concurrent_unlink)
+    assert main(["--audit-dir", str(tmp_path), "--apply"]) == 0
+    assert not old_file.exists()

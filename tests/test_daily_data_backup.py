@@ -183,6 +183,19 @@ def test_coordinator_failure_releases_pause(tmp_path: Path) -> None:
     assert not runtime.pause_held(tmp_path)
 
 
+def test_per_operation_guard_rejects_a_writer_started_after_pause(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """The documented guard aborts maintenance if a late unmanaged writer appears."""
+    writers = []
+    monkeypatch.setattr(runtime, "process_records", lambda: list(writers))
+    with runtime.cold_pause(root=tmp_path, records=lambda: list(writers)):
+        writers.append({"ProcessId": 7, "CommandLine": "python -m uvicorn api.server:server"})
+        with pytest.raises(BackupError, match="writers_running"):
+            runtime.assert_quiescent()
+    assert not runtime.pause_held(tmp_path)
+
+
 def test_checkpoint_stops_owned_child_and_resumes_once(monkeypatch, tmp_path: Path) -> None:
     """Exercise the real correlated checkpoint without signaling any real process."""
     old = MagicMock(pid=42)

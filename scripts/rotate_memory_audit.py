@@ -18,13 +18,13 @@ def rotate_memory_audit_logs(
     if keep_days < 1:
         return False
     directory = Path(audit_dir)
-    if not directory.exists():
-        return True
-    if (not directory.is_dir() or directory.is_symlink()
-            or getattr(directory.lstat(), "st_file_attributes", 0) & 0x400):
-        return False
-    cutoff = datetime.now().date().toordinal() - keep_days
     try:
+        if not directory.exists():
+            return True
+        if (not directory.is_dir() or directory.is_symlink()
+                or getattr(directory.lstat(), "st_file_attributes", 0) & 0x400):
+            return False
+        cutoff = datetime.now().date().toordinal() - keep_days
         for path in sorted(directory.iterdir()):
             if path.suffix != ".json" or not path.is_file() or path.is_symlink():
                 continue
@@ -32,11 +32,13 @@ def rotate_memory_audit_logs(
                 day = datetime.strptime(path.stem, "%Y-%m-%d").date()
             except ValueError:
                 continue
+            if day.isoformat() != path.stem:
+                continue
             if day.toordinal() < cutoff:
                 if dry_run:
                     print(f"Would remove audit log: {path.name}")
                 else:
-                    path.unlink()
+                    path.unlink(missing_ok=True)
                     print(f"Removed audit log: {path.name}")
     except OSError:
         return False
