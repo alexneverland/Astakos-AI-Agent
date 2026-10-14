@@ -175,6 +175,7 @@ Astakos combines memory, agents, schedulers, approvals, analytics, and tools int
 - Shared Web, Telegram, and Matrix conversation history in SQLite.
 - Web messages are mirrored to the selected external app; original attachments and generated files are not copied between apps.
 - ChromaDB semantic memory for facts, goals, sessions, documents, and photos.
+- Source maintenance follows the [reviewed memory cleanup procedure](docs/memory-maintenance.md).
 - Hybrid recall combining recent context, SQLite history, and semantic memory.
 - Trusted behavioral observations and specific entity/action patterns supporting ordinary conversational comments and guarded spontaneous openers, with Debug evidence and topic preferences.
 - Semantic reassessment of related context flags using current owner reports and bounded history, with event-time, provenance and stale-write safeguards.

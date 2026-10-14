@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- Retired the standalone bulk memory cleaners that mixed history backfill with
+  deletion or replaced structured profile categories using LLM output. Memory
+  cleanup now follows the reviewed cold-copy procedure in `docs/memory-maintenance.md`;
+  independent audit-log rotation remains available with preview by default.
+
 ### Added
 
 - Matrix, Web and Telegram terminal execution logs mirror the shared trace recorder with correlated

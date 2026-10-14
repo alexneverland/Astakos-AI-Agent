@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
+from pathlib import Path
 
-from clean import rotate_memory_audit_logs
+from scripts.rotate_memory_audit import main, rotate_memory_audit_logs
 
 
 def _touch(path):
@@ -35,3 +36,20 @@ def test_rotate_memory_audit_logs_dry_run_keeps_old_files(tmp_path):
     assert rotate_memory_audit_logs(keep_days=60, dry_run=True, audit_dir=str(tmp_path))
 
     assert old_file.exists()
+
+
+def test_audit_cli_previews_by_default_and_applies_only_explicitly(tmp_path: Path) -> None:
+    """Keep old logs until explicit apply while preserving recent and unrelated files."""
+    old_day = datetime.now().date() - timedelta(days=90)
+    old_file = tmp_path / f"{old_day.isoformat()}.json"
+    recent_file = tmp_path / f"{datetime.now().date().isoformat()}.json"
+    notes = tmp_path / "notes.json"
+    for path in (old_file, recent_file, notes):
+        _touch(path)
+
+    assert main(["--audit-dir", str(tmp_path)]) == 0
+    assert old_file.exists()
+    assert main(["--audit-dir", str(tmp_path), "--apply"]) == 0
+    assert not old_file.exists()
+    assert recent_file.exists()
+    assert notes.exists()
