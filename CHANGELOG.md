@@ -16,6 +16,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Owner-operated Chroma cleanup now has an exact-ID maintenance API with
+  collection/provenance checks, a durable pre-delete audit intent and verified
+  completion; structured profile facts and unselected memories stay unchanged.
+
 - Matrix, Web and Telegram terminal execution logs mirror the shared trace recorder with correlated
   graph steps, tool calls/results, phase timings, unresolved calls and final replies
   or failures. Previews retain credential redaction and size limits.

@@ -24,9 +24,22 @@ different dates. Do not interpret an assistant status message as a user fact.
 Do not classify content by a phrase list or automatically replace history with
 LLM summaries. Record the selected IDs and reasons in a private local plan.
 
-For an owner-authorized application, take another verified cold backup, recheck
-each selected record and its retained counterpart, and use the existing memory
-writer API while other writers remain paused and new launches remain excluded.
+For an owner-authorized application, take another verified cold backup and call
+`memory.maintenance.delete_reviewed_memories` while writers remain paused and
+new launches remain excluded. Pass the reviewed collection name, complete
+`id`/`document`/`metadata` records with a `reason` for each, and IDs that must be
+retained; set `owner_approved=True` only for the owner's approved plan. This
+operator-only API is not bound to conversational agents and never uses free-text
+`delete_from_memory`, which can also remove structured profile facts.
+
+The canonical operation requires an active native pause, rechecks each exact
+record and keeper, persists a strict durable audit intent before deletion,
+verifies all remaining records and writes a correlated completion receipt.
+Unwritable or corrupt audit journals block deletion. If verification or the
+completion receipt fails after deletion, retain the cold backup and audit intent
+for recovery: an exception does not mean the deletion was rolled back. Close
+the managed store before releasing the pause.
+
 Recheck `assert_quiescent()` immediately before each read/delete and after
 verification; abort on an unexpected writer rather than trying to pause or kill
 it implicitly. Preserve the pre-apply backup if application cannot be verified.

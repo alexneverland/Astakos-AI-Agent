@@ -26,8 +26,12 @@ from core.ai_provider import (
 _audit_lock = threading.Lock()
 
 
-def _audit_log(op: str, **kwargs):
-    """Writes an entry to the daily memory audit log (logs/memory_audit/YYYY-MM-DD.json)."""
+def _audit_log(op: str, *, require_valid_log: bool = False, **kwargs: object) -> bool:
+    """Atomically append an audit entry; report failure without raising.
+
+    Strict maintenance callers reject corrupt journals instead of replacing
+    them. Existing best-effort callers retain their previous behavior.
+    """
     try:
         today    = datetime.now().strftime("%Y-%m-%d")
         log_file = os.path.join(MEMORY_AUDIT_DIR, f"{today}.json")
@@ -40,8 +44,12 @@ def _audit_log(op: str, **kwargs):
                 with open(log_file, "r", encoding="utf-8") as f:
                     try:
                         loaded = json.load(f)
+                        if require_valid_log and not isinstance(loaded, list):
+                            raise ValueError("Invalid memory audit journal")
                         entries = loaded if isinstance(loaded, list) else []
                     except Exception:
+                        if require_valid_log:
+                            raise
                         entries = []
             entries.append(entry)
             with open(tmp_file, "w", encoding="utf-8") as f:
@@ -49,8 +57,10 @@ def _audit_log(op: str, **kwargs):
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_file, log_file)
+        return True
     except Exception as _e:
         print(f"\033[90m[AuditLog]: {_e}\033[0m")
+        return False
 
 vector_lock = threading.Lock()
 memory_lock = threading.Lock()
