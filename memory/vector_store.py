@@ -57,6 +57,12 @@ def _audit_log(op: str, *, require_valid_log: bool = False, **kwargs: object) ->
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_file, log_file)
+            if require_valid_log and os.name != "nt":
+                directory_fd = os.open(MEMORY_AUDIT_DIR, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
         return True
     except Exception as _e:
         print(f"\033[90m[AuditLog]: {_e}\033[0m")

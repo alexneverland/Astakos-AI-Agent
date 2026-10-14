@@ -5,6 +5,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator
+from types import SimpleNamespace
+import os
 
 import pytest
 from langchain_chroma import Chroma
@@ -113,3 +115,55 @@ def test_completion_failure_leaves_durable_intent_for_recovery(store: Chroma, mo
         apply()
     assert set(store._collection.get()["ids"]) == {"keep", "other"}
     assert [entry["op"] for entry in receipts()] == ["maintenance_delete_prepare"]
+
+
+@pytest.mark.parametrize("sync_fails", [False, True])
+def test_posix_audit_directory_sync_gates_real_deletion(
+    store: Chroma, monkeypatch: pytest.MonkeyPatch, sync_fails: bool,
+) -> None:
+    """A POSIX directory flush must complete before selected records are removed."""
+    events = []
+    directory_fd = 987654
+    platform_os = SimpleNamespace(**vars(os))
+    platform_os.name = "posix"
+    original_replace = os.replace
+    original_fsync = os.fsync
+    original_delete = vs._safe_chroma_delete
+
+    def replace(source: str, target: str) -> None:
+        original_replace(source, target)
+        events.append("replace")
+
+    def open_directory(path: str, flags: int) -> int:
+        assert path == vs.MEMORY_AUDIT_DIR
+        return directory_fd
+
+    def fsync(fd: int) -> None:
+        if fd != directory_fd:
+            original_fsync(fd)
+            return
+        events.append("directory_sync")
+        if sync_fails:
+            raise OSError("synthetic directory sync failure")
+
+    def delete(ids: list[str]) -> bool:
+        assert events[:3] == ["replace", "directory_sync", "directory_close"]
+        events.append("delete")
+        return original_delete(ids)
+
+    platform_os.replace = replace
+    platform_os.open = open_directory
+    platform_os.fsync = fsync
+    platform_os.close = lambda fd: events.append("directory_close")
+    monkeypatch.setattr(vs, "os", platform_os)
+    monkeypatch.setattr(vs, "_safe_chroma_delete", delete)
+    if sync_fails:
+        with pytest.raises(RuntimeError, match="audit_prepare_failed"):
+            apply()
+        assert store._collection.count() == 3
+        assert "delete" not in events
+    else:
+        apply()
+        assert set(store._collection.get()["ids"]) == {"keep", "other"}
+        assert events == ["replace", "directory_sync", "directory_close", "delete",
+                          "replace", "directory_sync", "directory_close"]
