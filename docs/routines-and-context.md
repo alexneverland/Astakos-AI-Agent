@@ -50,12 +50,23 @@ commitment may supply separate evidence until its stated end, capped at next loc
 midnight. The model must connect the duration to an actual current/completed
 transition and consider every later report; a plan or two people working alone
 does not prove separate locations. Shift names do not invent shift end times.
+An applicable active daily schedule can supply an exact ending for an episode
+grounded in today's owner reports. The selected routine identity, time, conditions
+and schedule metadata are revalidated before persistence and when reading the
+proof; a changed, paused, blocked or externally sourced schedule cannot sustain
+it. Schedules alone never establish execution, presence or separation.
 Ordinary presence still expires after two hours. The original observation and its
 timestamp stay unchanged; an internal proof uses the canonical conditional writer
 without a schema migration. New trusted owner history or changed canonical state
 (including GPS flag refreshes) invalidates the proof conservatively and requires
 reassessment. Missing, corrupt or expired proof leaves ordinary clarification in
 place. External action approval requirements are unaffected.
+
+Web draft preparation, like Chat, can resolve a recipient from the bounded
+conversation when the owner accepts a message offer without repeating the name.
+Preparation still uses the canonical saved-draft tool. A bare send command without
+an active draft cannot create a replacement; existing draft-edit isolation and
+the separate external sending approval gate remain in place.
 
 ## Read the routine status correctly
 

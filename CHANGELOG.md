@@ -37,6 +37,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Web can prepare a local Messenger draft when the owner accepts an offer without
+  repeating the recipient. Routine context inference can use an applicable daily
+  schedule to bound a confirmed ongoing episode, with schedule/source invalidation
+  and unchanged observation freshness and external-send approval gates.
+
 - Compound owner reports can update an existing goal's milestones while preparing
   a local Messenger draft through Chat/Web. Web also exposes the existing
   milestone updater for ordinary turns. Scores retain prior results without

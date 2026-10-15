@@ -31,3 +31,17 @@ flag, even if a plan previously covered today. Prefer the ordinary three-field
 form for recent momentary evidence, and the empty form whenever uncertain.
 This alternative records a separate expiring proof; it must never pretend the
 old event happened now or refresh its original presence timestamp.
+
+The daily_schedule reference supplies applicable canonical plans with exact times.
+When today's owner reports establish an ongoing episode, use its applicable
+scheduled ending as a duration bound rather than requiring the owner to repeat
+an already stored end time. A day-scoped work statement can supply duration
+support, combined with actual departure/arrival and corroborating context. The
+schedule alone never proves execution, ongoing presence, or separate workplaces.
+Do not treat every later scheduled activity as an ending: choose only a clearly
+relevant transition for the same person and episode. If its meaning, applicability
+or co-presence is uncertain, keep the ordinary clarification path. Shared work,
+remote work and later contrary reports remain authoritative.
+For this variant include the five duration fields plus schedule_routine_id, the
+integer ID of that ending. valid_until must equal its exact slot_at. Never invent
+hours from a shift label or use an absent, blocked or externally sourced routine.

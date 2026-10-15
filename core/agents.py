@@ -1215,7 +1215,6 @@ def web_agent_node(state: AgentState):
         draft_tool_reason = "active_draft_edit"
     elif (
         latest_user_text
-        and has_known_messenger_contact_reference(latest_user_text)
         and getattr(history[-1], "type", "") == "human"
         and (
             not active_messenger_draft
@@ -1223,7 +1222,8 @@ def web_agent_node(state: AgentState):
         )
         and classify_messenger_intent(latest_user_text).intent == "general_chat"
     ):
-        # Let the LLM understand naturally phrased, reversible draft requests.
+        # Like Chat, resolve recipients from bounded conversation, including an
+        # accepted offer whose recipient is absent from the newest user line.
         # Deterministic intent remains responsible only for exact lifecycle
         # boundaries such as a bare send confirmation, which must never create
         # a replacement draft when none exists.
