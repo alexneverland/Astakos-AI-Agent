@@ -34,7 +34,7 @@ def test_owner_reply_to_offer_reaches_saved_draft(
     if scenario in {"unrelated", "unbound_call"}:
         owner_text = "Πώς είναι ο καιρός σήμερα;"
         expected = False
-    append_message(role="user", channel="web", content=owner_text, db_path=config.CONVERSATION_DB_FILE)
+    saved_owner = append_message(role="user", channel="web", content=owner_text, db_path=config.CONVERSATION_DB_FILE)
     monkeypatch.setattr(approval, "PENDING_FILE", str(tmp_path / "pending.json"))
     monkeypatch.setattr(web, "_load_messenger_contacts", lambda: {"σοφια": "Sofia"})
     monkeypatch.setattr(agents, "build_prompt", lambda *a, **k: "offline")
@@ -81,7 +81,7 @@ def test_owner_reply_to_offer_reaches_saved_draft(
     result = graph.build_graph().invoke({"channel": "web", "messages": [
         HumanMessage(content="Για το πρωινό μήνυμα στη Σοφία"),
         AIMessage(content="Θες να της ετοιμάσω κανένα μήνυμα για καλημέρα ή το αφήνουμε;"),
-        HumanMessage(content=owner_text),
+        HumanMessage(content=owner_text, additional_kwargs={"astakos_owner_rowid": saved_owner["rowid"]}),
     ]})
     draft = load_draft()
     assert ("relay_local_payload" in bindings[0]) is expected
@@ -133,9 +133,10 @@ def test_stale_queued_turn_and_same_content_new_revision_are_rejected(tmp_path: 
     from memory.conversation_history import append_message
     from core.messenger_draft import capture_draft_write_guard, save_draft, load_draft
     monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(tmp_path / "draft.json"))
-    append_message(role="user", channel="web", content="Prepare a draft", db_path=config.CONVERSATION_DB_FILE)
+    saved = append_message(role="user", channel="web", content="Prepare a draft", db_path=config.CONVERSATION_DB_FILE)
     save_draft("Sofia", "Same contents")
-    guard = capture_draft_write_guard([HumanMessage(content="Prepare a draft")])
+    guard = capture_draft_write_guard([HumanMessage(content="Prepare a draft",
+        additional_kwargs={"astakos_owner_rowid": saved["rowid"]})])
     newer = save_draft("Sofia", "Same contents")
     with pytest.raises(ValueError):
         save_draft("Sofia", "Delayed replacement", write_guard=guard)
@@ -173,3 +174,24 @@ def test_draft_guard_state_is_hidden_from_model_tool_schema() -> None:
     """The model cannot supply or forge the ToolNode-injected write guard."""
     from tools.web import relay_local_payload
     assert "state" not in relay_local_payload.tool_call_schema.model_json_schema()["properties"]
+
+
+def test_identical_owner_text_in_different_recipient_context_cannot_adopt_new_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A delayed Sofia acceptance cannot borrow a newer Maria acceptance identity."""
+    import config
+    from memory.conversation_history import append_message
+    from core.messenger_draft import capture_draft_write_guard, save_draft, load_draft
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(tmp_path / "draft.json"))
+    old = append_message(role="user", channel="web", content="Ετοίμασέ το", db_path=config.CONVERSATION_DB_FILE)
+    new = append_message(role="user", channel="matrix", content="Ετοίμασέ το", db_path=config.CONVERSATION_DB_FILE)
+    message = HumanMessage(content="Ετοίμασέ το", additional_kwargs={"astakos_owner_rowid": old["rowid"]})
+    stale_guard = capture_draft_write_guard([AIMessage(content="Να ετοιμάσω μήνυμα στη Σοφία;"), message])
+    with pytest.raises(ValueError):
+        save_draft("Sofia", "Stale Sofia draft", write_guard=stale_guard)
+    assert load_draft() is None
+    fresh = HumanMessage(content="Ετοίμασέ το", additional_kwargs={"astakos_owner_rowid": new["rowid"]})
+    fresh_guard = capture_draft_write_guard([AIMessage(content="Να ετοιμάσω μήνυμα στη Μαρία;"), fresh])
+    save_draft("Maria", "Current Maria draft", write_guard=fresh_guard)
+    assert load_draft()["target_name"] == "Maria"

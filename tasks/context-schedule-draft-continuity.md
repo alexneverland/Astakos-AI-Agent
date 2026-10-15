@@ -96,3 +96,20 @@ tests also failed when the global network guard blocked Windows loopback event-
 loop setup. These unrelated harness cases were excluded from the final scoped
 253-case group, not silently counted as passing. Existing dependency deprecation
 warnings remain. Request one additional Codex review after the substantial fixes.
+
+Codex review of 0cfccd1 found one P2: content equality allowed a delayed turn to
+adopt a newer same-text owner row from a different recipient context. Reproduced
+the exact Sofia/Maria case before repair: the stale native draft write succeeded.
+Web/Matrix/Telegram now attach the actual persisted owner row ID to the current
+graph message. Guard capture requires that exact integer ID to equal the latest
+trusted owner row; matching text is no longer an identity fallback. The writer
+continues checking the captured version immediately before persistence.
+Existing graph fixtures now carry the actual saved row IDs; full-handler Web and
+Telegram plus Matrix adapter assertions verify propagation. The new native
+regression rejects the stale Sofia write and accepts the current Maria write.
+Final affected group: 99 offline cases passed, including all 29 offer/guard cases,
+goal/draft coexistence, Matrix turns, Telegram paths and mixed channel replies.
+Compilation and diff checks passed; existing dependency warnings remain.
+No third review request is necessary for this narrow identity substitution after
+the completed Codex review and targeted regression coverage; do not begin an
+unbounded speculative review loop. New-head CI must still be checked before merge.

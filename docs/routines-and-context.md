@@ -75,7 +75,10 @@ Ordinary contextual requests pass a bounded, tool-free semantic preparation
 decision before the draft tool is offered. Declines, unrelated conversation and
 externally sourced/synthetic input cannot supply that permission. Graph turns
 capture the shared draft revision and trusted owner-history version before model
-execution. The canonical writer checks both under a cross-process draft lock and
+execution. Web, Matrix and Telegram attach the actual persisted owner row ID;
+equal message wording cannot substitute a newer turn's identity. Missing or
+mismatched IDs fail closed when trusted owner history exists.
+The canonical writer checks both under a cross-process draft lock and
 replaces the JSON atomically; a newer draft or owner turn rejects the delayed
 write. Internal injected state is hidden from the model's tool schema. Drafts
 include a unique revision even when their text and second-resolution times match.

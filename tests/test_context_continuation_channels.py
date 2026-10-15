@@ -63,6 +63,9 @@ def assert_background_continues_once(tasks: list[tuple[Any, ...]]) -> None:
 def assert_context_and_original(messages: list[Any]) -> None:
     """The full trusted request remains, with a bounded non-authorizing context note."""
     assert sum(TEXT in str(message.content) for message in messages if isinstance(message, HumanMessage)) == 1
+    owner = next(message for message in reversed(messages) if isinstance(message, HumanMessage))
+    assert type(owner.additional_kwargs["astakos_owner_rowid"]) is int
+    assert owner.additional_kwargs["astakos_owner_rowid"] > 0
     notes = [message for message in messages if isinstance(message, SystemMessage)
              and "canonical answer outcome" in str(message.content)]
     assert len(notes) == 1
@@ -147,7 +150,7 @@ def test_telegram_mixed_answer_preserves_normal_graph_history_and_memory(
     monkeypatch.setattr(bot, "_safe_active_draft_status", lambda: (False, "missing", None))
     monkeypatch.setattr(bot, "_safe_classify_messenger_intent", lambda *a, **k: None)
     monkeypatch.setattr(bot, "_append_to_analytics_log", save)
-    monkeypatch.setattr(bot, "_build_fast_chat_context", lambda text, **k: ([], HumanMessage(content=text)))
+    monkeypatch.setattr(bot, "_load_shared_context_messages", lambda *a, **k: [])
     monkeypatch.setattr(bot, "_cache_bot_message", lambda *a, **k: None)
     monkeypatch.setattr(bot, "_schedule_capability_gap_if_valid", lambda *a, **k: None)
     monkeypatch.setattr(bot, "enqueue_fast_task", lambda *a, **k: tasks.append(a))

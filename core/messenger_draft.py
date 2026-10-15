@@ -57,9 +57,8 @@ def _draft_fingerprint() -> str:
 def capture_draft_write_guard(messages: list) -> dict:
     """Anchor a graph turn to its native owner history and shared draft revision."""
     import config
-    from memory.conversation_history import get_latest_trusted_user_rowid, load_messages_after_rowid
+    from memory.conversation_history import get_latest_trusted_user_rowid
     from core.untrusted_content import is_direct_user_message
-    from core.utils import strip_transport_metadata
     try:
         path = config.CONVERSATION_DB_FILE
         version = get_latest_trusted_user_rowid(db_path=path)
@@ -67,8 +66,8 @@ def capture_draft_write_guard(messages: list) -> dict:
         if latest is None:
             return {"valid": False}
         if version:
-            rows = load_messages_after_rowid(after_rowid=version-1, limit=1, db_path=path)
-            if not rows or strip_transport_metadata(rows[0]["content"]) != strip_transport_metadata(str(latest.content)):
+            owner_rowid = latest.additional_kwargs.get("astakos_owner_rowid")
+            if type(owner_rowid) is not int or owner_rowid != version:
                 return {"valid": False}
         draft_file, _ = _settings()
         with FileLock(draft_file + ".lock", timeout=10):

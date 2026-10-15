@@ -411,7 +411,8 @@ class MatrixTurnService:
         current_content = format_model_history_content(clean_user_text, user_metadata)
         current = HumanMessage(
             content=f"[{datetime.now().strftime('%H:%M')}] {current_content}",
-            additional_kwargs=history_message_additional_kwargs(user_metadata),
+            additional_kwargs={**history_message_additional_kwargs(user_metadata),
+                               "astakos_owner_rowid": saved_user["rowid"]},
         )
         self._select_tool_channel("matrix")
 
