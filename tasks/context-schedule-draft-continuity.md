@@ -42,3 +42,21 @@ proof is evidence of the result, not a complete inference trace. Live provider
 interpretation still needs natural observation. No live drafts/messages were
 created or sent during the tests. Preparing the scoped commit and PR after owner
 authorization; no merge or review monitoring was requested.
+
+PR #255 review repair: reproduced all three schedule-applicability findings on
+35519ef. Missing/unsupported condition types were accepted; stored-only presence
+ignored conflicting GPS; date-valid old partner_at_work remained usable. The
+schedule resolver now rejects unknown types, reuses canonical GPS reconciliation
+with an explicit reader (no recursive duration proof), and freshness-checks
+referenced non-volatile boolean observations. Legacy user_at_home negation is
+guarded against unknown owner absence. Date/shift contracts remain unchanged.
+Ten added offline cases cover creation/read rejection plus an unchanged schedule
+losing applicability solely through GPS conflict or observation age. Final
+schedule group passed 21 cases and the related context group passed 211 cases
+(213 distinct context cases in total, with two added read-lifecycle cases run in
+the final group). Compilation and diff checks passed; one existing dependency
+deprecation warning remains. No live state or runtime changes were performed.
+The three Messenger comments are not resolved by this context-only repair:
+general tool availability is semantic choice as in Chat, while shared-draft and
+latest-turn races concern the pre-existing unconditional draft writer. They
+remain explicitly open rather than being marked fixed by these changes.

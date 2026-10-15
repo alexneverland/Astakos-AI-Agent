@@ -55,6 +55,10 @@ grounded in today's owner reports. The selected routine identity, time, conditio
 and schedule metadata are revalidated before persistence and when reading the
 proof; a changed, paused, blocked or externally sourced schedule cannot sustain
 it. Schedules alone never establish execution, presence or separation.
+Schedule applicability rejects missing/unsupported condition types and uses
+GPS-reconciled observations without consulting the duration proof itself.
+Referenced boolean context observations outside the volatile set also retain
+their freshness limits; date/shift conditions keep their own typed contracts.
 Ordinary presence still expires after two hours. The original observation and its
 timestamp stay unchanged; an internal proof uses the canonical conditional writer
 without a schema migration. New trusted owner history or changed canonical state

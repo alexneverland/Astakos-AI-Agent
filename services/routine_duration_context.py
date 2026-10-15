@@ -16,17 +16,17 @@ DURATION_KEY = "routine_context_duration_proof"
 def load_daily_schedule_reference(now: datetime) -> list[dict[str, Any]]:
     """Read bounded applicable schedules as plans, never evidence of execution."""
     from memory import routine_db as db
-    from services.routine_context import build_runtime_routine_context
+    from services.routine_context import build_runtime_routine_context, build_routine_context_evidence
     from services.routine_conditions import evaluate_routine_conditions
     try:
         rows = db.get_routines_for_day(now.strftime("%A"))
         if len(rows) > 32:
             return []
         context = build_runtime_routine_context(now)
-        # Do not use this proof to validate its own schedule, or let stale raw
-        # co-presence make an otherwise unknown schedule condition applicable.
-        for flag in VOLATILE_FLAGS:
-            context[flag] = evaluate_stored_evidence(db.get_context_state(flag), now=now).effective_value
+        # An explicit reader suppresses duration-proof loading: schedules must
+        # use canonical GPS-reconciled observations, never validate themselves.
+        evidence = build_routine_context_evidence(now, state_reader=db.get_context_state)
+        context.update({flag: item.effective_value for flag, item in evidence.items()})
         result = []
         for row in rows:
             if json.loads(row.get("external_content_sources_json", "[]")) != []:
@@ -36,7 +36,30 @@ def load_daily_schedule_reference(now: datetime) -> list[dict[str, Any]]:
             if db.is_routine_temporarily_inactive_meta(meta, now=now)[0]:
                 continue
             conditions = db.get_routine_conditions(rid)
-            checked = evaluate_routine_conditions(conditions, context, now=now)
+            if any(cond.get("condition_type") not in {
+                    "context_flag", "shift_mode", "date_range", "location"} for cond in conditions):
+                continue
+            scoped = dict(context)
+            for cond in conditions:
+                payload = cond.get("condition_payload") or {}
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                if not isinstance(payload, dict):
+                    return []
+                if cond["condition_type"] == "context_flag":
+                    flags = [payload["flag"]] if payload.get("flag") else list(payload)
+                    for flag in flags:
+                        if flag not in VOLATILE_FLAGS and isinstance(scoped.get(flag), bool):
+                            scoped[flag] = evaluate_stored_evidence(db.get_context_state(flag), now=now).effective_value
+                # Legacy location evaluation negates bool(None) for user_at_home.
+                # Preserve uncertainty before that conversion can imply home.
+                if (cond["condition_type"] == "location" and payload.get("flag") == "user_at_home"
+                        and scoped.get("user_out_of_home") is None):
+                    scoped = None
+                    break
+            if scoped is None:
+                continue
+            checked = evaluate_routine_conditions(conditions, scoped, now=now)
             if not checked["allowed"] or any(
                     "actual_value" in item and item["actual_value"] is None for item in checked["results"]):
                 continue
