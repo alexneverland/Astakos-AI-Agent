@@ -2070,7 +2070,8 @@ def _build_fast_chat_context(
     """Build mixed context without repeating the current persisted input row."""
     now_ts = datetime.now().strftime("%H:%M")
     context_msgs = _load_shared_context_messages("telegram", exclude_rowid=user_rowid)
-    current_msg = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
+    current_msg = HumanMessage(content=f"[{now_ts}] {clean_user_text}",
+                               additional_kwargs={"astakos_owner_rowid": user_rowid})
     return context_msgs, current_msg
 
 def _run_fast_chat_path(

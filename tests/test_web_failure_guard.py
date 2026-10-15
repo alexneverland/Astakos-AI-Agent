@@ -1088,6 +1088,7 @@ def test_web_agent_keeps_draft_tool_for_mixed_search_and_known_recipient(
 ) -> None:
     """A mixed Web mention may still create a reversible recipient draft."""
     from core.agents import web_agent_node
+    monkeypatch.setattr("core.agents.resolve_contextual_draft_request", lambda *_: True)
 
     bound_tool_names: list[str] = []
 
@@ -1172,6 +1173,7 @@ def test_web_agent_exposes_reversible_draft_tool_for_natural_recipient_request(
     """The Web LLM can persist a naturally phrased recipient-specific draft request."""
     from core.agents import web_agent_node
     from services.messenger_intent import classify_messenger_intent
+    monkeypatch.setattr("core.agents.resolve_contextual_draft_request", lambda *_: True)
 
     bound_tool_names: list[str] = []
     request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
@@ -1215,6 +1217,7 @@ def test_natural_recipient_request_persists_draft_through_chat_graph(
     import config
     from core.graph import build_graph
     from services.messenger_intent import classify_messenger_intent
+    monkeypatch.setattr("core.agents.resolve_contextual_draft_request", lambda *_: True)
 
     request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
     draft_file = tmp_path / "messenger_draft.json"

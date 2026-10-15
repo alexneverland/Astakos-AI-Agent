@@ -226,6 +226,9 @@ async def test_matrix_turn_persists_both_sides_with_matrix_provenance(tmp_path) 
     ]
     assert persisted_users[0]["channel"] == "matrix"
     assert persisted_users[0]["metadata"]["matrix_event_id"] == "$event-persist"
+    owner_message = next(message for message in reversed(graph.states[0]["messages"])
+                         if message.type == "human")
+    assert owner_message.additional_kwargs["astakos_owner_rowid"] == persisted_users[0]["rowid"]
     assert completed == [
         ("δοκιμή", "Απάντηση από τον Αστακό", "Chat_Agent", "matrix")
     ]

@@ -219,8 +219,9 @@ def extract_and_update_context_flags(
         expected = {key: get_context_state(key) for key in
                     _CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES) | {"kid1_away_reason"}}
         if daily_resolution_flags is not None:
-            from services.routine_duration_context import DURATION_KEY
+            from services.routine_duration_context import DURATION_KEY, load_daily_schedule_reference
             expected[DURATION_KEY] = get_context_state(DURATION_KEY)
+            schedule_reference = load_daily_schedule_reference(current)
         prompt = _CONTEXT_EXTRACTION_PROMPT.format(
             bot_name=config.BOT_NAME,
             user_name=config.USER_NAME,
@@ -249,6 +250,8 @@ def extract_and_update_context_flags(
             prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
                                 "daily_context_resolution.md").read_text(encoding="utf-8")
             prompt += "\nAllowed flags: " + json.dumps(daily_resolution_flags)
+            prompt += "\n" + format_untrusted_tool_result("daily schedule reference", json.dumps(
+                {"daily_schedule": schedule_reference}, ensure_ascii=False))
         elif not clarification:
             prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
                                 "context_state_transition.md").read_text(encoding="utf-8")
@@ -281,6 +284,7 @@ def extract_and_update_context_flags(
         if daily_resolution_flags is not None:
             return _commit_daily_resolution(payload, daily_rows, expected,
                 allowed=set(daily_resolution_flags), now=current,
+                schedule_reference=schedule_reference,
                 still_current=lambda: (get_latest_trusted_user_rowid(**history_options) == source_version
                     and (clarification_still_current is None or clarification_still_current())))
         source_event_at = None
@@ -516,12 +520,13 @@ def _valid_context_flag_value(key: str, value: object) -> bool:
 def _commit_daily_resolution(
     payload: object, rows: list[dict], expected: dict, *, allowed: set[str],
     now: datetime, still_current: Callable[[], bool],
+    schedule_reference: list[dict] | None = None,
 ) -> ContextExtractionResult | None:
     """Reuse shared source validation and the canonical conditional writer."""
     if isinstance(payload, dict) and "valid_until" in payload:
         from services.routine_duration_context import commit_duration_resolution
         applied = commit_duration_resolution(payload, rows, expected, allowed=allowed,
-            now=now, still_current=still_current)
+            now=now, still_current=still_current, schedule_reference=schedule_reference)
         return ContextExtractionResult("related", applied) if applied else None
     resolved = _validate_context_resolution(payload, rows, expected, allowed=allowed, now=now)
     if resolved is None or not still_current():

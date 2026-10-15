@@ -50,12 +50,38 @@ commitment may supply separate evidence until its stated end, capped at next loc
 midnight. The model must connect the duration to an actual current/completed
 transition and consider every later report; a plan or two people working alone
 does not prove separate locations. Shift names do not invent shift end times.
+An applicable active daily schedule can supply an exact ending for an episode
+grounded in today's owner reports. The selected routine identity, time, conditions
+and schedule metadata are revalidated before persistence and when reading the
+proof; a changed, paused, blocked or externally sourced schedule cannot sustain
+it. Schedules alone never establish execution, presence or separation.
+Schedule applicability rejects missing/unsupported condition types and uses
+GPS-reconciled observations without consulting the duration proof itself.
+Referenced boolean context observations outside the volatile set also retain
+their freshness limits; date/shift conditions keep their own typed contracts.
 Ordinary presence still expires after two hours. The original observation and its
 timestamp stay unchanged; an internal proof uses the canonical conditional writer
 without a schema migration. New trusted owner history or changed canonical state
 (including GPS flag refreshes) invalidates the proof conservatively and requires
 reassessment. Missing, corrupt or expired proof leaves ordinary clarification in
 place. External action approval requirements are unaffected.
+
+Web draft preparation, like Chat, can resolve a recipient from the bounded
+conversation when the owner accepts a message offer without repeating the name.
+Preparation still uses the canonical saved-draft tool. A bare send command without
+an active draft cannot create a replacement; existing draft-edit isolation and
+the separate external sending approval gate remain in place.
+Ordinary contextual requests pass a bounded, tool-free semantic preparation
+decision before the draft tool is offered. Declines, unrelated conversation and
+externally sourced/synthetic input cannot supply that permission. Graph turns
+capture the shared draft revision and trusted owner-history version before model
+execution. Web, Matrix and Telegram attach the actual persisted owner row ID;
+equal message wording cannot substitute a newer turn's identity. Missing or
+mismatched IDs fail closed when trusted owner history exists.
+The canonical writer checks both under a cross-process draft lock and
+replaces the JSON atomically; a newer draft or owner turn rejects the delayed
+write. Internal injected state is hidden from the model's tool schema. Drafts
+include a unique revision even when their text and second-resolution times match.
 
 ## Read the routine status correctly
 

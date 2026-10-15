@@ -1707,7 +1707,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         now_ts = datetime.now().strftime("%H:%M")
         human_msg = HumanMessage(
             content=f"[{now_ts}] {human_msg.content}",
-            additional_kwargs=human_msg.additional_kwargs,
+            additional_kwargs={**human_msg.additional_kwargs, "astakos_owner_rowid": current_history_rowid},
         )
         # ── Running LangGraph ─────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "web"

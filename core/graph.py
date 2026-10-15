@@ -29,6 +29,14 @@ AGENT_MAP = [
 ]
 
 
+def guarded_pre_check_node(state: AgentState) -> dict:
+    """Capture draft/history identity before any routing or model latency."""
+    from core.messenger_draft import capture_draft_write_guard
+    guard = capture_draft_write_guard(state["messages"])
+    return {**pre_check_node(state), "messenger_draft_write_guard": guard,
+            "messenger_draft_preparation_authorized": False}
+
+
 
 # ────────────────────────────────────────────────────────────────
 # GRAPH BUILD
@@ -38,7 +46,7 @@ def build_graph():
     workflow = StateGraph(AgentState)
 
     # Nodes
-    workflow.add_node("pre_check",    pre_check_node)
+    workflow.add_node("pre_check",    guarded_pre_check_node)
     workflow.add_node("cancel_plan",  cancel_plan_node)
     workflow.add_node("supervisor",   supervisor_node)
     workflow.add_node("Chat_Agent",   chat_agent_node)
