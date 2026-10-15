@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any, Iterable, Callable
+import json
+from pathlib import Path
 import unicodedata
 import re
 from core import nl_config
@@ -165,6 +167,35 @@ def classify_messenger_intent(text: str, has_active_draft: bool = False) -> Mess
 def is_create_draft_intent(text: str) -> bool:
     """Return whether text explicitly requests a new Messenger draft."""
     return classify_messenger_intent(text).intent == "create_draft"
+
+
+def resolve_contextual_draft_request(messages: list, invoke: Callable[[list], Any]) -> bool:
+    """Resolve local preparation intent from bounded dialogue, never tool text."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from core.untrusted_content import (
+        is_direct_user_message, external_content_source_names, format_untrusted_tool_result,
+    )
+    from core.utils import extract_json_from_text
+    if not messages or not is_direct_user_message(messages[-1]):
+        return False
+    if external_content_source_names(getattr(messages[-1], "additional_kwargs", {})):
+        return False
+    if any(getattr(row, "type", "") == "tool" for row in messages[-8:]):
+        return False
+    dialogue = [{"role": row.type, "content": str(row.content)[:1800]}
+                for row in messages[-8:] if row.type in {"human", "ai"}
+                and not external_content_source_names(getattr(row, "additional_kwargs", {}))
+                and (row.type != "human" or is_direct_user_message(row))]
+    try:
+        prompt = (Path(__file__).resolve().parents[1] / "prompts" /
+                  "messenger_preparation_decision.md").read_text(encoding="utf-8")
+        response = invoke([SystemMessage(content=prompt), HumanMessage(content=
+            format_untrusted_tool_result("owner dialogue for local draft intent",
+                json.dumps(dialogue, ensure_ascii=False)))])
+        result = extract_json_from_text(str(response.content))
+        return isinstance(result, dict) and set(result) == {"prepare"} and result["prepare"] is True
+    except Exception:
+        return False
 
 
 def is_active_draft_edit_intent(text: str) -> bool:

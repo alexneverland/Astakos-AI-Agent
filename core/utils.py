@@ -88,6 +88,10 @@ class AgentState(TypedDict):
     active_draft_edit_context_isolated: NotRequired[bool]
     # Set only when an active Messenger draft revision is invoked without
     # externally derived prompt context or read tools.
+    messenger_draft_write_guard: NotRequired[dict]
+    # Captured by graph entry before routing/model work; never supplied by a tool.
+    messenger_draft_preparation_authorized: NotRequired[bool]
+    # Set by canonical Chat/Web binding decisions, not model tool arguments.
     bug_diagnosis_read_only: NotRequired[bool]
     # Set by the Supervisor only for the current accepted bug-investigation turn.
     bug_followup_routed: NotRequired[bool]

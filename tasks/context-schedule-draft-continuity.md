@@ -60,3 +60,39 @@ The three Messenger comments are not resolved by this context-only repair:
 general tool availability is semantic choice as in Chat, while shared-draft and
 latest-turn races concern the pre-existing unconditional draft writer. They
 remain explicitly open rather than being marked fixed by these changes.
+
+Owner then explicitly authorized all remaining Messenger review repairs. This
+supersedes the preceding context-only scope. Reproduced both delayed-write races
+and ordinary Web chat binding/saving an unsolicited draft in native graph tests
+before repair. Both Chat/Web contextual binding now require a bounded tool-free
+semantic decision; the injected tool state also rejects an unbound model call.
+Explicit creation and trusted routine acceptances reuse the existing canonical
+approval resolver. No phrase-list additions were made.
+
+The graph entry captures the current exact draft fingerprint and trusted owner
+history version before routing/model latency. The canonical save uses FileLock,
+validates both identities, gives every draft a unique revision, and atomically
+replaces its JSON. Hidden InjectedState carries the guard through ToolNode and
+the existing partial goal/draft execution path; the model cannot supply it.
+Stale queued input is rejected against the latest persisted owner text as well.
+Direct operator/native maintenance calls without graph state keep their existing
+API; all canonical saves still take the same draft lock. No live drafts were
+manually edited, and tests use isolated native history/draft stores.
+
+Final Messenger verification: 253 relevant offline cases passed under a session-
+wide outbound network prohibition. The expanded offer module contains 28 cases,
+including actual graph persistence, rejected unbound calls, simultaneous writers,
+same-content revisions, stale queued turns, malformed semantic decisions and
+external/synthetic input. Three existing natural-language binding tests now mock
+the new semantic provider boundary explicitly; their native execution assertions
+remain intact. Compilation and git diff --check passed.
+
+Exploratory broader tests are not reported as all green: legacy draft/plan
+approval tests still mock _notify_telegram rather than the selected-channel
+transport, so denied delivery returns blocked instead of pending. Two
+representative failures were reproduced with main:core/approval.py executed in
+an isolated test process; that source is unchanged by this PR. Six async vision
+tests also failed when the global network guard blocked Windows loopback event-
+loop setup. These unrelated harness cases were excluded from the final scoped
+253-case group, not silently counted as passing. Existing dependency deprecation
+warnings remain. Request one additional Codex review after the substantial fixes.

@@ -71,6 +71,14 @@ conversation when the owner accepts a message offer without repeating the name.
 Preparation still uses the canonical saved-draft tool. A bare send command without
 an active draft cannot create a replacement; existing draft-edit isolation and
 the separate external sending approval gate remain in place.
+Ordinary contextual requests pass a bounded, tool-free semantic preparation
+decision before the draft tool is offered. Declines, unrelated conversation and
+externally sourced/synthetic input cannot supply that permission. Graph turns
+capture the shared draft revision and trusted owner-history version before model
+execution. The canonical writer checks both under a cross-process draft lock and
+replaces the JSON atomically; a newer draft or owner turn rejects the delayed
+write. Internal injected state is hidden from the model's tool schema. Drafts
+include a unique revision even when their text and second-resolution times match.
 
 ## Read the routine status correctly
 

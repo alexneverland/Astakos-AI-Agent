@@ -6,6 +6,7 @@
 # ================================================================
 
 from copy import copy
+from services.messenger_intent import resolve_contextual_draft_request
 from core.i18n import t
 import json
 import os
@@ -694,6 +695,7 @@ def chat_agent_node(state: AgentState):
             or has_known_messenger_contact_reference(latest_user_text)
         )
         and classify_messenger_intent(latest_user_text).intent == "general_chat"
+        and resolve_contextual_draft_request(history, lambda messages: llm.invoke(messages))
     ):
         # Leave semantic interpretation to the canonical Chat agent while
         # deterministic intent protects exact draft lifecycle boundaries.
@@ -729,6 +731,7 @@ def chat_agent_node(state: AgentState):
     return {
         "current_agent": "Chat_Agent",
         "messages": [response],
+        "messenger_draft_preparation_authorized": bool(draft_tool_reason),
         "active_draft_edit_context_isolated": active_draft_edit_context_isolated,
     }
 
@@ -1221,6 +1224,7 @@ def web_agent_node(state: AgentState):
             or has_known_messenger_contact_reference(latest_user_text)
         )
         and classify_messenger_intent(latest_user_text).intent == "general_chat"
+        and resolve_contextual_draft_request(history, lambda messages: llm.invoke(messages))
     ):
         # Like Chat, resolve recipients from bounded conversation, including an
         # accepted offer whose recipient is absent from the newest user line.
@@ -1297,6 +1301,7 @@ def web_agent_node(state: AgentState):
     return {
         "current_agent": "Web_Agent",
         "messages": [result],
+        "messenger_draft_preparation_authorized": bool(draft_tool_reason),
         "active_draft_edit_context_isolated": active_draft_edit_context_isolated,
     }
 

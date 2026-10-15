@@ -17,6 +17,7 @@ import html
 import xml.etree.ElementTree as ET
 from config import NLP_CONFIG
 from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 from typing import Annotated
 from playwright.sync_api import sync_playwright
 from core.messenger_draft import active_draft_status
@@ -318,7 +319,8 @@ def _score_place_match(place: dict, profile: dict) -> float:
 
 
 @tool
-def relay_local_payload(target_entity: str, payload_data: str, image_path: str = "") -> str:
+def relay_local_payload(target_entity: str, payload_data: str, image_path: str = "",
+                        state: Annotated[dict, InjectedState] = None) -> str:
     """
     Saves a draft Messenger (Facebook) message.
     Use this WHEN you propose to the user to send a message,
@@ -345,7 +347,20 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
     if not clean_payload:
         return t("tools.web.msg_draft_err_sanitized")
 
-    save_draft(destination, clean_payload, image_path=image_path)
+    if state is not None:
+        if state.get("messenger_draft_preparation_authorized") is False:
+            from core.approval import _is_explicit_messenger_draft_creation
+            if not _is_explicit_messenger_draft_creation(
+                {"name": "relay_local_payload", "args": {"target_entity": target_entity,
+                    "payload_data": payload_data, "image_path": image_path}}, state.get("messages", []),
+                routine_draft_offer_authorized=state.get("routine_draft_offer_authorized"),
+                active_draft_edit_context_isolated=state.get("active_draft_edit_context_isolated", False),
+            ):
+                return t("tools.web.msg_draft_err_reason", reason="No current draft preparation request")
+        save_draft(destination, clean_payload, image_path=image_path,
+                   write_guard=state.get("messenger_draft_write_guard", {"valid": False}))
+    else:
+        save_draft(destination, clean_payload, image_path=image_path)
 
     # We return clean output — the display instructions are in prompts.md
     img_info = f"\nimage: {image_path}" if image_path else ""

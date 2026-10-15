@@ -41,6 +41,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   repeating the recipient. Routine context inference can use an applicable daily
   schedule to bound a confirmed ongoing episode, with schedule/source invalidation
   and unchanged observation freshness and external-send approval gates.
+  Contextual draft preparation requires a semantic request decision; delayed graph
+  writes cannot overwrite a newer draft or persist after a newer owner turn.
 
 - Compound owner reports can update an existing goal's milestones while preparing
   a local Messenger draft through Chat/Web. Web also exposes the existing

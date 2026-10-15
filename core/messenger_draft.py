@@ -1,5 +1,8 @@
 import json
 import os
+import hashlib
+from uuid import uuid4
+from filelock import FileLock
 from datetime import datetime, timedelta
 
 
@@ -29,6 +32,7 @@ def build_draft(target_name: str, message: str, *, image_path: str = "", now: da
     now = now or datetime.now()
     expires_at = now + timedelta(seconds=ttl_seconds)
     draft = {
+        "revision": uuid4().hex,
         "target_name": target_name,
         "message": message,
         "status": "pending",
@@ -40,12 +44,60 @@ def build_draft(target_name: str, message: str, *, image_path: str = "", now: da
     return draft
 
 
-def save_draft(target_name: str, message: str, *, image_path: str = "") -> dict:
+def _draft_fingerprint() -> str:
+    """Fingerprint exact persisted contents, including malformed existing data."""
+    from pathlib import Path
     draft_file, _ = _settings()
-    draft = build_draft(target_name, message, image_path=image_path)
-    with open(draft_file, "w", encoding="utf-8") as f:
-        json.dump(draft, f, ensure_ascii=False, indent=4)
-    return draft
+    try:
+        return hashlib.sha256(Path(draft_file).read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return "missing"
+
+
+def capture_draft_write_guard(messages: list) -> dict:
+    """Anchor a graph turn to its native owner history and shared draft revision."""
+    import config
+    from memory.conversation_history import get_latest_trusted_user_rowid, load_messages_after_rowid
+    from core.untrusted_content import is_direct_user_message
+    from core.utils import strip_transport_metadata
+    try:
+        path = config.CONVERSATION_DB_FILE
+        version = get_latest_trusted_user_rowid(db_path=path)
+        latest = next((row for row in reversed(messages) if is_direct_user_message(row)), None)
+        if latest is None:
+            return {"valid": False}
+        if version:
+            rows = load_messages_after_rowid(after_rowid=version-1, limit=1, db_path=path)
+            if not rows or strip_transport_metadata(rows[0]["content"]) != strip_transport_metadata(str(latest.content)):
+                return {"valid": False}
+        draft_file, _ = _settings()
+        with FileLock(draft_file + ".lock", timeout=10):
+            return {"valid": True, "history_version": version, "history_path": path,
+                    "draft_fingerprint": _draft_fingerprint()}
+    except Exception:
+        return {"valid": False}
+
+
+def save_draft(target_name: str, message: str, *, image_path: str = "", write_guard: dict | None = None) -> dict:
+    """Save atomically; guarded graph writes cannot replace newer draft/history."""
+    draft_file, _ = _settings()
+    with FileLock(draft_file + ".lock", timeout=10):
+        if write_guard is not None:
+            from memory.conversation_history import get_latest_trusted_user_rowid
+            if (write_guard.get("valid") is not True
+                    or _draft_fingerprint() != write_guard.get("draft_fingerprint")
+                    or get_latest_trusted_user_rowid(db_path=write_guard["history_path"]) != write_guard["history_version"]):
+                raise ValueError("Draft preparation cancelled: a newer turn or draft superseded this request.")
+        draft = build_draft(target_name, message, image_path=image_path)
+        temporary = draft_file + "." + uuid4().hex + ".tmp"
+        try:
+            with open(temporary, "w", encoding="utf-8") as f:
+                json.dump(draft, f, ensure_ascii=False, indent=4)
+            os.replace(temporary, draft_file)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        return draft
 
 
 def load_draft() -> dict | None:
