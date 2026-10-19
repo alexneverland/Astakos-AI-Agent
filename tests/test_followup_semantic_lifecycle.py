@@ -45,6 +45,18 @@ def stored(identity):
                 if row["id"] == identity)
 
 
+def expiry_fields(identity: int) -> tuple:
+    """Read lifecycle fields from this test's isolated follow-up store."""
+    conn = pf._conn()
+    try:
+        return conn.execute(
+            "SELECT resolved_at, outcome_score FROM pending_followups WHERE id=?",
+            (identity,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+
 def test_completed_wedding_is_not_deferred_by_evening_in_reason():
     identity = create("γάμος στο Μακροχώρι")
     result = bot._apply_followup_skip_outcome(stored(identity), {
@@ -97,6 +109,10 @@ def test_automatic_retry_after_expiry_expires_without_reopening(monkeypatch):
     assert after["status"] == "expired"
     assert after["last_decision"] == "expired"
     assert after["expires_at"] == before["expires_at"]
+    assert expiry_fields(identity) == ((now + timedelta(minutes=61)).isoformat(), -0.5)
+    pf.expire_old_followups((now + timedelta(hours=2)).isoformat())
+    assert pf.defer_followup(identity, delay_minutes=30, automatic=True) == "unchanged"
+    assert expiry_fields(identity) == ((now + timedelta(minutes=61)).isoformat(), -0.5)
 
 
 def test_retry_near_expiry_does_not_extend_or_prematurely_close(monkeypatch):
@@ -112,6 +128,44 @@ def test_retry_near_expiry_does_not_extend_or_prematurely_close(monkeypatch):
     assert after["status"] == "pending"
     assert after["expires_at"] == before["expires_at"]
     assert after["followup_after_ts"] <= after["expires_at"]
+    assert expiry_fields(identity) == (None, 0.0)
+
+
+@pytest.mark.parametrize("status", ["pending", "sent"])
+def test_scheduled_expiry_records_complete_outcome_once(monkeypatch, status):
+    """Both active statuses use the same complete, repeat-safe expiry bookkeeping."""
+    now = datetime(2030, 1, 2, 20, 0, tzinfo=pf.FOLLOWUP_LOCAL_TZ)
+    monkeypatch.setattr(pf, "_local_now", lambda: now)
+    identity = create(hours=1)
+    if status == "sent":
+        pf.mark_followup_sent(identity)
+    before_score = stored(identity)["outcome_score"]
+    expired_at = (now + timedelta(hours=2)).isoformat()
+    pf.expire_old_followups(expired_at)
+    pf.expire_old_followups(expired_at)
+    assert expiry_fields(identity) == (expired_at, before_score - 0.5)
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+def test_expiry_does_not_overwrite_an_owner_renewal(monkeypatch, automatic):
+    """A renewal between expiry lookup and write must retain its new deadline."""
+    now = datetime(2030, 1, 2, 20, 0, tzinfo=pf.FOLLOWUP_LOCAL_TZ)
+    monkeypatch.setattr(pf, "_local_now", lambda: now)
+    identity = create(hours=1)
+    monkeypatch.setattr(pf, "_local_now", lambda: now + timedelta(hours=2))
+    original_expire = pf._expire_followup
+
+    def renew_before_expiry(conn, followup_id, **kwargs):
+        assert pf.defer_followup(followup_id, delay_minutes=120) == "deferred"
+        return original_expire(conn, followup_id, **kwargs)
+
+    monkeypatch.setattr(pf, "_expire_followup", renew_before_expiry)
+    if automatic:
+        assert pf.defer_followup(identity, delay_minutes=30, automatic=True) == "unchanged"
+    else:
+        pf.expire_old_followups((now + timedelta(hours=2)).isoformat())
+    assert stored(identity)["status"] == "pending"
+    assert expiry_fields(identity) == (None, 0.0)
 
 
 def test_return_update_without_title_words_closes_only_related_outing(monkeypatch):

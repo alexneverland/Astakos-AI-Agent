@@ -851,6 +851,28 @@ def resolve_followup(followup_id: int, reason: str):
     record_followup_outcome(followup_id, +1.0, reason)
 
 
+def _expire_followup(
+    conn: sqlite3.Connection,
+    followup_id: int,
+    *,
+    now_iso: str,
+    reason: str,
+    expected_status: str,
+    expected_expiry: str,
+) -> bool:
+    """Atomically record expiry and its outcome for one still-active row."""
+    cursor = conn.execute(
+        """UPDATE pending_followups
+           SET status='expired', resolved_at=?, resolution_reason=?,
+               last_decision='expired', decision_reason=?,
+               outcome_score=COALESCE(outcome_score, 0.0) - 0.5
+           WHERE id=? AND status=? AND expires_at=?
+               AND status IN ('pending', 'sent')""",
+        (now_iso, reason, reason, followup_id, expected_status, expected_expiry),
+    )
+    return cursor.rowcount > 0
+
+
 def defer_followup(
     followup_id: int,
     *,
@@ -883,14 +905,15 @@ def defer_followup(
         if automatic:
             next_expires = _coerce_local_dt(datetime.fromisoformat(row[1]))
             if now >= next_expires:
-                conn.execute(
-                    """UPDATE pending_followups SET status='expired',
-                       last_decision='expired', decision_reason=?, resolution_reason=?
-                       WHERE id=? AND status='pending'""",
-                    ("automatic_deferral_exceeds_expiry", "automatic_deferral_exceeds_expiry", followup_id),
+                expired = _expire_followup(
+                    conn, followup_id,
+                    now_iso=now.isoformat(timespec="seconds"),
+                    reason="automatic_deferral_exceeds_expiry",
+                    expected_status="pending",
+                    expected_expiry=row[1],
                 )
                 conn.commit()
-                return "expired"
+                return "expired" if expired else "unchanged"
             next_due = min(next_due, next_expires)
 
         metadata = {}
@@ -1157,29 +1180,20 @@ def expire_old_followups(now_iso: str):
     conn = _conn()
     try:
         cur = conn.execute(
-            "SELECT id FROM pending_followups WHERE status IN ('pending', 'sent') AND expires_at <= ?",
+            "SELECT id, status, expires_at FROM pending_followups WHERE status IN ('pending', 'sent') AND expires_at <= ?",
             (now_iso,)
         )
-        expired_ids = [row[0] for row in cur.fetchall()]
+        expired_rows = cur.fetchall()
 
-        if expired_ids:
-            conn.execute(
-                """
-                UPDATE pending_followups
-                SET status='expired',
-                    resolution_reason='ttl_expired',
-                    resolved_at=?,
-                    last_decision='expired'
-                WHERE status IN ('pending', 'sent') AND expires_at <= ?
-                """,
-                (now_iso, now_iso),
+        for followup_id, status, expires_at in expired_rows:
+            _expire_followup(
+                conn, followup_id, now_iso=now_iso,
+                reason="ttl_expired", expected_status=status, expected_expiry=expires_at,
             )
+        if expired_rows:
             conn.commit()
     finally:
         conn.close()
-
-    for fid in expired_ids:
-        record_followup_outcome(fid, -0.5, "ttl_expired")
 
 
 def reanchor_pending_followups_to_target_windows(limit: int = 50) -> int:

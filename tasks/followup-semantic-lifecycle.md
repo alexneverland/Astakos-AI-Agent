@@ -107,3 +107,14 @@ mixed resolve/defer persistence, invalid-batch no-partial-write protection,
 empty-queue zero-call behavior, manual rejection and a lookup/write status race.
 Two isolated in-memory mutations (duplicate classification and ignored manual
 rejection) were both caught. git diff --check passed; live data was not changed.
+
+## Expiry bookkeeping review correction (22500e4)
+
+Inline 4312615609, P2: reproduced an automatic retry expiring after model
+evaluation with resolved_at unset and outcome_score unchanged. Automatic and
+scheduled expiry now share an atomic lifecycle/outcome write, conditional on the
+observed active status and deadline. Repeated expiry does not charge twice, and
+an intervening explicit owner renewal is preserved. Regression assertions inspect
+the final isolated persisted timestamp and score; no live rows are repaired.
+Final related group: 180 passed. git diff --check passed. Live model calls and
+the full repository suite were not run for this narrow correction.
