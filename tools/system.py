@@ -1922,13 +1922,15 @@ def control_pending_followup(
     if delay_minutes <= 0 and not target_window.strip():
         return "❌ Defer requires delay_minutes and/or target_window."
 
-    defer_followup(
+    outcome = defer_followup(
         item["id"],
         delay_minutes=delay_minutes or int(item.get("metadata", {}).get("delay_minutes_final") or 60),
         reason="manual_defer",
         target_window=(target_window or str(item.get("metadata", {}).get("target_window") or "")).strip(),
         topic=item["topic"],
     )
+    if outcome != "deferred":
+        return f"ℹ️ Follow-up #{item['id']} is no longer pending. No changes made."
     updated = find_pending_followups(limit=20)
     refreshed = next((row for row in updated if row["id"] == item["id"]), None)
     if not refreshed:

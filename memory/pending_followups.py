@@ -1833,96 +1833,6 @@ def process_followup_exchange(
     )
 
 
-def classify_followup_resolution_with_llm(
-    *,
-    user_text: str,
-    topic: str,
-    subject: str,
-    source_user_text: str,
-    recent_context: str = "",
-) -> dict | None:
-    import json
-    from core.i18n import load_prompt
-    from services.gemini import safe_gemini_call
-
-    prompt_template = load_prompt("telegram_bot_followup_resolve.md")
-    prompt = prompt_template.format(
-        topic=topic,
-        subject=subject,
-        source_user_text=source_user_text,
-        user_text=user_text,
-        recent_context=recent_context,
-    )
-
-    try:
-        response = safe_gemini_call(prompt)
-        raw = response.text if hasattr(response, "text") else str(response)
-        start = raw.find('{')
-        end = raw.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            raw = raw[start:end+1]
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else None
-    except Exception as exc:
-        print(f"[FollowUpResolve Error]: {exc}")
-        return None
-
-
-def classify_followup_deferral_with_llm(
-    *,
-    topic: str,
-    subject: str,
-    source_user_text: str,
-    current_user_text: str,
-    recent_context: str = "",
-) -> dict:
-    import json
-    from core.i18n import load_prompt
-    from services.gemini import safe_gemini_call
-
-    prompt_template = load_prompt("telegram_bot_followup_defer.md")
-    prompt = prompt_template.format(
-        topic=topic,
-        subject=subject,
-        source_user_text=source_user_text,
-        current_user_text=current_user_text,
-        recent_context=recent_context,
-    )
-
-    try:
-        response = safe_gemini_call(prompt)
-        raw = response.text if hasattr(response, "text") else str(response)
-        start = raw.find('{')
-        end = raw.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            raw = raw[start:end+1]
-        data = json.loads(raw)
-        if not isinstance(data, dict):
-            raise ValueError("Invalid follow-up deferral object")
-        confidence = data.get("confidence", 0.0)
-        if type(confidence) not in (int, float) or not 0 <= confidence <= 1:
-            raise ValueError("Invalid follow-up confidence")
-        delay = data.get("delay_minutes", 0)
-        if type(delay) is not int or not 0 <= delay <= 48 * 60:
-            raise ValueError("Invalid follow-up delay")
-    except Exception:
-        return {
-            "should_defer": False,
-            "delay_minutes": 0,
-            "target_window": "",
-            "reason": "invalid_json",
-            "confidence": 0.0,
-        }
-
-    return {
-        "should_defer": data.get("should_defer") is True,
-        "delay_minutes": delay,
-        "target_window": str(data.get("target_window", "")),
-        "reason": str(data.get("reason", "")),
-        "confidence": float(confidence),
-    }
-
-
 def _load_followup_resolution_context(user_text: str) -> str:
     """Read bounded trusted owner context preceding this recorded exchange."""
     from memory.conversation_history import load_messages
@@ -1965,44 +1875,28 @@ def maybe_resolve_followups_from_user_message(user_text: str) -> int:
         conn.close()
     if not rows:
         return 0
-    recent_context = _load_followup_resolution_context(user_text)
+    from services.followup_update_selector import select_followup_updates
+    candidates = [dict(zip(("id", "topic", "subject", "source_user_text", "status"), row)) for row in rows]
+    updates = select_followup_updates(user_text=user_text, candidates=candidates,
+                                     recent_context=_load_followup_resolution_context(user_text))
+    by_id = {row["id"]: row for row in candidates}
     resolved_count = 0
-    for followup_id, topic, subject, source_user_text, status in rows:
-        result = classify_followup_resolution_with_llm(
-            user_text=user_text, topic=topic, subject=subject,
-            source_user_text=source_user_text or "", recent_context=recent_context,
-        )
-        if not isinstance(result, dict):
-            continue
-        if result.get("resolves") is True:
-            confidence = result.get("confidence")
-            resolution_type = result.get("resolution_type")
-            if (type(confidence) not in (int, float) or not 0.55 <= confidence <= 1.0
-                    or not isinstance(resolution_type, str) or resolution_type not in {
-                "completed", "canceled", "superseded", "irrelevant",
-            }):
-                continue
-            reason = str(result.get("reason") or resolution_type)
+    for item in updates:
+        followup_id, reason = item["id"], item["reason"]
+        if item["action"] == "resolve":
+            resolution_type = item["resolution_type"]
             resolve_followup(followup_id, f"resolved_by_user:{resolution_type}")
-            _set_followup_decision(followup_id, "resolved", reason)
+            _set_followup_decision(followup_id, "resolved", reason or resolution_type)
             print(f"[FollowUp]: resolved #{followup_id} ({resolution_type})")
             resolved_count += 1
-            continue
-        if result.get("resolves") is not False or status != "pending":
-            continue
-        deferral = classify_followup_deferral_with_llm(
-            topic=topic, subject=subject, source_user_text=source_user_text or "",
-            current_user_text=user_text, recent_context=recent_context,
-        )
-        if (deferral.get("should_defer") is True
-                and 0.60 <= _coerce_float_scalar(deferral.get("confidence")) <= 1.0):
-            target_window = str(deferral.get("target_window") or "")
+        else:
+            topic, target_window = by_id[followup_id]["topic"], item["target_window"]
             delay_minutes = normalize_followup_delay(
-                topic=topic, suggested_minutes=int(deferral.get("delay_minutes") or 0),
-                source_user_text=user_text, target_window=target_window, now=_local_now(),
+                topic=topic, suggested_minutes=item["delay_minutes"], source_user_text=user_text,
+                target_window=target_window, now=_local_now(),
             )
-            defer_reason = deferral.get("reason") or "user_postponed"
-            defer_followup(followup_id, delay_minutes=delay_minutes,
-                           reason=f"deferred:{defer_reason}", target_window=target_window, topic=topic)
-            print(f"[FollowUp]: deferred #{followup_id} -> {defer_reason}")
+            outcome = defer_followup(followup_id, delay_minutes=delay_minutes,
+                reason=f"deferred:{reason or 'user_postponed'}", target_window=target_window, topic=topic)
+            if outcome == "deferred":
+                print(f"[FollowUp]: deferred #{followup_id} -> {reason}")
     return resolved_count

@@ -37,6 +37,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Follow-up completion and postponement share one bounded model evaluation per
+  owner exchange instead of serial calls per record. Manual deferral reports a
+  no-change result when a matched record is already sent or no longer pending.
+
 - Routine feedback sees adjacent assistant commentary when interpreting a reply,
   distinguishes corrections from cancellation, and supplies an explicit no-change
   result to prevent unsupported claims that a routine was skipped or completed.

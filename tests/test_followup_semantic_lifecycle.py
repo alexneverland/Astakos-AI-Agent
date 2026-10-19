@@ -1,4 +1,5 @@
 """Offline regressions for semantic completion and bounded scheduler retries."""
+import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -15,6 +16,16 @@ def isolated_followups(tmp_path, monkeypatch, offline_behavioral_io):
     import services.gemini as gemini
     monkeypatch.setattr(gemini, "safe_gemini_call",
                         lambda *a, **kw: pytest.fail("Unstubbed model call"))
+
+
+def _stub_updates(monkeypatch, updates):
+    """Keep the real batch selector and persistence; stub only cloud inference."""
+    calls = []
+    def model(prompt, *args, **kwargs):
+        calls.append(prompt)
+        return SimpleNamespace(text=json.dumps({"updates": updates}, ensure_ascii=False))
+    monkeypatch.setattr("services.gemini.safe_gemini_call", model)
+    return calls
 
 
 def create(subject="καφές στον Εύοσμο", *, hours=18):
@@ -104,61 +115,42 @@ def test_retry_near_expiry_does_not_extend_or_prematurely_close(monkeypatch):
 
 
 def test_return_update_without_title_words_closes_only_related_outing(monkeypatch):
-    coffee = create()
-    wedding = create("γάμος στο Μακροχώρι")
-    update = "Γύρισαν φίλε ένα γρήγορο μπάνιο και ύπνο"
-    def classify(**data):
-        assert data["user_text"] == update
-        return {"resolves": data["subject"] == "καφές στον Εύοσμο",
-                "resolution_type": "completed", "confidence": 0.95,
-                "reason": "The family returned from that outing."}
-    monkeypatch.setattr(pf, "classify_followup_resolution_with_llm", classify)
-    monkeypatch.setattr(pf, "classify_followup_deferral_with_llm",
-                        lambda **kw: {"should_defer": False})
-    assert pf.maybe_resolve_followups_from_user_message(update) == 1
-    assert stored(coffee)["status"] == "resolved"
-    assert stored(wedding)["status"] == "pending"
+    coffee, wedding = create(), create("γάμος στο Μακροχώρι")
+    _stub_updates(monkeypatch, [{"id": coffee, "action": "resolve", "resolution_type": "completed",
+                              "confidence": 0.95, "reason": "The family returned from that outing"}])
+    assert pf.maybe_resolve_followups_from_user_message("Γύρισαν φίλε ένα γρήγορο μπάνιο και ύπνο") == 1
+    assert stored(coffee)["status"] == "resolved" and stored(wedding)["status"] == "pending"
 
 
-@pytest.mark.parametrize("decision", [
-    {"resolves": False, "confidence": 0.99},
-    {"resolves": True, "confidence": 0.3},
-    {"resolves": "false", "confidence": 0.99},
-    {"resolves": True, "confidence": float("nan")},
-    {"resolves": True, "confidence": True},
-    {"resolves": True, "confidence": 0.95, "resolution_type": []},
+@pytest.mark.parametrize("overrides", [
+    {"action": "none"}, {"confidence": 0.3}, {"confidence": "false"},
+    {"confidence": float("nan")}, {"confidence": True}, {"resolution_type": []},
 ])
-def test_ambiguous_unrelated_or_invalid_completion_preserves_pending(monkeypatch, decision):
+def test_ambiguous_unrelated_or_invalid_completion_preserves_pending(monkeypatch, overrides):
     identity = create()
-    monkeypatch.setattr(pf, "classify_followup_resolution_with_llm", lambda **kw: decision)
-    monkeypatch.setattr(pf, "classify_followup_deferral_with_llm",
-                        lambda **kw: {"should_defer": False})
+    item = {"id": identity, "action": "resolve", "resolution_type": "completed", "confidence": 0.95, "reason": "Done"}
+    _stub_updates(monkeypatch, [{**item, **overrides}])
     pf.maybe_resolve_followups_from_user_message("Γύρισαν φίλε")
     assert stored(identity)["status"] == "pending"
 
 
-def test_resolved_action_wins_over_conflicting_deferral(monkeypatch):
+def test_conflicting_batch_actions_cannot_write_either_outcome(monkeypatch):
     identity = create()
-    monkeypatch.setattr(pf, "classify_followup_resolution_with_llm", lambda **kw: {
-        "resolves": True, "resolution_type": "completed", "confidence": 0.95})
-    monkeypatch.setattr(pf, "classify_followup_deferral_with_llm", lambda **kw: {
-        "should_defer": True, "confidence": 0.95, "delay_minutes": 1440})
+    _stub_updates(monkeypatch, [
+        {"id": identity, "action": "resolve", "resolution_type": "completed", "confidence": 0.95, "reason": "Done"},
+        {"id": identity, "action": "defer", "delay_minutes": 1440, "target_window": "explicit_timer", "confidence": 0.95, "reason": "Later"},
+    ])
     pf.maybe_resolve_followups_from_user_message("Τελικά ο καφές στον Εύοσμο τελείωσε χθες το βράδυ")
-    assert stored(identity)["status"] == "resolved"
+    assert stored(identity)["status"] == "pending"
 
 
 def test_resolution_model_receives_bounded_owner_context(monkeypatch):
     from memory import conversation_history as history
     history.append_message(role="user", content="Ο μικρός λείπει ακόμα με τη μαμά.", channel="matrix")
     history.append_message(role="user", content="Γύρισαν φίλε", channel="matrix")
-    seen = []
-    import services.gemini as gemini
-    def model(prompt, *a, **kw):
-        seen.append(prompt)
-        return SimpleNamespace(text='{"resolves":true,"resolution_type":"completed","confidence":0.95}')
-    monkeypatch.setattr(gemini, "safe_gemini_call", model)
     identity = create()
-    monkeypatch.setattr(pf, "classify_followup_deferral_with_llm", lambda **kw: {"should_defer": False})
+    seen = _stub_updates(monkeypatch, [{"id": identity, "action": "resolve", "resolution_type": "completed",
+                                      "confidence": 0.95, "reason": "The family returned"}])
     pf.maybe_resolve_followups_from_user_message("Γύρισαν φίλε")
     assert stored(identity)["status"] == "resolved"
     assert "Ο μικρός λείπει ακόμα με τη μαμά." in seen[0]
@@ -186,11 +178,8 @@ def test_explicit_owner_postponement_can_renew_expiry(monkeypatch):
     monkeypatch.setattr(pf, "_local_now", lambda: now)
     identity = create(hours=1)
     before = stored(identity)
-    monkeypatch.setattr(pf, "classify_followup_resolution_with_llm",
-                        lambda **kw: {"resolves": False, "confidence": 0.95})
-    monkeypatch.setattr(pf, "classify_followup_deferral_with_llm", lambda **kw: {
-        "should_defer": True, "confidence": 0.95, "delay_minutes": 1440,
-        "target_window": "explicit_timer", "reason": "Owner postponed this outing by one day"})
+    _stub_updates(monkeypatch, [{"id": identity, "action": "defer", "delay_minutes": 1440,
+        "target_window": "explicit_timer", "confidence": 0.95, "reason": "Owner moved it to tomorrow"}])
     pf.maybe_resolve_followups_from_user_message("Τελικά αύριο, όχι σήμερα")
     after = stored(identity)
     assert after["status"] == "pending"
@@ -222,15 +211,13 @@ def test_model_merge_cannot_extend_expiry(monkeypatch):
     assert stored(identity)["expires_at"] == before["expires_at"]
 
 
-@pytest.mark.parametrize("payload", [
-    '{"should_defer":"false","delay_minutes":60,"confidence":0.9}',
-    '{"should_defer":true,"delay_minutes":60,"confidence":true}',
-    '{"should_defer":true,"delay_minutes":-60,"confidence":0.9}',
-    '[]',
+@pytest.mark.parametrize("overrides", [
+    {"action": "false"}, {"confidence": True}, {"delay_minutes": -60}, {"target_window": []},
 ])
-def test_invalid_deferral_cannot_postpone_an_item(monkeypatch, payload):
-    import services.gemini as gemini
-    monkeypatch.setattr(gemini, "safe_gemini_call", lambda *a, **kw: SimpleNamespace(text=payload))
-    result = pf.classify_followup_deferral_with_llm(
-        topic="outing", subject="coffee", source_user_text="Going out", current_user_text="Back")
-    assert result["should_defer"] is False
+def test_invalid_deferral_cannot_postpone_an_item(monkeypatch, overrides):
+    identity = create()
+    item = {"id": identity, "action": "defer", "delay_minutes": 60,
+            "target_window": "explicit_timer", "confidence": 0.95, "reason": "Later"}
+    _stub_updates(monkeypatch, [{**item, **overrides}])
+    assert pf.maybe_resolve_followups_from_user_message("Γύρισαν") == 0
+    assert stored(identity)["last_decision"] != "deferred"

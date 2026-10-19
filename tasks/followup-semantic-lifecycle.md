@@ -87,3 +87,23 @@ The groups cover 732 distinct offline cases (13 correction cases overlap).
 The no-feedback mutation was caught by both exact correction cases while real
 cancellation and arrival continued to pass. git diff --check passed. No live
 model interpretation, outbound send or historical ledger repair was performed.
+
+## Codex review corrections (e9d5b92)
+
+- Inline comment 4312384089, P1: reproduced twenty serial provider calls with
+  twenty unrelated active candidates. Completion/deferral now share one strict
+  bounded batch selector; no per-record inference remains. Provider failure,
+  malformed data, unknown/duplicate IDs and conflicting actions leave the batch
+  unchanged. Low-confidence valid actions are omitted. Legacy single-record
+  classifiers/prompts were retired and their regressions moved to the provider
+  boundary so the batch parser and final writes remain real.
+- Inline comment 4312384093, P2: reproduced manual defer returning a success for
+  a sent record despite unchanged timestamps. The tool now propagates a rejected
+  defer result, including a status change after lookup, without claiming success.
+
+First focused group after correction: 126 passed. Final checks follow below.
+Final related group: 176 passed, including twenty-candidate one-call behavior,
+mixed resolve/defer persistence, invalid-batch no-partial-write protection,
+empty-queue zero-call behavior, manual rejection and a lookup/write status race.
+Two isolated in-memory mutations (duplicate classification and ignored manual
+rejection) were both caught. git diff --check passed; live data was not changed.
