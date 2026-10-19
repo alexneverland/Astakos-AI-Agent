@@ -98,6 +98,22 @@ def test_web_feedback_hook_failure_does_not_use_legacy_completion(client):
     assert any('"status": "error"' in str(msg.content) for msg in contexts)
 
 
+def test_no_feedback_receipt_does_not_consume_normal_web_turn(client):
+    """A truthful no-change notice must leave existing pending flows reachable."""
+    from services.routine_completion_context import build_dated_routine_feedback_context
+    from services.routine_feedback_turn import FeedbackTurnResult
+    context = build_dated_routine_feedback_context(FeedbackTurnResult("none"))
+    with (
+        patch.object(server.state, "persisted_routine_feedback_handler", lambda *a: context, create=True),
+        patch("memory.pending_assets.clear_expired_pending_assets"),
+        patch("memory.pending_assets.get_latest_pending_asset_any", return_value=None) as lookup,
+    ):
+        response, mocks = _post_chat(client, message="Τι πάρκο μου λες;")
+    assert response.status_code == 200
+    lookup.assert_called_once_with("web")
+    assert context in mocks["graph"].call_args.args[0]
+
+
 @pytest.mark.parametrize("broadcast_failure", [False, True])
 def test_real_web_history_writer_supplies_saved_identity_to_dated_handler(client, tmp_path, broadcast_failure):
     """An ID-only writer result silently disables actual dated feedback."""

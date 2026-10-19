@@ -20,8 +20,9 @@ test messages, config, runtime or release changes.
   The delivery ledger's context had user_at_work=false. The owner clarified on
   Oct 19 that he had misread "ευκαιρία" as "Ευκαρπία" and accepted the opener as
   correct. No geographical error or behavioral selector repair is established
-  by that misunderstanding. Behavioral behavior is outside this follow-up patch;
-  routine historical feedback is not rewritten here.
+  by that misunderstanding. The owner subsequently requested the separate repair
+  of the response that treated his correction as a routine skip, in this PR.
+  Routine historical feedback is not rewritten here.
   The final canonical park occurrence is complete at Oct 16 18:44, after the
   owner reported arrival. The persisted opener and park observation rows do not
   name Efkarpia as a park location, consistent with the owner's clarification.
@@ -50,3 +51,39 @@ in-memory mutation disabling the structured resolve branch made the wedding
 regression fail; production sources were not mutated. git diff --check passed.
 No claim of live LLM semantic verification or full repository suite coverage.
 Both existing owner follow-ups and routine feedback were left untouched manually.
+
+## Comment corrections versus routine outcomes (authorized after PR creation)
+
+The dated feedback reference loader included owner reports and authenticated
+routine context questions, but omitted the adjacent Behavioral_Agent opener.
+It now supplies up to four assistant utterances from the preceding 15 minutes
+as conversation_reference data only. External, future, oversized and forged
+routine-question references are excluded. Canonical question correlation and
+permissions remain separate. The semantic policy distinguishes correction of
+commentary from a current cancellation or actual execution report.
+
+Previously a no-feedback result supplied no graph context at all. The graph now
+receives the explicit status/action none receipt, with no routine identity or date,
+and must not claim a stored routine change without a separate successful current
+canonical tool result. This also covers truthful replies when no database change
+occurred. The old trace shows only a memory-save tool, which does not establish a
+routine skip; pre-graph feedback was not included in that trace.
+
+New correction suite: 13 cases failed before the fix and passed afterward,
+covering the reported wording across Web, Matrix and Telegram, explicit
+cancellation, actual arrival and unsafe reference exclusion. Full related
+verification for this additional slice is recorded below.
+
+No-action notices carry canonical non-consuming metadata. Web, Telegram and
+Matrix use one shared helper to keep existing draft/pending flows reachable;
+errors, stale results and concrete routine results retain their consuming
+behavior. New channel regressions reproduced and caught the initial blocking
+of Web/Telegram pending lookup and Matrix draft preview/clear. Existing approval
+and external-send gates remain on their normal paths.
+
+Additional verification: 595 related cases passed; after adding the canonical
+non-consuming receipt metadata, the final channel/receipt group passed 150 cases.
+The groups cover 732 distinct offline cases (13 correction cases overlap).
+The no-feedback mutation was caught by both exact correction cases while real
+cancellation and arrival continued to pass. git diff --check passed. No live
+model interpretation, outbound send or historical ledger repair was performed.

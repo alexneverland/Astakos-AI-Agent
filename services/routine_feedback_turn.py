@@ -33,17 +33,42 @@ def _context_question_store() -> ClarificationStore:
 
 
 def _feedback_conversation_reference(*, now: datetime, rowid: int, db_path: str) -> list[dict]:
-    """Keep expired questions as meaning references, never active permissions."""
-    from memory.conversation_history import load_recent_state_messages, load_daily_state_messages
+    """Keep dated owner/context evidence and adjacent commentary as references."""
+    from core.untrusted_content import external_content_source_names
+    from memory.conversation_history import load_recent_state_messages, load_daily_state_messages, load_messages
     rows = [row for row in load_recent_state_messages(now=now, through_rowid=rowid, db_path=db_path)
             if row["role"] == "assistant"]
     rows += [row for row in load_daily_state_messages(now=now, db_path=db_path) if row["rowid"] < rowid]
+    # The current reply may correct ordinary commentary rather than cancel an
+    # activity. Expose the preceding utterance without promoting it to a reminder.
+    commentary = []
+    for row in load_messages(limit=20, db_path=db_path):
+        metadata = row.get("metadata") or {}
+        if (row["rowid"] >= rowid or row.get("role") != "assistant"
+                or row.get("agent") == "Routine_Context"
+                or metadata.get("routine_context_question_id")
+                or external_content_source_names(metadata)):
+            continue
+        try:
+            stamp = datetime.fromisoformat(row["timestamp"])
+            stamp = stamp.replace(tzinfo=now.tzinfo) if stamp.tzinfo is None else aware(stamp)
+        except (TypeError, ValueError):
+            continue
+        if timedelta(0) <= now-stamp <= timedelta(minutes=15):
+            content = str(row.get("content") or "")
+            if len(content) <= 2000:
+                commentary.append({**row, "kind": "conversation_reference"})
+    rows += commentary[-4:]
     rows.sort(key=lambda row: (row["timestamp"], row["rowid"]))
     requests = None
     references = []
     for row in rows:
         item = {key: row.get(key) for key in ("timestamp", "channel", "role")}
         item["content"] = str(row.get("content") or "")
+        if row.get("kind") == "conversation_reference":
+            item["kind"] = "conversation_reference"
+            references.append(item)
+            continue
         if row["role"] == "assistant":
             if requests is None:
                 requests = {q["id"]: q for q in _context_question_store().snapshot()["requests"]}

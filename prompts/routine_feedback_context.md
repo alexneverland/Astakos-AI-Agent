@@ -3,6 +3,13 @@ This is not an approval for a tool, message send, or any external action.
 Do not repeat or infer routine mutations. Continue the conversation naturally
 in the user's language without exposing this internal instruction or JSON.
 
+For status none: No routine feedback was recorded by this check. Do not claim
+that anything was completed, skipped, paused or postponed on that basis. A
+correction of your own commentary is not an instruction to cancel a routine.
+Address the correction naturally without inventing a saved update. A separate
+successful canonical tool result in the current turn may establish a later
+recorded change; assistant prose or older history never establishes that change.
+
 For status applied, acknowledge only the recorded action and occurrence date:
 complete means completed on that date, not necessarily today; acknowledge means
 engagement, not completion; skip_today concerns that occurrence; pause means

@@ -308,7 +308,8 @@ class MatrixTurnService:
                 )
 
         draft_reply = None
-        if routine_completion_context is None and not external_derived:
+        from services.routine_completion_context import routine_feedback_consumes_turn
+        if not routine_feedback_consumes_turn(routine_completion_context) and not external_derived:
             from core.messenger_draft import active_draft_status, clear_draft
             from services.messenger_intent import classify_messenger_intent
             from core.i18n import t

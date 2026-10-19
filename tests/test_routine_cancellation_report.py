@@ -83,7 +83,11 @@ def test_mixed_outcomes_reject_entire_unsafe_or_stale_update(store, tmp_path, mo
     result = handler(REPORT, row, **({"reply_event_id": "$old-context"} if failure == "expired_reply" else {}))
     assert store.occurrences(1) == []
     assert [o.feedback for o in store.occurrences(2)] == (["complete"] if failure == "already_complete" else [])
-    assert result is None or '"status": "stale"' in result.content
+    if result is not None:
+        receipt = json.loads(result.content.splitlines()[0])
+        assert receipt["status"] in {"none", "stale"}
+        assert receipt["action"] == "none" and receipt["routine_id"] is None
+        assert receipt["occurrence_date"] is None
     assert result is None or '"outcomes"' not in result.content
 
 

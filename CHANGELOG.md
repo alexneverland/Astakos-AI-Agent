@@ -37,6 +37,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Routine feedback sees adjacent assistant commentary when interpreting a reply,
+  distinguishes corrections from cancellation, and supplies an explicit no-change
+  result to prevent unsupported claims that a routine was skipped or completed.
+
 - Conversational follow-ups understand completion updates without repeated title
   words, using bounded owner context. Structured decisions take precedence over
   explanation wording; automatic retries preserve expiry instead of carrying old

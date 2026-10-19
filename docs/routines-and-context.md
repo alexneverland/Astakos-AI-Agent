@@ -198,6 +198,17 @@ or rolling an evening window into another day. Only a confident, explicit owner
 postponement renews the timing and expiry. Updating an existing topic does not
 reopen a sent or closed follow-up.
 
+Routine feedback also reads up to four adjacent assistant comments from the last
+15 minutes, solely to understand the owner's response. These references cannot
+act as delivered routine questions or grant permissions. Criticism of a comment's
+timing or assumptions does not cancel an activity scheduled for later; a clear
+independent cancellation or execution report still records its own outcome.
+When no dated feedback was recorded, the graph receives that explicit result so
+it must not invent an acknowledgement that a routine was skipped or completed.
+That no-change notice is informational: normal draft and pending-action handling
+continues through its existing approval gates. Recorded routine actions and
+uncertain/error outcomes retain their existing turn ownership.
+
 ## Approvals and troubleshooting
 
 External messaging retains its approval gate. In Matrix, use an exact **Reply**

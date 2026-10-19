@@ -1150,7 +1150,8 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from services.routine_feedback_turn import FeedbackTurnResult
             print(f"[Web Routine Feedback]: {type(exc).__name__}")
             routine_completion_context = build_dated_routine_feedback_context(FeedbackTurnResult("error"))
-        routine_action_consumed = routine_completion_context is not None
+        from services.routine_completion_context import routine_feedback_consumes_turn
+        routine_action_consumed = routine_feedback_consumes_turn(routine_completion_context)
     else:
         try:
             from core.messenger_draft import active_draft_status

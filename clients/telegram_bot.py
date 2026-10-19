@@ -2166,7 +2166,8 @@ def handle_message(
             from services.routine_feedback_turn import FeedbackTurnResult
             print(f"[Telegram Routine Feedback]: {type(exc).__name__}")
             routine_completion_context = build_dated_routine_feedback_context(FeedbackTurnResult("error"))
-        routine_action_consumed = routine_completion_context is not None
+        from services.routine_completion_context import routine_feedback_consumes_turn
+        routine_action_consumed = routine_feedback_consumes_turn(routine_completion_context)
     else:
         if pending_routine_confirmations:
             # ── Partner/messenger contextual no-decay (preserved unchanged) ──

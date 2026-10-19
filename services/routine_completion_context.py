@@ -22,8 +22,6 @@ def build_dated_routine_feedback_context(result: FeedbackTurnResult) -> SystemMe
     clarification, not a fabricated new time. External authorization stays in
     the existing draft/critical-tool paths.
     """
-    if result.status == "none":
-        return None
     selection = result.selection
     successful = result.status in {"applied", "clarify"}
     payload = {
@@ -48,7 +46,18 @@ def build_dated_routine_feedback_context(result: FeedbackTurnResult) -> SystemMe
         from core.untrusted_content import format_untrusted_tool_result
         content += "\n" + format_untrusted_tool_result(
             "recorded routine display name", result.routine_name.strip()[:200])
-    return SystemMessage(content=content)
+    return SystemMessage(content=content, additional_kwargs={
+        "astakos_routine_feedback_action_consumed": result.status != "none"})
+
+
+def routine_feedback_consumes_turn(context: SystemMessage | None) -> bool:
+    """Distinguish a no-change notice from routine-owned actions or failures.
+
+    Legacy contexts and failed/uncertain outcomes retain their consuming behavior.
+    Only the canonical explicit no-action receipt allows normal pending flows.
+    """
+    return context is not None and getattr(context, "additional_kwargs", {}).get(
+        "astakos_routine_feedback_action_consumed", True) is not False
 
 
 @dataclass(frozen=True)

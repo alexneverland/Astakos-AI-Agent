@@ -690,6 +690,17 @@ def test_telegram_persisted_feedback_hook_never_runs_legacy_completion(tmp_path,
     assert [row["role"] for row in real_load_messages(db_path=path)] == ["user", "ai"]
 
 
+def test_telegram_no_feedback_notice_leaves_pending_flows_reachable():
+    """A no-action graph notice is not a consumed routine instruction."""
+    context = bot.SystemMessage(content="No routine feedback was recorded")
+    context.additional_kwargs = {"astakos_routine_feedback_action_consumed": False}
+    lookup = sys.modules["memory.pending_assets"].get_latest_pending_asset_any
+    lookup.reset_mock()
+    with patch.object(bot, "_persisted_routine_feedback_handler", lambda *a: context, create=True):
+        _run_handle_message("Τι πάρκο μου λες;")
+    lookup.assert_called_once_with("telegram")
+
+
 def test_telegram_consumed_context_reply_never_reaches_dated_feedback(tmp_path):
     """The context acknowledgement owns the saved turn and bypasses routine inference."""
     path = str(tmp_path / "context-history.db")
