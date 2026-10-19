@@ -851,6 +851,28 @@ def resolve_followup(followup_id: int, reason: str):
     record_followup_outcome(followup_id, +1.0, reason)
 
 
+def _expire_followup(
+    conn: sqlite3.Connection,
+    followup_id: int,
+    *,
+    now_iso: str,
+    reason: str,
+    expected_status: str,
+    expected_expiry: str,
+) -> bool:
+    """Atomically record expiry and its outcome for one still-active row."""
+    cursor = conn.execute(
+        """UPDATE pending_followups
+           SET status='expired', resolved_at=?, resolution_reason=?,
+               last_decision='expired', decision_reason=?,
+               outcome_score=COALESCE(outcome_score, 0.0) - 0.5
+           WHERE id=? AND status=? AND expires_at=?
+               AND status IN ('pending', 'sent')""",
+        (now_iso, reason, reason, followup_id, expected_status, expected_expiry),
+    )
+    return cursor.rowcount > 0
+
+
 def defer_followup(
     followup_id: int,
     *,
@@ -858,7 +880,9 @@ def defer_followup(
     reason: str = "deferred_by_user_reply",
     target_window: str = "",
     topic: str = "",
-) -> None:
+    automatic: bool = False,
+) -> str:
+    """Postpone an active item; automatic retries retain its existing deadline."""
     ensure_pending_followups_table()
     conn = _conn()
     try:
@@ -873,9 +897,24 @@ def defer_followup(
         next_expires = next_due + timedelta(hours=ttl_hours)
 
         row = conn.execute(
-            "SELECT metadata_json FROM pending_followups WHERE id=?",
+            "SELECT metadata_json, expires_at, status FROM pending_followups WHERE id=?",
             (followup_id,),
         ).fetchone()
+        if not row or row[2] != "pending":
+            return "unchanged"
+        if automatic:
+            next_expires = _coerce_local_dt(datetime.fromisoformat(row[1]))
+            if now >= next_expires:
+                expired = _expire_followup(
+                    conn, followup_id,
+                    now_iso=now.isoformat(timespec="seconds"),
+                    reason="automatic_deferral_exceeds_expiry",
+                    expected_status="pending",
+                    expected_expiry=row[1],
+                )
+                conn.commit()
+                return "expired" if expired else "unchanged"
+            next_due = min(next_due, next_expires)
 
         metadata = {}
         if row and row[0]:
@@ -884,13 +923,14 @@ def defer_followup(
             except Exception:
                 metadata = {}
 
-        metadata["ttl_hours"] = ttl_hours
+        if not automatic:
+            metadata["ttl_hours"] = ttl_hours
         metadata["delay_minutes_final"] = safe_delay
         metadata["defer_count"] = int(metadata.get("defer_count") or 0) + 1
         if target_window:
             metadata["target_window"] = target_window
 
-        conn.execute(
+        cursor = conn.execute(
             """
             UPDATE pending_followups
             SET
@@ -902,7 +942,7 @@ def defer_followup(
                 decision_reason=?,
                 resolution_reason='',
                 sent_at=NULL
-            WHERE id=?
+            WHERE id=? AND status='pending'
             """,
             (
                 next_due.isoformat(timespec="seconds"),
@@ -913,6 +953,7 @@ def defer_followup(
             ),
         )
         conn.commit()
+        return "deferred" if cursor.rowcount else "unchanged"
     finally:
         conn.close()
 
@@ -1139,29 +1180,20 @@ def expire_old_followups(now_iso: str):
     conn = _conn()
     try:
         cur = conn.execute(
-            "SELECT id FROM pending_followups WHERE status IN ('pending', 'sent') AND expires_at <= ?",
+            "SELECT id, status, expires_at FROM pending_followups WHERE status IN ('pending', 'sent') AND expires_at <= ?",
             (now_iso,)
         )
-        expired_ids = [row[0] for row in cur.fetchall()]
+        expired_rows = cur.fetchall()
 
-        if expired_ids:
-            conn.execute(
-                """
-                UPDATE pending_followups
-                SET status='expired',
-                    resolution_reason='ttl_expired',
-                    resolved_at=?,
-                    last_decision='expired'
-                WHERE status IN ('pending', 'sent') AND expires_at <= ?
-                """,
-                (now_iso, now_iso),
+        for followup_id, status, expires_at in expired_rows:
+            _expire_followup(
+                conn, followup_id, now_iso=now_iso,
+                reason="ttl_expired", expected_status=status, expected_expiry=expires_at,
             )
+        if expired_rows:
             conn.commit()
     finally:
         conn.close()
-
-    for fid in expired_ids:
-        record_followup_outcome(fid, -0.5, "ttl_expired")
 
 
 def reanchor_pending_followups_to_target_windows(limit: int = 50) -> int:
@@ -1741,11 +1773,9 @@ def maybe_create_followup_from_exchange(
         )
 
         # A sent arc is historical context, never a pending item to reopen.
-        if (
-            existing_followup
-            and str(existing_followup.get("status") or "").strip().lower() == "sent"
-        ):
-            print(f"[FollowUp]: ignored merge into already-sent #{update_id}")
+        if (type(update_id) is not int or not existing_followup
+                or existing_followup.get("status") != "pending"):
+            print(f"[FollowUp]: ignored merge into inactive or unknown #{update_id}")
             return None
 
         topic_for_defer = (
@@ -1755,13 +1785,16 @@ def maybe_create_followup_from_exchange(
         )
 
         from memory.pending_followups import defer_followup
-        defer_followup(
+        outcome = defer_followup(
             followup_id=update_id,
             delay_minutes=candidate.get("delay_minutes", 60),
             reason=candidate.get("reason", "updated_by_deduplication"),
             target_window=candidate.get("target_window", ""),
             topic=topic_for_defer,
+            automatic=True,
         )
+        if outcome != "deferred":
+            return None
         print(f"[FollowUp]: merged new info into existing #{update_id}")
         return update_id
 
@@ -1799,7 +1832,7 @@ def process_followup_exchange(
     """
     resolved_count = maybe_resolve_followups_from_user_message(user_text)
     recently_resolved = None
-    if resolved_count > 0 and looks_like_followup_resolution_update(user_text):
+    if resolved_count > 0:
         recently_resolved = get_recently_resolved_followups(
             limit=5,
             within_seconds=180,
@@ -1814,216 +1847,70 @@ def process_followup_exchange(
     )
 
 
-def classify_followup_resolution_with_llm(
-    *,
-    user_text: str,
-    topic: str,
-    subject: str,
-    source_user_text: str,
-) -> dict | None:
-    import json
-    from core.i18n import load_prompt
-    from services.gemini import safe_gemini_call
-
-    prompt_template = load_prompt("telegram_bot_followup_resolve.md")
-    prompt = prompt_template.format(
-        topic=topic,
-        subject=subject,
-        source_user_text=source_user_text,
-        user_text=user_text,
-    )
+def _load_followup_resolution_context(user_text: str) -> str:
+    """Read bounded trusted owner context preceding this recorded exchange."""
+    from memory.conversation_history import load_messages
+    from core.untrusted_content import external_content_source_names
 
     try:
-        response = safe_gemini_call(prompt)
-        raw = response.text if hasattr(response, "text") else str(response)
-        start = raw.find('{')
-        end = raw.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            raw = raw[start:end+1]
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else None
-    except Exception as exc:
-        print(f"[FollowUpResolve Error]: {exc}")
-        return None
-
-
-def classify_followup_deferral_with_llm(
-    *,
-    topic: str,
-    subject: str,
-    source_user_text: str,
-    current_user_text: str,
-) -> dict:
-    import json
-    from core.i18n import load_prompt
-    from services.gemini import safe_gemini_call
-
-    prompt_template = load_prompt("telegram_bot_followup_defer.md")
-    prompt = prompt_template.format(
-        topic=topic,
-        subject=subject,
-        source_user_text=source_user_text,
-        current_user_text=current_user_text,
-    )
-
-    response = safe_gemini_call(prompt)
-    raw = response.text if hasattr(response, "text") else str(response)
-    
-    start = raw.find('{')
-    end = raw.rfind('}')
-    if start != -1 and end != -1 and end > start:
-        raw = raw[start:end+1]
-
-    try:
-        data = json.loads(raw)
+        rows = load_messages(limit=20)
+        anchors = [i for i, row in enumerate(rows)
+                   if row.get("role") == "user" and row.get("content") == user_text
+                   and not external_content_source_names(row.get("metadata"))]
+        if not anchors:
+            return ""
+        anchor = anchors[-1]
+        current = _coerce_local_dt(datetime.fromisoformat(rows[anchor]["timestamp"]))
+        context = []
+        for row in rows[:anchor]:
+            if row.get("role") != "user" or external_content_source_names(row.get("metadata")):
+                continue
+            stamp = _coerce_local_dt(datetime.fromisoformat(row["timestamp"]))
+            if timedelta(0) <= current - stamp <= timedelta(hours=24):
+                context.append({"at": stamp.isoformat(), "text": str(row.get("content") or "")[:800]})
+        return json.dumps(context[-8:], ensure_ascii=False)
     except Exception:
-        return {
-            "should_defer": False,
-            "delay_minutes": 0,
-            "target_window": "",
-            "reason": "invalid_json",
-            "confidence": 0.0,
-        }
-
-    return {
-        "should_defer": bool(data.get("should_defer")),
-        "delay_minutes": int(data.get("delay_minutes", 0)),
-        "target_window": str(data.get("target_window", "")),
-        "reason": str(data.get("reason", "")),
-        "confidence": float(data.get("confidence", 0.0)),
-    }
+        return ""  # No context is safer than unrelated or future conversation.
 
 
 def maybe_resolve_followups_from_user_message(user_text: str) -> int:
+    """Interpret owner updates semantically, without requiring title keywords."""
     ensure_pending_followups_table()
-    text = _normalize_match_text(user_text)
-    if not text:
+    if not str(user_text or "").strip():
         return 0
-
     conn = _conn()
     try:
         rows = conn.execute(
-            """
-            SELECT id, topic, subject, source_user_text, status
-            FROM pending_followups
-            WHERE status IN ('pending', 'sent')
-            ORDER BY CASE WHEN status='sent' THEN 0 ELSE 1 END, id DESC
-            LIMIT 20
-            """
+            """SELECT id, topic, subject, source_user_text, status
+               FROM pending_followups WHERE status IN ('pending', 'sent')
+               ORDER BY CASE WHEN status='sent' THEN 0 ELSE 1 END, id DESC LIMIT 20"""
         ).fetchall()
-
-        resolution_markers = (
-            t("prompts.ext_str_534"),
-            t("prompts.ext_str_821"),
-            t("prompts.ext_str_319"),
-            t("prompts.ext_str_281"),
-            t("prompts.ext_str_369"),
-            t("prompts.ext_str_403"),
-            t("prompts.ext_str_285"),
-            t("prompts.ext_str_313"),
-            t("prompts.ext_str_516"),
-            t("prompts.ext_str_529"),
-            t("prompts.ext_str_551"),
-            t("prompts.ext_str_572"),
-            t("prompts.ext_str_713"),
-            t("prompts.ext_str_738"),
-            t("prompts.ext_str_563"),
-            t("prompts.ext_str_660"),
-            t("prompts.ext_str_787"),
-            t("prompts.ext_str_792"),
-            t("prompts.ext_str_644"),
-            t("prompts.ext_str_558"),
-            t("prompts.ext_str_655"),
-            t("prompts.ext_str_588"),
-            t("prompts.ext_str_316"),
-            t("prompts.ext_str_308"),
-            t("prompts.ext_str_253"),
-            t("prompts.ext_str_254"),
-            t("prompts.ext_str_681"),
-            t("prompts.ext_str_689"),
-            t("prompts.ext_str_282"),
-            t("prompts.ext_str_290"),
-        )
-
-        if not any(m in text for m in resolution_markers):
-            return 0
-
-        resolved_count = 0
-
-        for row in rows:
-            followup_id, topic, subject, source_user_text, followup_status = row
-            followup_status = str(followup_status or "").strip().lower()
-
-            shared_tokens = [
-                tok for tok in _normalize_match_text(subject).split()
-                if len(tok) >= 4 and tok in text
-            ]
-
-            if topic == "outing" and not shared_tokens:
-                continue
-
-            lexical_hint = bool(shared_tokens) or (
-                topic == "outing" and any(x in text for x in (t("prompts.ext_str_572"), t("prompts.ext_str_239"), t("prompts.ext_str_738"), t("prompts.ext_str_529")))
-            )
-
-            if not lexical_hint and len(text.split()) < 4:
-                continue
-
-            deferral = classify_followup_deferral_with_llm(
-                topic=topic,
-                subject=subject,
-                source_user_text=source_user_text or "",
-                current_user_text=user_text,
-            )
-
-            if deferral.get("should_defer") and float(deferral.get("confidence") or 0.0) >= 0.60:
-                delay_minutes = normalize_followup_delay(
-                    topic=topic,
-                    suggested_minutes=int(deferral.get("delay_minutes") or 0),
-                    source_user_text=user_text,
-                    target_window=str(deferral.get("target_window") or ""),
-                    now=_local_now(),
-                )
-                defer_reason = deferral.get('reason') or 'user_postponed'
-                defer_followup(
-                    followup_id,
-                    delay_minutes=delay_minutes,
-                    reason=f"deferred:{defer_reason}",
-                    target_window=str(deferral.get("target_window") or ""),
-                    topic=topic,
-                )
-                print(f"[FollowUp]: deferred #{followup_id} -> {defer_reason}")
-                continue
-
-            result = classify_followup_resolution_with_llm(
-                user_text=user_text,
-                topic=topic,
-                subject=subject,
-                source_user_text=source_user_text or "",
-            )
-
-            if not result or not result.get("resolves"):
-                continue
-
-            confidence = float(result.get("confidence") or 0.0)
-            if confidence < 0.55:
-                continue
-
-            resolution_type = str(result.get("resolution_type") or "resolved").strip()
-            reason = str(result.get("reason") or "").strip()
-
-            resolve_followup(
-                followup_id,
-                f"resolved_by_user:{resolution_type}"
-            )
-            _set_followup_decision(
-                followup_id,
-                decision="resolved",
-                reason=reason or resolution_type,
-            )
-            print(f"[FollowUp]: resolved #{followup_id} ({resolution_type})")
-            resolved_count += 1
-        return resolved_count
     finally:
         conn.close()
-
+    if not rows:
+        return 0
+    from services.followup_update_selector import select_followup_updates
+    candidates = [dict(zip(("id", "topic", "subject", "source_user_text", "status"), row)) for row in rows]
+    updates = select_followup_updates(user_text=user_text, candidates=candidates,
+                                     recent_context=_load_followup_resolution_context(user_text))
+    by_id = {row["id"]: row for row in candidates}
+    resolved_count = 0
+    for item in updates:
+        followup_id, reason = item["id"], item["reason"]
+        if item["action"] == "resolve":
+            resolution_type = item["resolution_type"]
+            resolve_followup(followup_id, f"resolved_by_user:{resolution_type}")
+            _set_followup_decision(followup_id, "resolved", reason or resolution_type)
+            print(f"[FollowUp]: resolved #{followup_id} ({resolution_type})")
+            resolved_count += 1
+        else:
+            topic, target_window = by_id[followup_id]["topic"], item["target_window"]
+            delay_minutes = normalize_followup_delay(
+                topic=topic, suggested_minutes=item["delay_minutes"], source_user_text=user_text,
+                target_window=target_window, now=_local_now(),
+            )
+            outcome = defer_followup(followup_id, delay_minutes=delay_minutes,
+                reason=f"deferred:{reason or 'user_postponed'}", target_window=target_window, topic=topic)
+            if outcome == "deferred":
+                print(f"[FollowUp]: deferred #{followup_id} -> {reason}")
+    return resolved_count

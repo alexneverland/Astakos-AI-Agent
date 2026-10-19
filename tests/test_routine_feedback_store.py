@@ -87,15 +87,12 @@ def test_failed_feedback_cannot_supply_a_successful_routine_reference(status):
     result = FeedbackTurnResult(status, DatedRoutineSelection("complete", 11, stamp(7).date()),
                                 routine_name="Never acknowledge this stale name")
     context = build_dated_routine_feedback_context(result)
-    if status == "none":
-        assert context is None
-    else:
-        import json
-        assert context is not None
-        assert "Never acknowledge this stale name" not in context.content
-        assert json.loads(context.content.splitlines()[0]) == {
-            "status": status, "action": "none", "routine_id": None,
-            "occurrence_date": None}
+    import json
+    assert context is not None
+    assert "Never acknowledge this stale name" not in context.content
+    assert json.loads(context.content.splitlines()[0]) == {
+        "status": status, "action": "none", "routine_id": None,
+        "occurrence_date": None}
 
 
 @pytest.mark.parametrize("routine_id,expected", [(11, "Καθάρισμα κουνελιού"), (None, None), (999, None)])
@@ -111,7 +108,8 @@ def test_routine_specific_date_clarification_keeps_name_without_recording_feedba
     context = build_dated_routine_feedback_context(result)
     assert store.occurrences(11) == []
     if routine_id == 999:
-        assert result.status == "none" and context is None
+        assert result.status == "none" and context is not None
+        assert '"action": "none"' in context.content
     else:
         assert result.status == "clarify" and context is not None
         assert result.routine_name == expected
@@ -519,7 +517,9 @@ def test_persisted_feedback_handler_carries_verified_outcome_to_graph(store, tmp
         clock=lambda: now, channel=channel, conversation_db_path=path, trusted_owner=True)
     context = handler("owner feedback", saved)
     if action == "none":
-        assert context is None
+        assert context is not None
+        assert json.loads(context.content.splitlines()[0]) == {
+            "status": "none", "action": "none", "routine_id": None, "occurrence_date": None}
         assert store.occurrences(11) == []
         return
     outcome = json.loads(context.content.split("\n", 1)[0])

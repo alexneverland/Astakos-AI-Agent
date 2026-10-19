@@ -120,7 +120,11 @@ def test_batch_rejects_whole_unsafe_or_stale_update(store, tmp_path, monkeypatch
         assert store.occurrences(2)[0].feedback == "skip_today"
     else:
         assert store.occurrences(2) == []
-    assert result is None or '"status": "stale"' in result.content
+    if result is not None:
+        receipt = json.loads(result.content.splitlines()[0])
+        assert receipt["status"] in {"none", "stale"}
+        assert receipt["action"] == "none" and receipt["routine_id"] is None
+        assert receipt["occurrence_date"] is None
     assert result is None or '"outcomes"' not in result.content
 
 
@@ -152,4 +156,6 @@ def test_current_activity_does_not_skip_prior_play_or_complete_future_visit(stor
     if phase == "playing_then_plan":
         assert store.occurrences(1)[0].feedback == "complete" and result is not None
     else:
-        assert store.occurrences(1) == [] and result is None
+        assert store.occurrences(1) == [] and result is not None
+        assert json.loads(result.content.splitlines()[0]) == {
+            "status": "none", "action": "none", "routine_id": None, "occurrence_date": None}

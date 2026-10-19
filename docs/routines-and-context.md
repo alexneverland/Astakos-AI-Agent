@@ -189,6 +189,29 @@ these topics does not initialize, modify or complete the follow-up queue.
 Goals also remain separate. Conversational partial updates preserve recorded
 activity and provenance; milestone scores do not invent completion percentages.
 Follow-ups use recent relevant activity rather than an isolated old mention.
+An owner update can close an existing follow-up without repeating its title or
+place name. The resolver considers the original scenario and bounded dated owner
+context in one shared model evaluation for up to twenty candidates; an unrelated
+or ambiguous reply leaves it open. The complete batch is validated before any
+write, rejecting unknown/duplicate IDs or malformed actions. A scheduler's structured
+resolve/defer decision controls the outcome, never keywords in its explanation.
+Automatic retries check again within an hour without renewing the existing expiry
+or rolling an evening window into another day. Only a confident, explicit owner
+postponement renews the timing and expiry. Updating an existing topic does not
+reopen a sent or closed follow-up.
+Manual deferral reports success only when the pending record actually changed;
+a sent or concurrently closed record receives a no-change response.
+
+Routine feedback also reads up to four adjacent assistant comments from the last
+15 minutes, solely to understand the owner's response. These references cannot
+act as delivered routine questions or grant permissions. Criticism of a comment's
+timing or assumptions does not cancel an activity scheduled for later; a clear
+independent cancellation or execution report still records its own outcome.
+When no dated feedback was recorded, the graph receives that explicit result so
+it must not invent an acknowledgement that a routine was skipped or completed.
+That no-change notice is informational: normal draft and pending-action handling
+continues through its existing approval gates. Recorded routine actions and
+uncertain/error outcomes retain their existing turn ownership.
 
 ## Approvals and troubleshooting
 

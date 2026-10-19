@@ -21,8 +21,9 @@ def isolated_context_question_boundary(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("no_feedback", [False, True])
 async def test_matrix_draft_clear_and_clarify_intercept_without_graph(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, no_feedback,
 ) -> None:
     """Draft management must not become a graph send or an external action."""
     from core import messenger_draft
@@ -35,7 +36,11 @@ async def test_matrix_draft_clear_and_clarify_intercept_without_graph(
     )
     cleared: list[bool] = []
     monkeypatch.setattr(messenger_draft, "clear_draft", lambda: cleared.append(True) or True)
-    service = MatrixTurnService(graph=graph, conversation_db_path=db_path)
+    from services.routine_completion_context import build_dated_routine_feedback_context
+    from services.routine_feedback_turn import FeedbackTurnResult
+    receipt = build_dated_routine_feedback_context(FeedbackTurnResult("none"))
+    service = MatrixTurnService(graph=graph, conversation_db_path=db_path,
+        persisted_routine_confirmation_handler=(lambda *a, **kw: receipt) if no_feedback else None)
 
     preview = await service("ποιο μήνυμα;", "$draft-preview")
     result = await service("κλείσε το draft", "$draft-clear")

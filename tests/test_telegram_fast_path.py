@@ -298,8 +298,3 @@ def test_contextual_sofia_not_needed_reply_does_not_decay():
     from clients.telegram_bot import _looks_like_contextual_not_needed_reply
     text = "Δεν θα χρειαστεί σήμερα μήνυμα μόλις μίλησα μαζί της στο τηλέφωνο, κλείνει εδώ"
     assert _looks_like_contextual_not_needed_reply(text) is True
-
-def test_terminal_followup_skip_reason_marks_stale_case():
-    from clients.telegram_bot import _looks_terminal_followup_skip_reason
-    reason = "Το follow-up αφορά αφύπνιση της προηγούμενης ημέρας και δεν έχει νόημα τώρα."
-    assert _looks_terminal_followup_skip_reason(reason) is True

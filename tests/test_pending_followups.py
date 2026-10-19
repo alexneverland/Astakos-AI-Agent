@@ -9,6 +9,24 @@ import clients.telegram_bot as bot
 import memory.pending_followups as pf
 
 
+def _make_update_candidate(subject):
+    """Create the actual record acted on by the semantic update tests."""
+    return pf.create_pending_followup(source_channel="matrix", source_agent="Chat_Agent",
+        topic="outing", subject=subject, source_user_text=subject, source_ai_text="Okay",
+        followup_after_ts="2030-01-01T19:00:00+02:00", confidence=0.9, metadata={})
+
+
+def _stub_followup_updates(monkeypatch, updates):
+    """Replace only the model boundary, keeping batch validation and writes real."""
+    from types import SimpleNamespace
+    calls = []
+    def model(prompt, *args, **kwargs):
+        calls.append(prompt)
+        return SimpleNamespace(text=json.dumps({"updates": updates}))
+    monkeypatch.setattr("services.gemini.safe_gemini_call", model)
+    return calls
+
+
 @pytest.fixture()
 def temp_state_db(tmp_path, monkeypatch):
     db_path = tmp_path / "state_followups.db"
@@ -356,151 +374,38 @@ def test_maybe_create_followup_from_exchange_skips_low_confidence(temp_state_db,
 
 
 def test_maybe_resolve_followups_from_user_message_uses_llm_resolution(temp_state_db, monkeypatch):
-    followup_id = pf.create_pending_followup(
-        source_channel="telegram",
-        source_agent="Chat_Agent",
-        topic="outing",
-        subject="συνάντηση με Partner",
-        source_user_text="Σε λίγο φεύγω να βρω τη Partner",
-        source_ai_text="ΟΚ.",
-        followup_after_ts="2030-01-01T19:00:00",
-        confidence=0.80,
-        metadata={},
-    )
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_resolution_with_llm",
-        lambda **kwargs: {
-            "resolves": True,
-            "resolution_type": "completed",
-            "confidence": 0.91,
-            "reason": "user said they found them",
-        },
-    )
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_deferral_with_llm",
-        lambda **kwargs: {"should_defer": False},
-    )
-
-    pf.maybe_resolve_followups_from_user_message("Βρήκα την Partner τελικά στο πάρκο")
-
-    rows = _fetch_all(temp_state_db)
-    assert len(rows) == 1
-    assert rows[0][3] == "resolved"
-    assert rows[0][6] == "resolved_by_user:completed"
-
-    followup = next(
-        item
-        for item in pf.find_pending_followups(limit=10, active_only=False)
-        if item["id"] == followup_id
-    )
-    assert followup["outcome_score"] == 1.0
+    identity = _make_update_candidate("συνάντηση με Partner")
+    _stub_followup_updates(monkeypatch, [{"id": identity, "action": "resolve",
+        "resolution_type": "completed", "confidence": 0.91, "reason": "user found them"}])
+    assert pf.maybe_resolve_followups_from_user_message("Βρήκα την Partner τελικά στο πάρκο") == 1
+    row = pf.find_pending_followups(active_only=False)[0]
+    assert row["status"] == "resolved" and row["outcome_score"] == 1.0
+    assert _fetch_all(temp_state_db)[0][6] == "resolved_by_user:completed"
 
 
 def test_maybe_resolve_followups_from_user_message_ignores_unrelated_for_outing(temp_state_db, monkeypatch):
-    followup_id = pf.create_pending_followup(
-        source_channel="telegram",
-        source_agent="Chat_Agent",
-        topic="outing",
-        subject="βόλτα στο πάρκο",
-        source_user_text="πάω βόλτα στο πάρκο",
-        source_ai_text="ΟΚ.",
-        followup_after_ts="2030-01-01T19:00:00",
-        confidence=0.80,
-        metadata={},
-    )
-
-    call_count = 0
-    def mock_classify(**kwargs):
-        nonlocal call_count
-        call_count += 1
-        return {"resolves": True, "resolution_type": "completed", "confidence": 0.9}
-
-    monkeypatch.setattr(pf, "classify_followup_resolution_with_llm", mock_classify)
-    monkeypatch.setattr(pf, "classify_followup_deferral_with_llm", lambda **kwargs: {"should_defer": False})
-
+    _make_update_candidate("βόλτα στο πάρκο")
+    calls = _stub_followup_updates(monkeypatch, [])
     pf.maybe_resolve_followups_from_user_message("Η Σοφία πήγε σπίτι να κλείσει τον φούρνο")
-
-    assert call_count == 0
-    rows = _fetch_all(temp_state_db)
-    assert len(rows) == 1
-    assert rows[0][3] == "pending"
+    assert len(calls) == 1
+    assert pf.find_pending_followups()[0]["status"] == "pending"
 
 
 def test_maybe_resolve_followups_from_user_message_skips_low_confidence_llm(temp_state_db, monkeypatch):
-    pf.create_pending_followup(
-        source_channel="telegram",
-        source_agent="Chat_Agent",
-        topic="food_purchase",
-        subject="μπριζόλες λαιμού",
-        source_user_text="Θύμισέ μου να πάρω τις μπριζόλες",
-        source_ai_text="Έγινε.",
-        followup_after_ts="2030-01-01T19:00:00",
-        confidence=0.80,
-        metadata={},
-    )
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_resolution_with_llm",
-        lambda **kwargs: {
-            "resolves": True,
-            "resolution_type": "completed",
-            "confidence": 0.30,
-            "reason": "too weak",
-        },
-    )
-
+    identity = _make_update_candidate("μπριζόλες λαιμού")
+    _stub_followup_updates(monkeypatch, [{"id": identity, "action": "resolve",
+        "resolution_type": "completed", "confidence": 0.30, "reason": "too weak"}])
     pf.maybe_resolve_followups_from_user_message("Ναι οκ")
-
-    rows = _fetch_all(temp_state_db)
-    assert len(rows) == 1
-    assert rows[0][3] == "pending"
+    assert pf.find_pending_followups()[0]["status"] == "pending"
 
 
 def test_maybe_resolve_followups_from_user_message_resolves_sent_followup(temp_state_db, monkeypatch):
-    followup_id = pf.create_pending_followup(
-        source_channel="telegram",
-        source_agent="Chat_Agent",
-        topic="food_purchase",
-        subject="\u03bc\u03c0\u03c1\u03b9\u03b6\u03cc\u03bb\u03b5\u03c2 \u03bb\u03b1\u03b9\u03bc\u03bf\u03cd",
-        source_user_text="\u0398\u03cd\u03bc\u03b9\u03c3\u03ad \u03bc\u03bf\u03c5 \u03bd\u03b1 \u03c0\u03ac\u03c1\u03c9 \u03c4\u03b9\u03c2 \u03bc\u03c0\u03c1\u03b9\u03b6\u03cc\u03bb\u03b5\u03c2",
-        source_ai_text="\u0388\u03b3\u03b9\u03bd\u03b5.",
-        followup_after_ts="2030-01-01T19:00:00",
-        confidence=0.80,
-        metadata={},
-    )
-    pf.mark_followup_sent(followup_id)
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_resolution_with_llm",
-        lambda **kwargs: {
-            "resolves": True,
-            "resolution_type": "completed",
-            "confidence": 0.92,
-            "reason": "user said they bought them",
-        },
-    )
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_deferral_with_llm",
-        lambda **kwargs: {"should_defer": False},
-    )
-
-    resolved = pf.maybe_resolve_followups_from_user_message(
-        "\u03a4\u03b9\u03c2 \u03c0\u03ae\u03c1\u03b1 \u03c4\u03ce\u03c1\u03b1 \u03ba\u03b1\u03b9 \u03c6\u03b5\u03cd\u03b3\u03c9 \u03b1\u03c0\u03cc \u03c4\u03b7 \u03b4\u03bf\u03c5\u03bb\u03b5\u03b9\u03ac"
-    )
-
-    rows = _fetch_all(temp_state_db)
-    assert resolved == 1
-    assert len(rows) == 1
-    assert rows[0][3] == "resolved"
-    assert rows[0][6] == "resolved_by_user:completed"
+    identity = _make_update_candidate("μπριζόλες λαιμού")
+    pf.mark_followup_sent(identity)
+    _stub_followup_updates(monkeypatch, [{"id": identity, "action": "resolve",
+        "resolution_type": "completed", "confidence": 0.92, "reason": "user bought them"}])
+    assert pf.maybe_resolve_followups_from_user_message("Τις πήρα τώρα και φεύγω από τη δουλειά") == 1
+    assert pf.find_pending_followups(active_only=False)[0]["status"] == "resolved"
 
 
 def test_build_followup_arc_key_collapses_similar_subjects():
@@ -980,6 +885,7 @@ def test_process_followup_exchange_updates_other_active_arc_after_resolution(
             "reason": "user postponed the other task",
             "target_window": "",
             "topic": "task_progress",
+            "automatic": True,
         }
     ]
 
@@ -1591,46 +1497,13 @@ def test_defer_followup_moves_due_time_and_keeps_pending(temp_state_db):
 
 
 def test_maybe_resolve_followups_from_user_message_defers_when_user_postpones(temp_state_db, monkeypatch):
-    pf.create_pending_followup(
-        source_channel="telegram",
-        source_agent="Chat_Agent",
-        topic="food_purchase",
-        subject="μπριζόλες λαιμού",
-        source_user_text="θυμισέ μου για τις μπριζόλες",
-        source_ai_text="έγινε",
-        followup_after_ts="2030-01-01T19:00:00+02:00",
-        confidence=0.8,
-        metadata={},
-    )
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_resolution_with_llm",
-        lambda **kwargs: {
-            "resolves": False,
-            "resolution_type": "",
-            "confidence": 0.2,
-            "reason": "not resolved",
-        },
-    )
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_deferral_with_llm",
-        lambda **kwargs: {
-            "should_defer": True,
-            "delay_minutes": 720,
-            "target_window": "next_day_late_morning",
-            "reason": "user postponed to tomorrow",
-            "confidence": 0.88,
-        },
-    )
-
+    identity = _make_update_candidate("μπριζόλες λαιμού")
+    _stub_followup_updates(monkeypatch, [{"id": identity, "action": "defer",
+        "delay_minutes": 720, "target_window": "next_day_late_morning",
+        "confidence": 0.88, "reason": "user postponed to tomorrow"}])
     pf.maybe_resolve_followups_from_user_message("όχι σήμερα, αύριο οι μπριζόλες")
-
-    row = pf.find_pending_followups(limit=10)[0]
-    assert row["status"] == "pending"
-    assert row["last_decision"] == "deferred"
+    row = pf.find_pending_followups()[0]
+    assert row["status"] == "pending" and row["last_decision"] == "deferred"
     assert "postponed" in row["decision_reason"]
 
 
