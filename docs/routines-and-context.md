@@ -189,6 +189,14 @@ these topics does not initialize, modify or complete the follow-up queue.
 Goals also remain separate. Conversational partial updates preserve recorded
 activity and provenance; milestone scores do not invent completion percentages.
 Follow-ups use recent relevant activity rather than an isolated old mention.
+An owner update can close an existing follow-up without repeating its title or
+place name. The resolver considers the original scenario and bounded dated owner
+context; an unrelated or ambiguous reply leaves it open. A scheduler's structured
+resolve/defer decision controls the outcome, never keywords in its explanation.
+Automatic retries check again within an hour without renewing the existing expiry
+or rolling an evening window into another day. Only a confident, explicit owner
+postponement renews the timing and expiry. Updating an existing topic does not
+reopen a sent or closed follow-up.
 
 ## Approvals and troubleshooting
 

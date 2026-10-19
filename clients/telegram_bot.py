@@ -625,64 +625,8 @@ def _short_followup_reason(reason: str, limit: int = 220) -> str:
         return text
     return text[: limit - 3].rstrip() + "..."
 
-def _followup_skip_means_defer(reason: str) -> bool:
-    text = _normalize_followup_signal_text(reason)
-    markers = (
-        t("clients.telegram_bot.bot_msg_395694"),
-        t("clients.telegram_bot.bot_msg_28b202"),
-        t("clients.telegram_bot.bot_msg_117791"),
-        t("clients.telegram_bot.bot_msg_082854"),
-        t("clients.telegram_bot.bot_msg_437093"),
-        t("clients.telegram_bot.bot_msg_4f17de"),
-        t("clients.telegram_bot.bot_msg_a77d19"),
-        t("clients.telegram_bot.bot_msg_251e4d"),
-        "before",
-        "not yet",
-        "later",
-        "tonight",
-    )
-    return any(marker in text for marker in markers)
-
-def _followup_skip_means_resolved(reason: str) -> bool:
-    text = _normalize_followup_signal_text(reason)
-    markers = (
-        t("clients.telegram_bot.bot_msg_39b4e9"),
-        t("clients.telegram_bot.bot_msg_48da5a"),
-        t("clients.telegram_bot.bot_msg_12e8b7"),
-        t("clients.telegram_bot.bot_msg_77d021"),
-        t("clients.telegram_bot.bot_msg_451cec"),
-        t("clients.telegram_bot.bot_msg_6e8d10"),
-        t("clients.telegram_bot.bot_msg_770c84"),
-        t("clients.telegram_bot.bot_msg_1b3dde"),
-        t("clients.telegram_bot.bot_msg_ef62c0"),
-        t("clients.telegram_bot.bot_msg_7755d1"),
-        t("clients.telegram_bot.bot_msg_9f7078"),
-        "already completed",
-        "already discussed",
-        "no further follow-up",
-        t("clients.telegram_bot.bot_msg_1bbc61"),
-        t("clients.telegram_bot.bot_msg_aaa6cf"),
-        t("clients.telegram_bot.bot_msg_b1aca8"),
-    )
-    return any(marker in text for marker in markers)
-
-def _looks_terminal_followup_skip_reason(reason: str) -> bool:
-    text = _normalize_gr(reason or "")
-    markers = [
-        t("clients.telegram_bot.bot_msg_cdf440"),
-        t("clients.telegram_bot.bot_msg_055f83"),
-        t("clients.telegram_bot.bot_msg_f6a7ce"),
-        t("clients.telegram_bot.bot_msg_12a43d"),
-        t("clients.telegram_bot.bot_msg_a0f7e2"),
-        t("clients.telegram_bot.bot_msg_3ee579"),
-        t("clients.telegram_bot.bot_msg_27ae12"),
-        t("clients.telegram_bot.bot_msg_062ecf"),
-    ]
-    return any(m in text for m in markers)
-
 def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
-    from datetime import datetime
-    from memory.pending_followups import defer_followup, resolve_followup, _set_followup_decision, normalize_followup_delay
+    from memory.pending_followups import defer_followup, resolve_followup, _set_followup_decision
 
     reason = str(decision.get("reason") or "").strip()
     skip_action = str(decision.get("skip_action") or "none").strip().lower()
@@ -694,28 +638,24 @@ def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
         _set_followup_decision(item["id"], "resolved", resolution_reason)
         return "resolved"
 
-    target_window = str(metadata.get("target_window") or "").strip()
     raw_delay = int(metadata.get("delay_minutes_raw") or metadata.get("delay_minutes_final") or 60)
 
-    if skip_action == "defer" or _followup_skip_means_defer(reason):
-        delay_minutes = normalize_followup_delay(
-            topic=topic,
-            suggested_minutes=raw_delay,
-            source_user_text=str(item.get("source_user_text") or ""),
-            target_window=target_window,
-            now=datetime.now(),
-        )
-        defer_followup(
+    if skip_action == "defer":
+        # A due item's next check is a short retry, not a new occurrence of
+        # its original calendar window. Only an owner postponement renews TTL.
+        outcome = defer_followup(
             item["id"],
-            delay_minutes=delay_minutes,
+            delay_minutes=max(15, min(raw_delay, 60)),
             reason=f"deferred:skip:{reason or 'too_early'}",
-            target_window=target_window,
             topic=topic,
+            automatic=True,
         )
+        if outcome != "deferred":
+            return outcome
         _set_followup_decision(item["id"], "deferred", reason or "too_early")
         return "deferred"
 
-    if skip_action == "resolve" or _followup_skip_means_resolved(reason) or _looks_terminal_followup_skip_reason(reason):
+    if skip_action == "resolve":
         resolve_followup(item["id"], f"resolved_by_skip:{reason or 'stale_followup_no_longer_relevant'}")
         _set_followup_decision(item["id"], "resolved", reason or "stale_followup_no_longer_relevant")
         return "resolved"

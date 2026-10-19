@@ -37,6 +37,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Conversational follow-ups understand completion updates without repeated title
+  words, using bounded owner context. Structured decisions take precedence over
+  explanation wording; automatic retries preserve expiry instead of carrying old
+  events into later evenings, while explicit owner postponements can renew timing.
+
 - Web can prepare a local Messenger draft when the owner accepts an offer without
   repeating the recipient. Routine context inference can use an applicable daily
   schedule to bound a confirmed ongoing episode, with schedule/source invalidation

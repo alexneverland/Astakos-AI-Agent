@@ -417,14 +417,14 @@ def test_maybe_resolve_followups_from_user_message_ignores_unrelated_for_outing(
     def mock_classify(**kwargs):
         nonlocal call_count
         call_count += 1
-        return {"resolves": True, "resolution_type": "completed", "confidence": 0.9}
+        return {"resolves": False, "confidence": 0.9, "reason": "Different person and activity"}
 
     monkeypatch.setattr(pf, "classify_followup_resolution_with_llm", mock_classify)
     monkeypatch.setattr(pf, "classify_followup_deferral_with_llm", lambda **kwargs: {"should_defer": False})
 
     pf.maybe_resolve_followups_from_user_message("Η Σοφία πήγε σπίτι να κλείσει τον φούρνο")
 
-    assert call_count == 0
+    assert call_count == 1
     rows = _fetch_all(temp_state_db)
     assert len(rows) == 1
     assert rows[0][3] == "pending"
@@ -980,6 +980,7 @@ def test_process_followup_exchange_updates_other_active_arc_after_resolution(
             "reason": "user postponed the other task",
             "target_window": "",
             "topic": "task_progress",
+            "automatic": True,
         }
     ]
 
