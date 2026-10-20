@@ -12,6 +12,7 @@ Astakos remembers useful context, learns recurring routines, follows up naturall
 [![Docker](https://img.shields.io/badge/Docker-Automatic_Updates-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-FF6B6B?style=for-the-badge&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/alexneverland/badge.svg)](https://hub.xerj.org/contributors/alexneverland.html)
 
 [**Latest Release & Downloads**](https://github.com/alexneverland/Astakos-AI-Agent/releases/latest) · [Beginner Setup Guide](SETUP_GUIDE.md) · [Screenshots](#screenshots) · [Features](#what-astakos-can-do) · [Architecture](#architecture)
 
