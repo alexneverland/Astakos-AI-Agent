@@ -198,6 +198,41 @@ def resolve_contextual_draft_request(messages: list, invoke: Callable[[list], An
         return False
 
 
+def resolve_pending_draft_action(messages: list, draft: dict, invoke: Callable[[list], Any]) -> str:
+    """Interpret the current owner's draft lifecycle request, failing closed."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from core.untrusted_content import (
+        is_direct_user_message, external_content_source_names, format_untrusted_tool_result,
+    )
+    from core.utils import extract_json_from_text
+    if (not draft or draft.get("status", "pending") != "pending" or not messages
+            or not is_direct_user_message(messages[-1])
+            or external_content_source_names(getattr(messages[-1], "additional_kwargs", {}))):
+        return "none"
+    if any(getattr(row, "type", "") == "tool" for row in messages[-8:]):
+        return "none"
+    dialogue = [{"role": row.type, "content": str(row.content)[:1800]}
+                for row in messages[-8:] if row.type in {"human", "ai"}
+                and not external_content_source_names(getattr(row, "additional_kwargs", {}))
+                and (row.type != "human" or is_direct_user_message(row))]
+    try:
+        prompt = (Path(__file__).resolve().parents[1] / "prompts" /
+                  "messenger_lifecycle_decision.md").read_text(encoding="utf-8")
+        reference = {"draft": {key: str(draft.get(key, ""))[:1800]
+                               for key in ("target_name", "message", "created_at", "expires_at")},
+                     "dialogue": dialogue}
+        response = invoke([SystemMessage(content=prompt), HumanMessage(content=
+            format_untrusted_tool_result("pending Messenger draft and owner dialogue",
+                                         json.dumps(reference, ensure_ascii=False)))])
+        result = extract_json_from_text(str(response.content))
+        if (isinstance(result, dict) and set(result) == {"action"}
+                and result["action"] in ("send", "retire", "none")):
+            return result["action"]
+    except Exception:
+        pass
+    return "none"
+
+
 def is_active_draft_edit_intent(text: str) -> bool:
     """Return whether text asks to revise the currently active Messenger draft."""
     normalized = _normalize(text)

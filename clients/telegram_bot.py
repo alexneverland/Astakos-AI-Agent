@@ -4395,8 +4395,15 @@ def _craft_proactive_msg(
                 and parsed["message"].strip()
                 and type(parsed["offers_messenger_draft"]) is bool
             ):
+                message = parsed["message"].strip()
+                # This path has no draft-write tool. A Messenger reminder may
+                # offer preparation, but cannot display a supposedly saved draft.
+                if (_is_partner_messenger_routine(event_name)
+                        and not message.startswith(("[CONTEXT_SKIP]", "[CONTEXT_NOTE]", "[SILENT_SKIP]"))):
+                    key = "messenger_prepare_offer" if allow_messenger_draft_offer else "messenger_routine_reminder"
+                    return t(f"clients.telegram_bot.{key}", event_name=event_name), allow_messenger_draft_offer
                 return (
-                    parsed["message"].strip(),
+                    message,
                     parsed["offers_messenger_draft"] and allow_messenger_draft_offer,
                 )
         except (TypeError, ValueError):

@@ -37,6 +37,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Messenger draft preparation now requires a native write result before showing
+  a saved message, and conversational send requests reach the existing external
+  approval path. Tool-free routine notifications offer preparation rather than
+  inventing drafts. Contextual retirement can clear an unwanted expired draft
+  without erasing newer owner work or marking a routine skipped.
+
 - Follow-up completion and postponement share one bounded model evaluation per
   owner exchange instead of serial calls per record. Manual deferral reports a
   no-change result when a matched record is already sent or no longer pending.

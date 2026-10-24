@@ -83,6 +83,17 @@ replaces the JSON atomically; a newer draft or owner turn rejects the delayed
 write. Internal injected state is hidden from the model's tool schema. Drafts
 include a unique revision even when their text and second-resolution times match.
 
+Messenger routine notifications offer local preparation without presenting a
+supposedly saved message. Chat/Web preparation must produce a native draft-write
+receipt: a prose-only model answer gets one required-tool retry, then an explicit
+failure if no write is requested. Successful writes display the saved tool result
+without another synthesis call. Send requests for a stored draft enter the normal
+external approval path; expired drafts cannot be sent or recreated by that request.
+An owner can retire an unwanted draft through ordinary conversation, including
+after expiry. Retirement checks the observed owner turn and draft revision under
+the writer lock, preserves the remaining conversation, and supplies no routine
+completion or skip evidence.
+
 ## Read the routine status correctly
 
 | Debug field | Meaning |

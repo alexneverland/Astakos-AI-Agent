@@ -188,14 +188,28 @@ def debug_draft_state(*, now: datetime | None = None) -> dict:
     }
 
 
-def clear_draft() -> bool:
+def clear_draft(*, write_guard: dict | None = None) -> bool:
+    """Clear under the writer lock, optionally bound to an observed owner/revision."""
     draft_file, _ = _settings()
-    if not os.path.exists(draft_file):
-        return False
     try:
-        with open(draft_file, "w", encoding="utf-8") as f:
-            json.dump({}, f, ensure_ascii=False, indent=4)
-        return True
-    except Exception:
+        with FileLock(draft_file + ".lock", timeout=10):
+            if not os.path.exists(draft_file):
+                return False
+            if write_guard is not None:
+                from memory.conversation_history import get_latest_trusted_user_rowid
+                if (write_guard.get("valid") is not True
+                        or _draft_fingerprint() != write_guard.get("draft_fingerprint")
+                        or get_latest_trusted_user_rowid(db_path=write_guard["history_path"]) != write_guard["history_version"]):
+                    return False
+            temporary = draft_file + "." + uuid4().hex + ".tmp"
+            try:
+                with open(temporary, "w", encoding="utf-8") as f:
+                    json.dump({}, f)
+                os.replace(temporary, draft_file)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+            return True
+    except (OSError, TimeoutError):
         return False
 

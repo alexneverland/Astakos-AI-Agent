@@ -7,6 +7,7 @@
 
 from copy import copy
 from services.messenger_intent import resolve_contextual_draft_request
+from services.messenger_lifecycle import messenger_lifecycle_boundary, require_draft_tool_result
 from core.i18n import t
 import json
 import os
@@ -550,6 +551,9 @@ def chat_agent_node(state: AgentState):
     boundary_response = _unverified_search_boundary_response(history, "Chat_Agent")
     if boundary_response:
         return boundary_response
+    history, lifecycle_response = messenger_lifecycle_boundary(state, history, "Chat_Agent", llm.invoke)
+    if lifecycle_response:
+        return lifecycle_response
     last_msg_text = clean_message(history[-1].content) if history else ""
     latest_user_text = ""
     for msg in reversed(history):
@@ -718,6 +722,7 @@ def chat_agent_node(state: AgentState):
 
     invoke_started = perf_counter()
     response = bound_llm.invoke(final_messages)
+    response = require_draft_tool_result(response, draft_tool_reason, final_messages, llm)
     invoke_ms = int((perf_counter() - invoke_started) * 1000)
 
     _attach_phase_timing(response, "chat_bind_ms", bind_ms)
@@ -1082,6 +1087,9 @@ def web_agent_node(state: AgentState):
     boundary_response = _unverified_search_boundary_response(history, "Web_Agent")
     if boundary_response:
         return boundary_response
+    history, lifecycle_response = messenger_lifecycle_boundary(state, history, "Web_Agent", llm.invoke)
+    if lifecycle_response:
+        return lifecycle_response
     last_msg_text = clean_message(history[-1].content) if history else ""
     latest_user_text = ""
     for msg in reversed(history):
@@ -1278,6 +1286,7 @@ def web_agent_node(state: AgentState):
     else:
         result = llm.bind_tools(web_tools).invoke(final_messages)
 
+    result = require_draft_tool_result(result, draft_tool_reason, final_messages, llm)
     result = _trim_web_research_tool_calls(result, history)
 
     if _is_stale_messenger_send_call(result):

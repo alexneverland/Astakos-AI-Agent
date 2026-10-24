@@ -1563,6 +1563,8 @@
       "bot_msg_morning_lazaros_e": "🌅 *Καλημέρα {user_name}!*\n\n📅 Σήμερα δεν έχεις τίποτα προγραμματισμένο.\n\n*Επόμενες 7 μέρες:*\n{w}",
       "bot_msg_morning_lazaros": "🌅 *Καλημέρα {user_name}!*\n\n*Σημερινό πρόγραμμα:*\n{t}",
       "bot_msg_draft_clear_done": "[{now_ts}] Done. The draft is cleared and we are closing it here.",
+      "messenger_prepare_offer": "For the routine “{event_name}”, would you like me to prepare a message?",
+      "messenger_routine_reminder": "Reminder for the routine “{event_name}”.",
       "bot_msg_has_routines_mins": "{user_name} has {count} routines in ~30 mins: {event_name}.",
       "bot_msg_almost_always_does": "{user_name} almost always does '{event_name}' at this time.",
       "bot_msg_usually_does": "Usually at this time {user_name} does '{event_name}'.",
@@ -1842,7 +1844,9 @@
       "capability_gap_instruction": "\n\n[CAPABILITY GAP RULE]\nWhen detecting a user request for a genuinely missing capability (never a transient failure) or a new tool, you MUST propose it in the same turn by starting your response EXACTLY with the proposal prefix: '{proposal_prefix}' followed by a short natural proposal. Then, stop and wait for the user's explicit '{draft_command}' command.\n- If you are Dev_Agent: Use this prefix and wait for authorization before proceeding with the guarded capability-draft workflow. CRITICAL: You must NOT call ANY tools during this proposal turn.\n- If you are a specialized agent (not Dev_Agent): You must never write code or call draft/registration tools."
     },
     "messenger_draft": {
-      "draft_expired": "❌ Error: Draft expired."
+      "draft_expired": "❌ Error: Draft expired.",
+      "preparation_failed": "No new draft was saved. Please retry preparation with a clear recipient.",
+      "request_superseded": "The draft or conversation changed in the meantime. Check the current draft before continuing."
     },
     "plan_judge": {
       "prompt": "Decide if the request needs a multi-step plan.\nAnswer only: PLAN, REFERENCE or NO."
