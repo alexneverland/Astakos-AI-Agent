@@ -35,7 +35,7 @@ async def test_matrix_draft_clear_and_clarify_intercept_without_graph(
         lambda: (True, "active", {"target_name": "Σοφία", "message": "Καλημέρα!"}),
     )
     cleared: list[bool] = []
-    monkeypatch.setattr(messenger_draft, "clear_draft", lambda: cleared.append(True) or True)
+    monkeypatch.setattr(messenger_draft, "clear_draft", lambda **kwargs: cleared.append(True) or True)
     from services.routine_completion_context import build_dated_routine_feedback_context
     from services.routine_feedback_turn import FeedbackTurnResult
     receipt = build_dated_routine_feedback_context(FeedbackTurnResult("none"))
@@ -84,7 +84,7 @@ async def test_matrix_historical_message_mention_keeps_active_draft(
         lambda: (True, "active", {"target_name": "Σοφία", "message": "Καλημέρα!"}),
     )
     cleared: list[bool] = []
-    monkeypatch.setattr(messenger_draft, "clear_draft", lambda: cleared.append(True) or True)
+    monkeypatch.setattr(messenger_draft, "clear_draft", lambda **kwargs: cleared.append(True) or True)
     graph = FakeGraph()
     service = MatrixTurnService(
         graph=graph,
@@ -127,7 +127,7 @@ async def test_matrix_draft_confirm_requires_selected_approval(
 
     reply = await service("στείλε", "$draft-send")
 
-    assert saved[0][0][:2] == ("execute_local_pipeline", {})
+    assert saved[0][0][:2] == ("execute_local_pipeline", {"expected_draft_revision": "missing"})
     assert saved[0][1]["channel"] == "matrix"
     assert delivered[0]["id"] == saved[0][0][2]
     assert "execute_local_pipeline" in reply

@@ -310,7 +310,9 @@ class MatrixTurnService:
         draft_reply = None
         from services.routine_completion_context import routine_feedback_consumes_turn
         if not routine_feedback_consumes_turn(routine_completion_context) and not external_derived:
-            from core.messenger_draft import active_draft_status, clear_draft
+            from core.messenger_draft import active_draft_status, clear_draft, capture_draft_write_guard
+            draft_guard = capture_draft_write_guard([HumanMessage(content=clean_user_text,
+                additional_kwargs={"astakos_owner_rowid": saved_user["rowid"]})], db_path=self._conversation_db_path)
             from services.messenger_intent import classify_messenger_intent
             from core.i18n import t
 
@@ -321,7 +323,7 @@ class MatrixTurnService:
             if draft_intent == "clear_draft":
                 draft_reply = (
                     t("server.draft_cleared")
-                    if clear_draft() else t("api.server.no_active_draft_to_clear")
+                    if clear_draft(write_guard=draft_guard) else t("api.server.no_active_draft_to_clear")
                 )
             elif draft_intent == "clarify_draft":
                 if draft_active and draft_data and draft_data.get("message"):
@@ -347,11 +349,12 @@ class MatrixTurnService:
                 from core import approval
 
                 call_id = f"call_{uuid.uuid4().hex[:12]}"
+                send_args = {"expected_draft_revision": draft_data.get("revision") or "missing"}
                 approval.save_pending(
-                    "execute_local_pipeline", {}, call_id, channel="matrix",
+                    "execute_local_pipeline", send_args, call_id, channel="matrix",
                 )
                 tool_call = {
-                    "name": "execute_local_pipeline", "id": call_id, "args": {},
+                    "name": "execute_local_pipeline", "id": call_id, "args": send_args,
                 }
                 try:
                     delivery_channel = approval._notify_selected_approval(tool_call)
@@ -420,9 +423,8 @@ class MatrixTurnService:
         final_reply = ""
         handling_agent = "Chat_Agent"
         answer_context = context_answer_graph_context(context_answer)
-        graph_messages = context + ([answer_context] if answer_context is not None else []) + [current]
-        if routine_completion_context is not None:
-            graph_messages.append(routine_completion_context)
+        graph_messages = (context + ([answer_context] if answer_context is not None else [])
+                          + ([routine_completion_context] if routine_completion_context is not None else []) + [current])
         graph_state: dict[str, Any] = {
             "messages": graph_messages,
             "channel": "matrix",

@@ -17,7 +17,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Iterator
 
 from config import CONVERSATION_DB_FILE
 
@@ -822,6 +822,26 @@ def load_messages_after_rowid(
     for msg, row in zip(msgs, rows):
         msg["rowid"] = row["rowid"] if hasattr(row, "keys") else row[0]
     return msgs
+
+
+@contextmanager
+def guard_owner_history_version(version: int, *, db_path: str) -> Iterator[bool]:
+    """Serialize a bounded file mutation with all SQLite history writers.
+
+    BEGIN IMMEDIATE gives the check and caller's mutation one linearization
+    point with append_message, including appenders in other processes.
+    This abstraction reads the existing schema and never provisions it.
+    """
+    from core.untrusted_content import external_content_source_names
+    with _conn(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        latest = 0
+        for row in conn.execute("SELECT rowid, * FROM conversation_messages "
+                                "WHERE role IN ('user', 'human', 'Human') ORDER BY rowid DESC"):
+            if not external_content_source_names(_row_to_message(row).get("metadata")):
+                latest = int(row["rowid"])
+                break
+        yield latest == version
 
 
 def get_latest_trusted_user_rowid(*, db_path: str = CONVERSATION_DB_FILE) -> int:

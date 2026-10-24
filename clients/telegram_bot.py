@@ -2737,12 +2737,13 @@ def handle_message(
             
             call_id = f"call_{uuid.uuid4().hex[:12]}"
             
-            save_pending("execute_local_pipeline", {}, call_id, channel="telegram")
+            send_args = {"expected_draft_revision": draft_data.get("revision") or "missing"}
+            save_pending("execute_local_pipeline", send_args, call_id, channel="telegram")
             
             tool_call_fake = {
                 "name": "execute_local_pipeline",
                 "id": call_id,
-                "args": {}
+                "args": send_args
             }
             _notify_telegram(tool_call_fake)
             
@@ -4395,8 +4396,15 @@ def _craft_proactive_msg(
                 and parsed["message"].strip()
                 and type(parsed["offers_messenger_draft"]) is bool
             ):
+                message = parsed["message"].strip()
+                # This path has no draft-write tool. A Messenger reminder may
+                # offer preparation, but cannot display a supposedly saved draft.
+                if (_is_partner_messenger_routine(event_name)
+                        and not message.startswith(("[CONTEXT_SKIP]", "[CONTEXT_NOTE]", "[SILENT_SKIP]"))):
+                    key = "messenger_prepare_offer" if allow_messenger_draft_offer else "messenger_routine_reminder"
+                    return t(f"clients.telegram_bot.{key}", event_name=event_name), allow_messenger_draft_offer
                 return (
-                    parsed["message"].strip(),
+                    message,
                     parsed["offers_messenger_draft"] and allow_messenger_draft_offer,
                 )
         except (TypeError, ValueError):

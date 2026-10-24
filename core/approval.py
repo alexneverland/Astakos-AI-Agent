@@ -321,7 +321,11 @@ def save_pending(
     delivery_target_channel: str | None = None,
     continuation_context: dict | None = None,
 ):
-    """Saves CRITICAL tool call for later."""
+    """Saves CRITICAL tool call for later, binding Messenger to its draft."""
+    if tool_name == "execute_local_pipeline" and not (tool_args.get("target_name") or tool_args.get("message")):
+        from core.messenger_draft import load_draft
+        draft = load_draft() or {}
+        tool_args = {**tool_args, "expected_draft_revision": tool_args.get("expected_draft_revision") or draft.get("revision") or "missing"}
     with _pending_lock():
         pending = _load_pending_raw()
         _expire_stale_pending_unlocked(pending)
@@ -499,19 +503,26 @@ def execute_approved_pending(tool_call_id: str, tools: list, *, retain_reminder_
         }
 
     invoke_args = dict(tool_args)
+    if (tool_name == "execute_local_pipeline" and not (tool_args.get("target_name") or tool_args.get("message"))
+            and not tool_args.get("expected_draft_revision")):
+        return {"ok": False, "status": "draft_unbound", "tool": tool_name,
+                "error": "Request a new approval bound to the current draft."}
     if tool_name == "run_terminal_command":
         invoke_args["already_approved"] = True
 
     retain = (retain_reminder_outcome and tool_name == "set_local_reminder"
               and item.get("channel") == "matrix")
-    if retain:
+    claim_execution = retain or tool_name == "execute_local_pipeline"
+    if claim_execution:
         with _pending_lock():
             pending = _load_pending_raw()
             _expire_stale_pending_unlocked(pending)
             current = pending.get(tool_call_id)
             if not current or current.get("status") != "pending" or current != item:
                 return {"ok": False, "status": "not_pending", "tool": tool_name}
-            current.update(status="executing", retain_reminder_outcome=True)
+            current.update(status="executing")
+            if retain:
+                current["retain_reminder_outcome"] = True
             _save_pending_unlocked(pending)
 
     try:

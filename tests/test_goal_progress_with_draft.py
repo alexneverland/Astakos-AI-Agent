@@ -29,6 +29,9 @@ def bindings(monkeypatch: pytest.MonkeyPatch, role: str, mode: str) -> dict[str,
     monkeypatch.setattr(agents, "llm", Model())
     monkeypatch.setattr(agents, "build_prompt", lambda *a, **k: "offline")
     monkeypatch.setattr(agents, "_has_active_messenger_draft", lambda: mode == "edit")
+    # These are binding-only node calls, without a graph-entry guard. Do not
+    # let the new lifecycle boundary inspect the owner's real shared draft.
+    monkeypatch.setattr("core.messenger_draft.active_draft_status", lambda: (False, "missing", None))
     monkeypatch.setattr(intent, "is_create_draft_intent", lambda *a: mode == "create")
     monkeypatch.setattr(intent, "has_accepted_routine_draft_offer", lambda *a, **k: mode == "accepted")
     monkeypatch.setattr(intent, "is_contextually_grounded_active_draft_edit", lambda *a: mode == "edit")
