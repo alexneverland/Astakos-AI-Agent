@@ -215,3 +215,38 @@ def test_native_retirement_rechecks_revision_under_lock(lifecycle: dict[str, Any
     newer = lifecycle["save"]("Sofia", "Newer draft")
     assert not clear_draft(write_guard=guard)
     assert load_draft() == newer
+
+
+@pytest.mark.parametrize("action", ["send", "retire"])
+def test_matrix_no_action_feedback_reaches_native_outcome(lifecycle, monkeypatch, action):
+    """Real Matrix service plus real graph preserves lifecycle after feedback."""
+    from services.matrix_turn import MatrixTurnService
+    from services.routine_context_clarification import QuestionAnswer
+    from langchain_core.messages import SystemMessage
+    from core.messenger_draft import load_draft
+    env = lifecycle
+    env["save"]("Sofia", "The actual persisted draft")
+    monkeypatch.setattr("services.routine_context_clarification.try_context_question_reply", lambda *a, **k: QuestionAnswer())
+    monkeypatch.setattr("core.messaging_channel.resolve_external_channel", lambda: "telegram")
+    notifications = []
+    monkeypatch.setattr(env["approval"], "_notify_selected_approval", lambda *a: notifications.append(a) or "telegram")
+    class Model:
+        def bind_tools(self, *a, **k):
+            return self
+        def invoke(self, rows):
+            if "MESSENGER_LIFECYCLE_DECISION" in str(rows[0].content):
+                return AIMessage(content='{"action":"' + action + '"}')
+            if "MESSENGER_PREPARATION_DECISION" in str(rows[0].content):
+                return AIMessage(content='{"prepare":false}')
+            return AIMessage(content="Εντάξει, φίλε")
+    monkeypatch.setattr(env["agents"], "llm", Model())
+    service = MatrixTurnService(graph=env["graph"].build_graph(),
+        conversation_db_path=env["config"].CONVERSATION_DB_FILE,
+        persisted_routine_confirmation_handler=lambda *a, **k: SystemMessage(content="[ROUTINE_FEEDBACK_NO_ACTION]"))
+    text = "Προχώρησε την αποστολή του προσχεδίου" if action == "send" else "Το προσχέδιο δεν χρειάζεται πια, μιλήσαμε ήδη"
+    service._run_sync(text, "$matrix-" + action)
+    if action == "send":
+        assert notifications and env["approval"].list_pending()
+    else:
+        assert not load_draft()
+        assert not notifications

@@ -583,25 +583,27 @@ def messenger_send_result_succeeded(result: object) -> bool:
 
 
 @tool
-def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
+def execute_local_pipeline(target_name: str = "", message: str = "", expected_draft_revision: str = "") -> str:
     """Sends a message on Facebook Messenger by reading the saved draft.
-    CALL IT ONLY after {config.USER_NAME} confirms with 'yes/send'. WITHOUT ANY ARGUMENTS."""
+    Call only after owner confirmation; leave recipient and message empty.
+    The approval backend binds expected_draft_revision to the observed draft.
+    """
     import time
-    import json
     import os
-    from core.messenger_draft import active_draft_status, inactive_draft_message
-    from config import MESSENGER_DRAFT_FILE
     from playwright.sync_api import sync_playwright
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    draft_file = MESSENGER_DRAFT_FILE
 
     # 1. [MASTRO INTERCEPTOR]: Read the draft
     image_path = ""
+    claimed_revision = ""
     if not target_name or not message:
-        is_active, reason, draft = active_draft_status()
-        if not is_active:
-            return inactive_draft_message(reason)
+        from core.messenger_draft import claim_draft_send
+        try:
+            draft = claim_draft_send(expected_draft_revision)
+        except ValueError as exc:
+            return str(exc)
+        claimed_revision = draft["revision"]
         target_name = target_name or draft.get("target_name", "")
         message = message or draft.get("message", "")
         image_path = draft.get("image_path", "")
@@ -685,11 +687,9 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
             browser.close()
         except:
             pass
-        if _sent_ok and os.path.exists(draft_file):
-            try:
-                os.remove(draft_file)
-            except OSError as _de:
-                print(f"⚠️ [execute_local_pipeline]: draft delete failed: {_de}")
+        if claimed_revision:
+            from core.messenger_draft import finish_draft_send
+            finish_draft_send(claimed_revision, succeeded=_sent_ok)
 
     # ── AUTO-CONFIRM pending routines ──────────────────────────────
     # If there is a TRIGGER_PENDING routine (e.g. "morning message Sophia"),_

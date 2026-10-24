@@ -94,6 +94,17 @@ after expiry. Retirement checks the observed owner turn and draft revision under
 the writer lock, preserves the remaining conversation, and supplies no routine
 completion or skip evidence.
 
+Approval records bind saved-draft sends to the observed revision. A replacement
+requires a new approval; legacy unbound pending sends cannot adopt a current
+draft. Dispatch claims that revision durably before transport work, so concurrent
+approvals cannot send it twice. Successful delivery leaves a `sent` record; an
+interrupted/failed transport leaves `sending` or `uncertain` and is never retried
+automatically. The transport cannot prove exactly-once remote delivery after a
+crash. Owner preparation can replace the claim; completion never deletes that
+replacement. Guarded retirement serializes its owner-version check and file
+replacement with SQLite history writers. Channel clear shortcuts use that same
+guard. Matrix places trusted feedback receipts before the current owner turn.
+
 ## Read the routine status correctly
 
 | Debug field | Meaning |

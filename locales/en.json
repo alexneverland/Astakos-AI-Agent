@@ -1845,6 +1845,7 @@
     },
     "messenger_draft": {
       "draft_expired": "❌ Error: Draft expired.",
+      "lifecycle_unavailable": "I could not verify the conversation state. Draft handling is unavailable; please retry.",
       "preparation_failed": "No new draft was saved. Please retry preparation with a clear recipient.",
       "request_superseded": "The draft or conversation changed in the meantime. Check the current draft before continuing."
     },

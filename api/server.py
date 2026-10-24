@@ -1521,10 +1521,12 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
     # ── Messenger Draft Intent Guard (Web UI parity with Telegram) ─────────────
     try:
-        from core.messenger_draft import active_draft_status, clear_draft
+        from core.messenger_draft import active_draft_status, clear_draft, capture_draft_write_guard
         from services.messenger_intent import classify_messenger_intent
         from memory.execution_trace import ExecutionTrace
 
+        draft_guard = capture_draft_write_guard([HumanMessage(content=user_input,
+            additional_kwargs={"astakos_owner_rowid": current_history_saved["rowid"]})])
         draft_active, _, draft_data = active_draft_status()
         draft_intent = (
             classify_messenger_intent(user_input, has_active_draft=draft_active)
@@ -1533,7 +1535,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         )
 
         if draft_intent and draft_intent.intent == "clear_draft":
-            cleared = bool(clear_draft())
+            cleared = bool(clear_draft(write_guard=draft_guard))
             reply = (
                 t("server.draft_cleared")
                 if cleared

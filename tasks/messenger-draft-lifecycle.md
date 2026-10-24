@@ -55,3 +55,45 @@ not live model interpretation quality or real Messenger delivery.
 - The final channel/plan group also uses the disposable offline socket guard
   (non-loopback connections fail loudly) and Telegram as its test-process
   default, while channel-specific fixtures override that setting as needed.
+
+## PR 261 review repair
+
+Reviewed head 50874763a18908bac2d2783c713dc8ec2580f99e. The Codex finding
+4366625384 is confirmed: Matrix appended a dated no-action SystemMessage after
+the owner. The Matrix turn service now keeps the owner last; real service/graph
+tests cover both retirement persistence and send approval after feedback.
+
+All eight Sourcery findings were evaluated against the same head:
+
+- 4366626993: approval now binds the observed revision, including channel
+  shortcuts; native dispatch rejects replacements and legacy unbound approvals.
+- 4366626997: pending execution is claimed atomically and native draft dispatch
+  persists `sending` before transport; completed/uncertain claims cannot replay.
+  This prevents automatic duplicates, without claiming exactly-once delivery
+  across a remote Messenger acceptance and a process crash.
+- 4366626998: the native history abstraction uses a short BEGIN IMMEDIATE
+  transaction across the version check and file replacement; appenders serialize
+  with that operation. No schema change or live migration is involved.
+- 4366627000: send completion conditionally records sent/uncertain only for the
+  claimed revision; it does not remove a replacement saved during transport.
+- 4366627003: Web and Matrix clear shortcuts capture/pass the same conditional
+  history/revision guard, rather than invoking an unconditional clear.
+- 4366627007: non-draft tool calls no longer satisfy required preparation;
+  the bounded retry preserves their calls beside the actual draft write.
+- 4366627008: mixed tool outcomes retain native saved-draft and sibling receipts.
+- 4366627011: history guard failures with pending draft work return an explicit
+  unavailable outcome instead of falling through to prose-only processing.
+
+Review regressions exercise real native storage/approval and the real send tool
+with Playwright mocked at the transport boundary. The initial mixed receipt,
+non-draft call, invalid guard and send-claim cases failed before their repairs.
+No test sent a real message or called a cloud model.
+
+Final review verification: 479 distinct related offline cases passed in focused
+groups (217 core/channel/approval cases, 117 real scheduler worker cases, 66
+legacy Telegram cases and 79 additional intent/goal/approval cases). The core
+group's 215-case run was supplemented by two additional review safety cases;
+the 14 review regressions passed together afterward. The binding-only goal
+tests now stub the native draft-state read as well as the old active-state
+helper, avoiding an unintended read of the owner's actual draft when invoking
+agent nodes outside graph entry. Syntax, locale JSON and diff checks passed.

@@ -2737,12 +2737,13 @@ def handle_message(
             
             call_id = f"call_{uuid.uuid4().hex[:12]}"
             
-            save_pending("execute_local_pipeline", {}, call_id, channel="telegram")
+            send_args = {"expected_draft_revision": draft_data.get("revision") or "missing"}
+            save_pending("execute_local_pipeline", send_args, call_id, channel="telegram")
             
             tool_call_fake = {
                 "name": "execute_local_pipeline",
                 "id": call_id,
-                "args": {}
+                "args": send_args
             }
             _notify_telegram(tool_call_fake)
             
