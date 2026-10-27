@@ -228,3 +228,13 @@ def test_unbound_legacy_approval_cannot_adopt_current_draft(tmp_path, monkeypatc
         def invoke(self, args):
             pytest.fail("Unbound send reached transport")
     assert approval.execute_approved_pending("legacy", [Tool()])["status"] == "draft_unbound"
+
+def test_preparation_never_batches_old_send_with_new_write():
+    """Even a provider supplying both tools must finish local preparation first."""
+    from services.messenger_lifecycle import require_draft_tool_result
+    response = AIMessage(content='', tool_calls=[
+        {'name':'execute_local_pipeline','id':'old-send','args':{}},
+        {'name':'relay_local_payload','id':'new-write','args':{}},
+    ])
+    result = require_draft_tool_result(response, 'response_grounded_preparation', [], None)
+    assert [call['name'] for call in result.tool_calls] == ['relay_local_payload']

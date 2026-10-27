@@ -250,3 +250,58 @@ def test_matrix_no_action_feedback_reaches_native_outcome(lifecycle, monkeypatch
     else:
         assert not load_draft()
         assert not notifications
+
+@pytest.mark.parametrize("agent", ["Chat_Agent", "Web_Agent"])
+@pytest.mark.parametrize("text", [
+    "ΦΤΙΑΞΕ ΕΝΑ ΟΜΟΡΦΟ ΦΙΛΕ ΑΦΟΥ ΗΜΑΣΤΕ ΔΟΥΛΕΙΑ ΚΑΙ ΟΙ ΔΥΟ ΠΩΣ ΘΑ ΗΜΑΣΤΕ ΜΑΖΙ?",
+    "Το μήνυμα που μου έγραψες κάντο προσχέδιο και στείλε",
+])
+def test_mixed_preparation_recovers_initial_false_negative(lifecycle, monkeypatch, agent, text):
+    """A missed preparation is recovered before prose or a stale send can terminate it."""
+    import json
+    from core.messenger_draft import load_draft
+    env = lifecycle
+    old = env["save"]("Sofia", "Yesterday")
+    old["status"] = "sent"
+    Path(env["config"].MESSENGER_DRAFT_FILE).write_text(json.dumps(old), encoding="utf-8")
+    monkeypatch.setattr(env["graph"], "supervisor_node", lambda state: {"next_agent": agent})
+    class Model:
+        forced = False
+        def bind_tools(self, tools, **kwargs):
+            self.forced = kwargs.get("tool_choice") == "relay_local_payload"
+            return self
+        def invoke(self, rows):
+            if "MESSENGER_PREPARATION_DECISION" in str(rows[0].content):
+                return AIMessage(content=json.dumps({"prepare": "candidate_reply" in str(rows[-1].content)}))
+            if self.forced:
+                return AIMessage(content="", tool_calls=[{"name":"relay_local_payload", "id":"saved",
+                    "args":{"target_entity":"Σοφία", "payload_data":"Καλημέρα αγάπη μου!"}}])
+            if "προσχέδιο και στείλε" in text:
+                return AIMessage(content="", tool_calls=[{"name":"execute_local_pipeline", "args":{}, "id":"stale-send"}])
+            return AIMessage(content="Ορίστε το μήνυμα: Καλημέρα αγάπη μου!")
+    monkeypatch.setattr(env["agents"], "llm", Model())
+    monkeypatch.setattr(env["approval"], "_notify_selected_approval", lambda *a: pytest.fail("No send before review"))
+    result = env["graph"].build_graph().invoke({"channel":"web", "messages":owner_messages(env, text)})
+    assert load_draft()["message"] == "Καλημέρα αγάπη μου!"
+    assert load_draft()["status"] == "pending"
+    assert load_draft()["revision"] != old["revision"]
+    assert "Καλημέρα αγάπη μου!" in result["messages"][-1].content
+    assert not env["approval"].list_pending()
+
+@pytest.mark.parametrize("text", ["Στείλε", "Μην το κάνεις προσχέδιο, μιλήσαμε ήδη", "Πώς αποθηκεύονται τα προσχέδια;"])
+def test_unsolicited_candidate_cannot_authorize_preparation(lifecycle, monkeypatch, text):
+    """A composed assistant reply cannot supply missing owner permission."""
+    from core.messenger_draft import load_draft
+    env = lifecycle
+    class Model:
+        def bind_tools(self, tools, **kwargs):
+            assert not kwargs.get('tool_choice')
+            return self
+        def invoke(self, rows):
+            if 'MESSENGER_PREPARATION_DECISION' in str(rows[0].content):
+                return AIMessage(content='{"prepare":false}')
+            return AIMessage(content="Ορίστε ένα μήνυμα που θα μπορούσαμε να αποθηκεύσουμε")
+    monkeypatch.setattr(env['agents'], 'llm', Model())
+    env['graph'].build_graph().invoke({'channel':'web','messages':owner_messages(env,text)})
+    assert load_draft() is None
+    assert not env['approval'].list_pending()

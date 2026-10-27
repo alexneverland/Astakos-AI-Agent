@@ -37,6 +37,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Recover missed Messenger preparation in mixed conversational requests through
+  a bounded semantic recheck and native draft-write receipt. Preparation cannot
+  batch an old draft send; subsequent sends retain revision-bound approval.
+- Separate historical pre-question context inference from current-message
+  extraction and record its bounded uncertainty/validation outcomes without
+  extending presence expiry or inventing work-location evidence.
+
 - Messenger draft preparation now requires a native write result before showing
   a saved message, and conversational send requests reach the existing external
   approval path. Tool-free routine notifications offer preparation rather than

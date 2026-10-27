@@ -169,7 +169,9 @@ def is_create_draft_intent(text: str) -> bool:
     return classify_messenger_intent(text).intent == "create_draft"
 
 
-def resolve_contextual_draft_request(messages: list, invoke: Callable[[list], Any]) -> bool:
+def resolve_contextual_draft_request(
+    messages: list, invoke: Callable[[list], Any], *, candidate_reply: str | None = None,
+) -> bool:
     """Resolve local preparation intent from bounded dialogue, never tool text."""
     from langchain_core.messages import HumanMessage, SystemMessage
     from core.untrusted_content import (
@@ -189,9 +191,12 @@ def resolve_contextual_draft_request(messages: list, invoke: Callable[[list], An
     try:
         prompt = (Path(__file__).resolve().parents[1] / "prompts" /
                   "messenger_preparation_decision.md").read_text(encoding="utf-8")
+        reference: Any = dialogue
+        if candidate_reply is not None:
+            reference = {"dialogue": dialogue, "candidate_reply": candidate_reply[:2400]}
         response = invoke([SystemMessage(content=prompt), HumanMessage(content=
             format_untrusted_tool_result("owner dialogue for local draft intent",
-                json.dumps(dialogue, ensure_ascii=False)))])
+                json.dumps(reference, ensure_ascii=False)))])
         result = extract_json_from_text(str(response.content))
         return isinstance(result, dict) and set(result) == {"prepare"} and result["prepare"] is True
     except Exception:

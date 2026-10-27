@@ -7,7 +7,7 @@
 
 from copy import copy
 from services.messenger_intent import resolve_contextual_draft_request
-from services.messenger_lifecycle import messenger_lifecycle_boundary, require_draft_tool_result
+from services.messenger_lifecycle import messenger_lifecycle_boundary, require_draft_tool_result, recover_preparation_reason
 from core.i18n import t
 import json
 import os
@@ -722,6 +722,7 @@ def chat_agent_node(state: AgentState):
 
     invoke_started = perf_counter()
     response = bound_llm.invoke(final_messages)
+    draft_tool_reason = recover_preparation_reason(history, response, draft_tool_reason, llm.invoke)
     response = require_draft_tool_result(response, draft_tool_reason, final_messages, llm)
     invoke_ms = int((perf_counter() - invoke_started) * 1000)
 
@@ -1286,6 +1287,7 @@ def web_agent_node(state: AgentState):
     else:
         result = llm.bind_tools(web_tools).invoke(final_messages)
 
+    draft_tool_reason = recover_preparation_reason(history, result, draft_tool_reason, llm.invoke)
     result = require_draft_tool_result(result, draft_tool_reason, final_messages, llm)
     result = _trim_web_research_tool_calls(result, history)
 

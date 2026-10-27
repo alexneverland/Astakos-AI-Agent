@@ -58,11 +58,38 @@ def messenger_lifecycle_boundary(state: AgentState, history: list[Any], agent: s
     return history, {"current_agent": agent, "messages": [AIMessage(content=t("core.messenger_draft.request_superseded"))]}
 
 
+def recover_preparation_reason(
+    history: list[Any], response: AIMessage, reason: str | None,
+    invoke: Callable[[list], Any],
+) -> str | None:
+    """Recheck a missed mixed request against the candidate, never its claims alone."""
+    from services.messenger_intent import classify_messenger_intent, resolve_contextual_draft_request
+    from core.untrusted_content import is_direct_user_message
+    if reason or not history or not is_direct_user_message(history[-1]):
+        return reason
+    # Exact lifecycle commands cannot authorize creating a replacement draft.
+    if classify_messenger_intent(str(history[-1].content)).intent != "general_chat":
+        return reason
+    if resolve_contextual_draft_request(
+        history, invoke, candidate_reply=str(response.content or ""),
+    ):
+        return "response_grounded_preparation"
+    return reason
+
+
 def require_draft_tool_result(response: AIMessage, reason: str | None, messages: list[Any], model: Any) -> AIMessage:
     """Retry prose-only authorized preparation once with the native tool required."""
     calls = getattr(response, "tool_calls", None) or []
-    if not reason or any(call.get("name") == "relay_local_payload" for call in calls):
+    if not reason:
         return response
+    # Preparation precedes any send. A recovered request cannot execute an old
+    # draft beside its new write, or bypass the later revision-bound approval.
+    prepared_calls = [call for call in calls if call.get("name") != "execute_local_pipeline"]
+    if any(call.get("name") == "relay_local_payload" for call in prepared_calls):
+        if prepared_calls == calls:
+            return response
+        return AIMessage(content=response.content, tool_calls=prepared_calls)
+    calls = prepared_calls
     from tools.web import relay_local_payload
     try:
         forced = model.bind_tools([relay_local_payload], tool_choice="relay_local_payload").invoke(messages)
