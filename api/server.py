@@ -1054,9 +1054,6 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         try_context_question_reply, user_input, "web", trusted_owner=True,
         external_derived=bool(photo_path),
     )
-    if context_answer.context_flags_processed and context_answer.continue_conversation:
-        from services.context_extractor import reconcile_context_message
-        enqueue_slow_task(reconcile_context_message, user_input)
     if context_answer.consumed and not context_answer.continue_conversation:
         reply = context_answer.reply
         user_saved = append_to_chat_history(
@@ -1088,6 +1085,11 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             or not current_history_id):
         logging.error("Web turn stopped: user history identity was not persisted")
         return JSONResponse({"error": t("api.server.internal_error")}, status_code=503)
+    if context_answer.context_flags_processed and context_answer.continue_conversation:
+        from config import CONVERSATION_DB_FILE
+        from services.context_extractor import reconcile_context_message
+        enqueue_slow_task(reconcile_context_message, user_input, current_history_rowid,
+                          CONVERSATION_DB_FILE)
 
     # 2. --- XML CONTEXT ISOLATION ---
     # Web/Telegram are trusted local user channels.

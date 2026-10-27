@@ -179,7 +179,8 @@ class MatrixBackgroundHooks:
             raise ValueError("Matrix background hooks require channel='matrix'")
 
         if context_reconciliation_pending:
-            self._enqueue_slow_task(reconcile_context_message, user_text)
+            self._enqueue_slow_task(reconcile_context_message, user_text, correlation_rowid,
+                                    self._conversation_db_path)
 
         self._enqueue_fast_task(
             log_exchange,

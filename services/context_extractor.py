@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from services.routine_reconciler import (
     infer_routine_reconciliation_directives,
     apply_routine_reconciliation_directives,
+    observed_shift_expiry,
 )
 
 _CONTEXT_BOOLEAN_FLAGS = {
@@ -309,7 +310,7 @@ def extract_and_update_context_flags(
                 # No live-state inference must not swallow durable routine requests.
                 if (current_source is not None and current_source["content"] == user_text
                         and get_latest_trusted_user_rowid(**history_options) == source_version):
-                    reconcile_context_message(user_text)
+                    reconcile_context_message(user_text, source_version, history_options["db_path"], current)
                 return None
             # Source IDs validate provenance, never the meaning of a state change.
             if payload.get("event_rowid") != source_version or not any(
@@ -455,7 +456,7 @@ def extract_and_update_context_flags(
             # consistency rules and the canonical writer above remain authoritative.
             return ContextExtractionResult("related", frozenset(applied_flags), continue_conversation)
 
-        reconcile_context_message(user_text)
+        reconcile_context_message(user_text, source_version, history_options["db_path"], current)
 
     except Exception as exc:
         if daily_resolution_flags is not None:
@@ -464,18 +465,75 @@ def extract_and_update_context_flags(
         return empty_result
 
 
-def reconcile_context_message(user_text: str) -> None:
+def reconcile_context_message(
+    user_text: str, source_rowid: int | None = None,
+    conversation_db_path: str | None = None, now: datetime | None = None,
+) -> None:
     """Apply durable routine updates without reinterpreting guarded live flags."""
     try:
+        from memory.conversation_history import guard_owner_history_version
+        from memory.event_log import log_event
+
+        current = now or datetime.now(ZoneInfo("Europe/Athens"))
+        options = {"db_path": conversation_db_path or config.CONVERSATION_DB_FILE}
+        marker = get_latest_trusted_user_rowid(**options)
+        rows = load_daily_state_messages(now=current, **options)
+        identity = source_rowid if source_rowid is not None else marker
+        source = next((row for row in rows if row["rowid"] == identity), None)
+        if source is None or source["content"] != user_text:
+            return
+        expected_shift = get_context_state("current_shift")
+        reference = {"source_rowid": identity, "source_at": source["timestamp"],
+                     "source_text": user_text,
+                     "later_owner_reports": [{"rowid": row["rowid"], "at": row["timestamp"],
+                                               "text": row["content"]}
+                                              for row in rows if row["rowid"] > identity]}
         inferred = infer_routine_reconciliation_directives(
-            user_text, category="family", reason="live_message_context", now=datetime.now(),
+            user_text, category="family", reason="live_message_context", now=current,
+            shift_reference=reference,
         )
+        if get_latest_trusted_user_rowid(**options) != marker:
+            return
         live_keys = _CONTEXT_BOOLEAN_FLAGS | {"kid1_absence_scope", "state:kid1:outing"}
         directives = [item for item in inferred if not (
             item.get("kind") == "context_state_set" and item.get("key") in live_keys)]
+        if identity != marker:
+            # Only the semantic shift decision has considered later reports.
+            # Do not apply historical lexical routine changes from this turn.
+            directives = [item for item in directives if item.get("kind") == "context_state_set"
+                          and item.get("key") == "current_shift"]
+        shifts = [item for item in directives if item.get("kind") == "context_state_set"
+                  and item.get("key") == "current_shift"]
+        if shifts:
+            # The semantic date/value contract is validated by the reconciler.
+            # Its live caller adds the same history/state concurrency guards as
+            # ordinary context extraction instead of using an unguarded writer.
+            if len(shifts) != 1:
+                return
+            shift = shifts[0]
+            recorded_at = datetime.fromisoformat(source["timestamp"])
+            if recorded_at.tzinfo is None:
+                recorded_at = recorded_at.replace(tzinfo=current.tzinfo)
+            from services.routine_context_evidence import _recorded_time
+            previous_at = _recorded_time((expected_shift or {}).get("updated_at"), current)
+            if expected_shift and (previous_at is None or previous_at > recorded_at):
+                return
+            value = "" if shift.get("context_operation") == "clear" else shift["value"]
+            expiry = observed_shift_expiry(value, shift.get("until_date"), expected_shift,
+                revision=shift.get("context_operation") == "clear" or shift.get("schedule_revision") is True)
+            with guard_owner_history_version(marker, **options) as valid:
+                saved = valid and set_context_states_if_unchanged(
+                    {"current_shift": (value, expiry)},
+                    {"current_shift": expected_shift}, recorded_at=recorded_at)
+            log_event("routines", "live_shift_reconciliation",
+                      outcome="applied" if saved else "state_changed",
+                      debug_type="reconciler_applied", debug_source="context_extractor")
+            directives = [item for item in directives if item not in shifts]
         if directives:
-            apply_routine_reconciliation_directives(directives)
-            print(f"[ContextExtractor] Applied {len(directives)} reconciler directive(s) from live message")
+            with guard_owner_history_version(marker, **options) as valid:
+                if valid:
+                    apply_routine_reconciliation_directives(directives)
+                    print(f"[ContextExtractor] Applied {len(directives)} reconciler directive(s) from live message")
     except Exception as exc:
         print(f"[ContextReconciler Error]: {type(exc).__name__}")
 
@@ -599,7 +657,10 @@ def _persist_context_payload(
         updates["kid1_away_reason"] = ("", today)
     for key in _CONTEXT_ENUM_VALUES:
         if key in payload and key != "kid1_absence_scope":
-            updates[key] = (payload[key], today)
+            expiry = today
+            if key == "current_shift":
+                expiry = observed_shift_expiry(payload[key], today, expected.get(key))
+            updates[key] = (payload[key], expiry)
     if recorded_at is not None:
         from services.routine_context_evidence import _recorded_time
 

@@ -57,6 +57,9 @@ def assert_background_continues_once(tasks: list[tuple[Any, ...]]) -> None:
     assert names.count("_enqueue_slow_memory_sifter") == 1
     assert names.count("_enqueue_followup_pipeline") == 1
     assert names.count("reconcile_context_message") == 1
+    scheduled = next(task for task in tasks if task[0].__name__ == "reconcile_context_message")
+    assert type(scheduled[2]) is int and scheduled[2] > 0
+    assert isinstance(scheduled[3], str)
     assert "extract_and_update_context_flags" not in names
 
 

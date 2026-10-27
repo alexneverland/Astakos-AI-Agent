@@ -312,8 +312,16 @@ def test_context_extractor_user_home_alone_does_not_clear_child_absence(mocked_c
 
 def test_future_bedtime_does_not_apply_reconciler_quiet_hours(mocked_context_pipeline):
     """A future bedtime must not activate a live quiet-hours flag."""
+    import config
+    import json
+    from memory.conversation_history import append_message
+
     mock_llm, mock_set, mock_apply = mocked_context_pipeline
-    mock_llm.return_value = MagicMock(text="{}")
+    message = "Είμαστε σπίτι και σε λίγο θα πάμε για ύπνο με τον Αλέξανδρο."
+    append_message(role="user", channel="telegram", content=message,
+                   db_path=config.CONVERSATION_DB_FILE)
+    mock_llm.return_value = MagicMock(text=json.dumps(
+        {"flags": {}, "event_rowid": None, "support_rowids": []}))
     with patch(
         "services.context_extractor.infer_routine_reconciliation_directives",
         return_value=[{
@@ -323,9 +331,7 @@ def test_future_bedtime_does_not_apply_reconciler_quiet_hours(mocked_context_pip
             "until_date": "2026-09-23",
         }],
     ) as mock_infer:
-        extract_and_update_context_flags(
-            "Είμαστε σπίτι και σε λίγο θα πάμε για ύπνο με τον Αλέξανδρο."
-        )
+        extract_and_update_context_flags(message)
 
     mock_infer.assert_called_once()
     assert "quiet_hours" not in _state_calls(mock_set)

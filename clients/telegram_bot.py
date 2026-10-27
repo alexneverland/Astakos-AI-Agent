@@ -2115,9 +2115,6 @@ def handle_message(
         and str(chat_id) == str(config.TELEGRAM_CHAT_ID),
         **({"reply_to_id": reply_event_id} if reply_event_id is not None else {}),
     )
-    if context_answer.context_flags_processed and context_answer.continue_conversation:
-        from services.context_extractor import reconcile_context_message
-        enqueue_slow_task(reconcile_context_message, clean_user_text)
     if context_answer.consumed and not context_answer.continue_conversation:
         reply = context_answer.reply
         _append_to_analytics_log("user", clean_user_text,
@@ -2133,6 +2130,10 @@ def handle_message(
         print("[ConversationHistory/telegram]: turn stopped; user identity not persisted")
         send_telegram_msg(t("api.server.internal_error"))
         return
+    if context_answer.context_flags_processed and context_answer.continue_conversation:
+        from services.context_extractor import reconcile_context_message
+        enqueue_slow_task(reconcile_context_message, clean_user_text, user_rowid,
+                          config.CONVERSATION_DB_FILE)
     # ── ROUTINE COMPLETION DECISION ────────────────────────────────
     # Pending routines get first priority; a pass-through still checks today's pool.
     from memory.event_log import log_event

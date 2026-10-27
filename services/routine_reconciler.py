@@ -1513,18 +1513,31 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
 
     return directives
 
+def observed_shift_expiry(
+    value: str, until_date: str | None, previous: dict | None, *, revision: bool = False,
+) -> str | None:
+    """Retain a same-value observation's scope unless semantically revised."""
+    if not revision and previous and previous.get("value") == value:
+        existing = previous.get("expires_at")
+        if existing is None or (isinstance(existing, str) and until_date is not None
+                                and existing > until_date):
+            return existing
+    return until_date
+
+
 def _infer_llm_reconciliation_candidates(
     fact: str,
     *,
     category: str,
     reason: str,
     now: datetime,
+    shift_reference: dict | None = None,
 ) -> list[dict]:
     """
     LLM-first extraction layer.
     Returns candidate directives in the same schema as rule-based candidates.
     """
-    if reason not in {"user_stated", "agent_inferred"}:
+    if reason not in {"user_stated", "agent_inferred", "live_message_context"}:
         return []
 
     try:
@@ -1572,16 +1585,42 @@ def _infer_llm_reconciliation_candidates(
         fact=fact
     )
 
+    if reason == "live_message_context":
+        prompt += ("\nFor this live-message pass, return only an explicit owner work-shift "
+                   "schedule or cancellation (context_key=current_shift). Other live "
+                   "presence flags have a separate source-validated writer. A current "
+                   "shift report is valid even when the owner is now at home after work. "
+                   "Do not infer a schedule from the assistant's acknowledgement.\n")
+        prompt += ("For current_shift include schedule_revision (boolean): true only "
+                   "for an explicit replacement, restriction or correction of the "
+                   "schedule's scope; a repeated observation is false.\n")
+        if shift_reference is not None:
+            from core.untrusted_content import format_untrusted_tool_result
+            prompt += ("Interpret only the identified source report below. Later owner "
+                       "reports are references: if they supersede its shift, omit that "
+                       "shift rather than reinstating the old report. Use the source "
+                       "timestamp for its relative dates.\n")
+            prompt += format_untrusted_tool_result("queued shift reference", json.dumps(shift_reference, ensure_ascii=False))
+
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])
         raw = getattr(resp, "content", "") or ""
-    except Exception:
+    except Exception as exc:
+        if reason == "live_message_context":
+            from memory.event_log import log_event
+            log_event("routines", "live_shift_inference_failed", error_type=type(exc).__name__,
+                      debug_type="reconciler_error", debug_source="context_extractor")
         return []
 
     impacts = _safe_json_list(raw)
     out: list[dict] = []
     for impact in impacts:
         for directive in _llm_impact_to_directives(impact):
+            if reason == "live_message_context" and not (
+                directive.get("kind") == "context_state_set"
+                and directive.get("key") == "current_shift"
+            ):
+                continue
             if directive.get("key") == "current_shift":
                 value = directive.get("value")
                 operation = impact.get("context_operation", "set")
@@ -1602,6 +1641,11 @@ def _infer_llm_reconciliation_candidates(
                         continue
                 if clearing:
                     directive["context_operation"] = "clear"
+                if reason == "live_message_context":
+                    revision = impact.get("schedule_revision", False)
+                    if type(revision) is not bool:
+                        continue
+                    directive["schedule_revision"] = revision
             out.append(directive)
     return out
 
@@ -1647,6 +1691,7 @@ def infer_routine_reconciliation_candidates(
     category: str,
     reason: str,
     now: datetime | None = None,
+    shift_reference: dict | None = None,
 ) -> list[dict]:
     """
     Runs all rule groups and returns raw candidate directives,
@@ -1675,6 +1720,7 @@ def infer_routine_reconciliation_candidates(
         category=category,
         reason=reason,
         now=current,
+        **({"shift_reference": shift_reference} if shift_reference is not None else {}),
     )
 
     filtered_llm = []
@@ -1718,6 +1764,11 @@ def infer_routine_reconciliation_candidates(
     for d in llm_candidates:
         d.setdefault("rule_name", "llm_extracted")
 
+    if reason == "live_message_context":
+        # A live shift needs a semantic decision, never a phrase-rule fallback.
+        rule_candidates = [item for item in rule_candidates if not (
+            item.get("kind") == "context_state_set" and item.get("key") == "current_shift")]
+
     # Live outings belong to source-timed semantic context extraction. Memory
     # summaries cannot activate them or install persistent suppression rules.
     return [item for item in _merge_candidate_lists(llm_candidates, rule_candidates)
@@ -1732,6 +1783,7 @@ def infer_routine_reconciliation_directives(
     category: str,
     reason: str,
     now: datetime | None = None,
+    shift_reference: dict | None = None,
 ) -> list[dict]:
     """
     Backward-compatible wrapper: returns only auto_apply directives (scored >= threshold).
@@ -1741,6 +1793,7 @@ def infer_routine_reconciliation_directives(
     normalized_fact = _normalize(fact)
     candidates = infer_routine_reconciliation_candidates(
         fact, category=category, reason=reason, now=current,
+        **({"shift_reference": shift_reference} if shift_reference is not None else {}),
     )
     scored = [
         score_candidate_directive(
