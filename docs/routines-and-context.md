@@ -87,7 +87,20 @@ Messenger routine notifications offer local preparation without presenting a
 supposedly saved message. Chat/Web preparation must produce a native draft-write
 receipt: a prose-only model answer gets one required-tool retry, then an explicit
 failure if no write is requested. Successful writes display the saved tool result
-without another synthesis call. Send requests for a stored draft enter the normal
+without another synthesis call. For a missed mixed request, one bounded semantic
+decision uses the candidate reply as untrusted reference and the owner turn as
+the permission source. It replaces the earlier pre-generation semantic check,
+so ordinary conversation does not pay for both checks. Pending-draft sends first
+defer to preparation when the owner also requests a new draft. Recovery retains
+the existing active-draft/contact boundary and excludes tool content from its
+owner dialogue; same-turn external-content action guards remain authoritative. Preparation finishes before sending: any send call batched
+with that write is removed, leaving the normal reviewed-draft approval path.
+Bare send, declined preparation and explanatory questions cannot authorize a new
+draft from an unsolicited candidate reply. The required-tool retry receives the candidate as
+untrusted text reference, including after a Web failure. Historical tool messages
+do not veto a new owner request, while an external result in the current turn
+can still block its write through the existing approval guard.
+Send requests for a stored draft enter the normal
 external approval path; expired drafts cannot be sent or recreated by that request.
 An owner can retire an unwanted draft through ordinary conversation, including
 after expiry. Retirement checks the observed owner turn and draft revision under
@@ -106,6 +119,14 @@ replacement with SQLite history writers. Channel clear shortcuts use that same
 guard. Matrix places trusted feedback receipts before the current owner turn.
 
 ## Read the routine status correctly
+
+Pre-question daily inference uses a dedicated historical-resolution prompt rather
+than replaying the latest report as a new message. Its structured event
+`daily_context_resolution` distinguishes applied duration/observation proofs,
+model uncertainty, rejected or superseded proposals, changed state, missing
+sources and invalid output. It records flag identifiers and channel, not message
+text or coordinates. Two-hour observation expiry and duration-proof validation
+remain in force; a morning work plan alone cannot prove later co-presence.
 
 | Debug field | Meaning |
 | --- | --- |

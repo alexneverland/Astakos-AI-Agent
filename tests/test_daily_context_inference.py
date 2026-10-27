@@ -1,6 +1,7 @@
 """Daily owner context uses real isolated stores and mocked provider boundaries."""
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from pathlib import Path
 import json
 
 import pytest
@@ -284,3 +285,73 @@ def test_invalid_resolution_cannot_write_flags(tmp_path, monkeypatch, payload):
         still_current=lambda:True, channel="matrix", conversation_db_path=path)
     assert db.get_context_state("partner_with_user") is None
     assert db.get_context_state("user_at_work") is None
+
+@pytest.mark.parametrize("known", [False, True])
+def test_prequestion_uses_dedicated_historical_prompt_and_records_decision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, known: bool,
+) -> None:
+    """Historical inference is neither a new report nor a silent failed refresh."""
+    from memory import conversation_history as history, routine_db as db, event_log
+    from services import context_extractor as extractor
+    from services.routine_duration_context import DURATION_KEY
+    path = str(tmp_path / "history.db")
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "routines.db"))
+    db.setup_db()
+    now = datetime(2026, 10, 27, 10, 45, tzinfo=ATHENS)
+    row = history.append_message(role="user", channel="matrix", timestamp=now.replace(hour=6, minute=20),
+        content="Είμαι στο δρόμο για την δουλειά και η σοφία δουλεύει σήμερα", db_path=path)
+    if known:
+        support = history.append_message(role="user", channel="web", timestamp=now.replace(hour=7),
+            content="Έφτασα στο δικό μου γραφείο, είμαστε χωριστά μέχρι τις δύο", db_path=path)
+    events = []
+    monkeypatch.setattr(event_log, "log_event", lambda *a, **k: events.append((a, k)))
+    def model(prompt: str) -> SimpleNamespace:
+        """Validate the historical reference before returning a bounded proof."""
+        assert 'User Message:' not in prompt
+        assert row['content'] in prompt
+        if not known:
+            return SimpleNamespace(text='{"flags":{},"event_rowid":null,"support_rowids":[]}')
+        return SimpleNamespace(text=json.dumps({"flags":{"partner_with_user":False},
+            "event_rowid":support['rowid'],"support_rowids":[row['rowid'],support['rowid']],
+            "duration_source_rowids":[support['rowid']],"valid_until":now.replace(hour=14,minute=0).isoformat()}))
+    monkeypatch.setattr(extractor, "safe_gemini_call", model)
+    monkeypatch.setattr("services.routine_duration_context.load_daily_schedule_reference", lambda _: [])
+    assert extractor.resolve_daily_context_before_question(("partner_with_user",), now=now,
+        still_current=lambda:True, channel="matrix", conversation_db_path=path) is known
+    assert bool(db.get_context_state(DURATION_KEY)) is known
+    assert db.get_context_state("partner_with_user") is None
+    assert events[-1][0] == ('routines','daily_context_resolution')
+    assert events[-1][1]['outcome'] == ('applied_duration' if known else 'model_unknown')
+
+@pytest.mark.parametrize('failure',['provider','second_history_read'])
+def test_review_daily_resolution_errors_are_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    """Failures swallowed inside extraction retain a diagnostic outcome."""
+    from memory import conversation_history as history, routine_db as db, event_log
+    from services import context_extractor as extractor
+    path = str(tmp_path / 'history.db')
+    monkeypatch.setattr(db,'DB_PATH',str(tmp_path/'routines.db'))
+    db.setup_db()
+    history.append_message(role='user',channel='web',timestamp=NOW,content='Current owner report',db_path=path)
+    events: list[dict] = []
+    monkeypatch.setattr(event_log,'log_event',lambda *a,**k:events.append(k))
+    monkeypatch.setattr('services.routine_duration_context.load_daily_schedule_reference',lambda _:[])
+    real_load = extractor.load_daily_state_messages
+    reads = 0
+    def load(**kwargs: object) -> list[dict]:
+        """Allow wrapper loading, then reproduce the guarded inner read failure."""
+        nonlocal reads
+        reads += 1
+        if failure == 'second_history_read' and reads == 2:
+            raise OSError('offline simulated read failure')
+        return real_load(**kwargs)
+    def model(prompt: str) -> SimpleNamespace:
+        """Reproduce an exhausted provider boundary without contacting it."""
+        raise RuntimeError('offline simulated provider failure')
+    monkeypatch.setattr(extractor,'load_daily_state_messages',load)
+    monkeypatch.setattr(extractor,'safe_gemini_call',model)
+    assert not extractor.resolve_daily_context_before_question(('partner_with_user',),now=NOW,
+        still_current=lambda:True,channel='matrix',conversation_db_path=path)
+    assert events[-1]['outcome'] == 'resolution_error'
+    assert db.get_context_state('partner_with_user') is None

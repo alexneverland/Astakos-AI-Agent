@@ -169,18 +169,42 @@ def is_create_draft_intent(text: str) -> bool:
     return classify_messenger_intent(text).intent == "create_draft"
 
 
-def resolve_contextual_draft_request(messages: list, invoke: Callable[[list], Any]) -> bool:
+def preparation_owner_history(messages: list[Any]) -> list[Any]:
+    """Keep the latest owner's turn while excluding subsequent tool authority."""
+    from core.untrusted_content import is_direct_user_message
+    for index in range(len(messages) - 1, -1, -1):
+        if is_direct_user_message(messages[index]):
+            tail = messages[index + 1:]
+            if any(getattr(row, "type", "") == "human" or (
+                getattr(row, "type", "") == "tool" and getattr(row, "name", "") in {
+                    "relay_local_payload", "execute_local_pipeline"}) for row in tail):
+                return []
+            return messages[:index + 1]
+    return []
+
+
+def contextual_preparation_eligible(messages: list[Any]) -> bool:
+    """Preserve the existing active-draft/contact boundary for semantic recovery."""
+    from core.messenger_draft import has_active_draft
+    from tools.web import has_known_messenger_contact_reference
+    owner = preparation_owner_history(messages)
+    return bool(owner) and (not has_active_draft()
+        or has_known_messenger_contact_reference(str(owner[-1].content)))
+
+
+def resolve_contextual_draft_request(
+    messages: list, invoke: Callable[[list], Any], *, candidate_reply: str | None = None,
+) -> bool:
     """Resolve local preparation intent from bounded dialogue, never tool text."""
     from langchain_core.messages import HumanMessage, SystemMessage
     from core.untrusted_content import (
         is_direct_user_message, external_content_source_names, format_untrusted_tool_result,
     )
     from core.utils import extract_json_from_text
-    if not messages or not is_direct_user_message(messages[-1]):
+    messages = preparation_owner_history(messages)
+    if not messages:
         return False
     if external_content_source_names(getattr(messages[-1], "additional_kwargs", {})):
-        return False
-    if any(getattr(row, "type", "") == "tool" for row in messages[-8:]):
         return False
     dialogue = [{"role": row.type, "content": str(row.content)[:1800]}
                 for row in messages[-8:] if row.type in {"human", "ai"}
@@ -189,9 +213,12 @@ def resolve_contextual_draft_request(messages: list, invoke: Callable[[list], An
     try:
         prompt = (Path(__file__).resolve().parents[1] / "prompts" /
                   "messenger_preparation_decision.md").read_text(encoding="utf-8")
+        reference: Any = dialogue
+        if candidate_reply is not None:
+            reference = {"dialogue": dialogue, "candidate_reply": candidate_reply[:2400]}
         response = invoke([SystemMessage(content=prompt), HumanMessage(content=
             format_untrusted_tool_result("owner dialogue for local draft intent",
-                json.dumps(dialogue, ensure_ascii=False)))])
+                json.dumps(reference, ensure_ascii=False)))])
         result = extract_json_from_text(str(response.content))
         return isinstance(result, dict) and set(result) == {"prepare"} and result["prepare"] is True
     except Exception:

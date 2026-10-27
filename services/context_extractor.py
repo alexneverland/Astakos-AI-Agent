@@ -2,7 +2,7 @@ import config
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 from services.gemini import safe_gemini_call
 from core.utils import clean_message, extract_json_from_text
 from core.untrusted_content import external_content_source_names, format_untrusted_tool_result
@@ -212,6 +212,7 @@ def extract_and_update_context_flags(
             daily_rows = load_daily_state_messages(now=current, **history_options)
         except (ValueError, OSError):
             if daily_resolution_flags is not None:
+                _record_daily_resolution("resolution_error", daily_resolution_flags, channel)
                 return None
             # A bounded view failure must not disable an explicit current report.
             # The missing day reference is never permission to infer an old plan.
@@ -222,15 +223,19 @@ def extract_and_update_context_flags(
             from services.routine_duration_context import DURATION_KEY, load_daily_schedule_reference
             expected[DURATION_KEY] = get_context_state(DURATION_KEY)
             schedule_reference = load_daily_schedule_reference(current)
-        prompt = _CONTEXT_EXTRACTION_PROMPT.format(
-            bot_name=config.BOT_NAME,
-            user_name=config.USER_NAME,
-            partner_name=config.PARTNER_NAME,
-            kid1_name=config.KID1_NAME,
-            user_text=user_text,
-            recent_user_context=_recent_user_context_hint(channel),
-            ai_text=ai_text,
-        )
+        if daily_resolution_flags is not None:
+            prompt = ("Resolve unknown routine context from the dated reference sources below.\n"
+                      f"Owner: {config.USER_NAME}; partner: {config.PARTNER_NAME}; child: {config.KID1_NAME}.\n")
+        else:
+            prompt = _CONTEXT_EXTRACTION_PROMPT.format(
+                bot_name=config.BOT_NAME,
+                user_name=config.USER_NAME,
+                partner_name=config.PARTNER_NAME,
+                kid1_name=config.KID1_NAME,
+                user_text=user_text,
+                recent_user_context=_recent_user_context_hint(channel),
+                ai_text=ai_text,
+            )
         prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
                             "daily_context_reference.md").read_text(encoding="utf-8")
         prompt += "\n" + format_untrusted_tool_result("daily owner context reference", json.dumps({
@@ -280,11 +285,14 @@ def extract_and_update_context_flags(
 
         payload = extract_json_from_text(cleaned)
         if payload is None:
+            if daily_resolution_flags is not None:
+                _record_daily_resolution("invalid_model_output", daily_resolution_flags, channel)
             return empty_result
         if daily_resolution_flags is not None:
             return _commit_daily_resolution(payload, daily_rows, expected,
                 allowed=set(daily_resolution_flags), now=current,
                 schedule_reference=schedule_reference,
+                channel=channel,
                 still_current=lambda: (get_latest_trusted_user_rowid(**history_options) == source_version
                     and (clarification_still_current is None or clarification_still_current())))
         source_event_at = None
@@ -450,6 +458,8 @@ def extract_and_update_context_flags(
         reconcile_context_message(user_text)
 
     except Exception as exc:
+        if daily_resolution_flags is not None:
+            _record_daily_resolution("resolution_error", daily_resolution_flags, channel)
         print(f"[ContextExtractor Error]: {exc!r}")
         return empty_result
 
@@ -517,24 +527,39 @@ def _valid_context_flag_value(key: str, value: object) -> bool:
     return type(value) is bool
 
 
+def _record_daily_resolution(outcome: str, flags: Iterable[str], channel: str) -> None:
+    """Record bounded decision metadata without conversation text or locations."""
+    from memory.event_log import log_event
+    log_event("routines", "daily_context_resolution", outcome=outcome,
+              requested_flags=sorted(flags), channel=channel)
+
+
 def _commit_daily_resolution(
     payload: object, rows: list[dict], expected: dict, *, allowed: set[str],
     now: datetime, still_current: Callable[[], bool],
     schedule_reference: list[dict] | None = None,
+    channel: str = "unknown",
 ) -> ContextExtractionResult | None:
     """Reuse shared source validation and the canonical conditional writer."""
     if isinstance(payload, dict) and "valid_until" in payload:
         from services.routine_duration_context import commit_duration_resolution
         applied = commit_duration_resolution(payload, rows, expected, allowed=allowed,
             now=now, still_current=still_current, schedule_reference=schedule_reference)
+        _record_daily_resolution("applied_duration" if applied else "duration_rejected_or_superseded", allowed, channel)
         return ContextExtractionResult("related", applied) if applied else None
+    if payload == {"flags": {}, "event_rowid": None, "support_rowids": []}:
+        _record_daily_resolution("model_unknown", allowed, channel)
+        return None
     resolved = _validate_context_resolution(payload, rows, expected, allowed=allowed, now=now)
     if resolved is None or not still_current():
+        _record_daily_resolution("observation_rejected_or_superseded", allowed, channel)
         return None
     flags, event_at = resolved
     updates = {key: (str(value).lower(), event_at.date().isoformat()) for key, value in flags.items()}
     if not set_context_states_if_unchanged(updates, expected, recorded_at=event_at):
+        _record_daily_resolution("state_changed", allowed, channel)
         return None
+    _record_daily_resolution("applied_observation", allowed, channel)
     return ContextExtractionResult("related", frozenset(flags))
 
 
@@ -547,12 +572,14 @@ def resolve_daily_context_before_question(
     try:
         rows = load_daily_state_messages(now=now, db_path=path)
         if not rows:
+            _record_daily_resolution("no_sources", flags, channel)
             return False
         result = extract_and_update_context_flags(rows[-1]["content"], channel=channel,
             now=now, conversation_db_path=path, daily_resolution_flags=flags,
             clarification_still_current=still_current)
         return isinstance(result, ContextExtractionResult) and bool(result.applied_flags)
     except Exception:
+        _record_daily_resolution("resolution_error", flags, channel)
         return False
 
 
