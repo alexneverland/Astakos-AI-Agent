@@ -6,7 +6,6 @@
 # ================================================================
 
 from copy import copy
-from services.messenger_intent import resolve_contextual_draft_request
 from services.messenger_lifecycle import messenger_lifecycle_boundary, require_draft_tool_result, recover_preparation_reason
 from core.i18n import t
 import json
@@ -551,7 +550,7 @@ def chat_agent_node(state: AgentState):
     boundary_response = _unverified_search_boundary_response(history, "Chat_Agent")
     if boundary_response:
         return boundary_response
-    history, lifecycle_response = messenger_lifecycle_boundary(state, history, "Chat_Agent", llm.invoke)
+    history, lifecycle_response = messenger_lifecycle_boundary(state, history, "Chat_Agent", lambda messages: llm.invoke(messages))
     if lifecycle_response:
         return lifecycle_response
     last_msg_text = clean_message(history[-1].content) if history else ""
@@ -642,12 +641,10 @@ def chat_agent_node(state: AgentState):
     from tools.system import archive_file, retrieve_photo, retrieve_document, save_to_memory, delete_from_memory, search_memory, control_spotify, get_current_location, read_local_file
     from tools.web import (
         execute_local_pipeline,
-        has_known_messenger_contact_reference,
         relay_local_payload,
         search_supermarket_prices,
     )
     from services.messenger_intent import (
-        classify_messenger_intent,
         has_accepted_routine_draft_offer,
         is_create_draft_intent,
     )
@@ -691,19 +688,6 @@ def chat_agent_node(state: AgentState):
         draft_tool_reason = "accepted_routine_offer"
     elif active_draft_edit_context_isolated:
         draft_tool_reason = "active_draft_edit"
-    elif (
-        latest_user_text
-        and getattr(history[-1], "type", "") == "human"
-        and (
-            not active_messenger_draft
-            or has_known_messenger_contact_reference(latest_user_text)
-        )
-        and classify_messenger_intent(latest_user_text).intent == "general_chat"
-        and resolve_contextual_draft_request(history, lambda messages: llm.invoke(messages))
-    ):
-        # Leave semantic interpretation to the canonical Chat agent while
-        # deterministic intent protects exact draft lifecycle boundaries.
-        draft_tool_reason = "natural_language_choice"
     if draft_tool_reason:
         print(f"[Messenger Tool Gate]: Chat_Agent enabled relay_local_payload ({draft_tool_reason}).")
         if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
@@ -722,7 +706,7 @@ def chat_agent_node(state: AgentState):
 
     invoke_started = perf_counter()
     response = bound_llm.invoke(final_messages)
-    draft_tool_reason = recover_preparation_reason(history, response, draft_tool_reason, llm.invoke)
+    draft_tool_reason = recover_preparation_reason(history, response, draft_tool_reason, lambda messages: llm.invoke(messages))
     response = require_draft_tool_result(response, draft_tool_reason, final_messages, llm)
     invoke_ms = int((perf_counter() - invoke_started) * 1000)
 
@@ -1088,7 +1072,7 @@ def web_agent_node(state: AgentState):
     boundary_response = _unverified_search_boundary_response(history, "Web_Agent")
     if boundary_response:
         return boundary_response
-    history, lifecycle_response = messenger_lifecycle_boundary(state, history, "Web_Agent", llm.invoke)
+    history, lifecycle_response = messenger_lifecycle_boundary(state, history, "Web_Agent", lambda messages: llm.invoke(messages))
     if lifecycle_response:
         return lifecycle_response
     last_msg_text = clean_message(history[-1].content) if history else ""
@@ -1195,13 +1179,12 @@ def web_agent_node(state: AgentState):
     )
     from tools.web import (
         get_news, get_weather_forecast, get_navigation_info,
-        has_known_messenger_contact_reference, relay_local_payload,
+        relay_local_payload,
         search_google_places, browse_url, search_supermarket_prices
     )
 
     from tools.web import execute_local_pipeline
     from services.messenger_intent import (
-        classify_messenger_intent,
         has_accepted_routine_draft_offer,
         is_create_draft_intent,
     )
@@ -1225,22 +1208,6 @@ def web_agent_node(state: AgentState):
         draft_tool_reason = "accepted_routine_offer"
     elif active_draft_edit_context_isolated:
         draft_tool_reason = "active_draft_edit"
-    elif (
-        latest_user_text
-        and getattr(history[-1], "type", "") == "human"
-        and (
-            not active_messenger_draft
-            or has_known_messenger_contact_reference(latest_user_text)
-        )
-        and classify_messenger_intent(latest_user_text).intent == "general_chat"
-        and resolve_contextual_draft_request(history, lambda messages: llm.invoke(messages))
-    ):
-        # Like Chat, resolve recipients from bounded conversation, including an
-        # accepted offer whose recipient is absent from the newest user line.
-        # Deterministic intent remains responsible only for exact lifecycle
-        # boundaries such as a bare send confirmation, which must never create
-        # a replacement draft when none exists.
-        draft_tool_reason = "natural_language_choice"
     if draft_tool_reason:
         print(f"[Messenger Tool Gate]: Web_Agent enabled relay_local_payload ({draft_tool_reason}).")
         if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
@@ -1266,9 +1233,13 @@ def web_agent_node(state: AgentState):
             recent_web_tool_results,
         )
         from langchain_core.messages import AIMessage as _AIMsg
+        failure = _AIMsg(content=guarded_reply)
+        draft_tool_reason = recover_preparation_reason(history, failure, draft_tool_reason, lambda messages: llm.invoke(messages))
+        failure = require_draft_tool_result(failure, draft_tool_reason, final_messages, llm)
         return {
-            "messages": [_AIMsg(content=guarded_reply)],
+            "messages": [failure],
             "current_agent": "Web_Agent",
+            "messenger_draft_preparation_authorized": bool(draft_tool_reason),
         }
 
     if _has_exhausted_web_research_budget(history):
@@ -1287,7 +1258,7 @@ def web_agent_node(state: AgentState):
     else:
         result = llm.bind_tools(web_tools).invoke(final_messages)
 
-    draft_tool_reason = recover_preparation_reason(history, result, draft_tool_reason, llm.invoke)
+    draft_tool_reason = recover_preparation_reason(history, result, draft_tool_reason, lambda messages: llm.invoke(messages))
     result = require_draft_tool_result(result, draft_tool_reason, final_messages, llm)
     result = _trim_web_research_tool_calls(result, history)
 

@@ -229,7 +229,7 @@ def test_unbound_legacy_approval_cannot_adopt_current_draft(tmp_path, monkeypatc
             pytest.fail("Unbound send reached transport")
     assert approval.execute_approved_pending("legacy", [Tool()])["status"] == "draft_unbound"
 
-def test_preparation_never_batches_old_send_with_new_write():
+def test_preparation_never_batches_old_send_with_new_write() -> None:
     """Even a provider supplying both tools must finish local preparation first."""
     from services.messenger_lifecycle import require_draft_tool_result
     response = AIMessage(content='', tool_calls=[
@@ -238,3 +238,16 @@ def test_preparation_never_batches_old_send_with_new_write():
     ])
     result = require_draft_tool_result(response, 'response_grounded_preparation', [], None)
     assert [call['name'] for call in result.tool_calls] == ['relay_local_payload']
+
+@pytest.mark.parametrize('kind',['tool_use','function_call'])
+def test_review_send_removed_from_native_content(kind: str) -> None:
+    """Normalization cannot retain a native send hidden beside the surviving write."""
+    from services.messenger_lifecycle import require_draft_tool_result
+    response = AIMessage(content=[{'type':'text','text':'Prepared'},
+        {'type':kind,'name':'execute_local_pipeline','id':'old','input':{}}],tool_calls=[
+        {'name':'execute_local_pipeline','args':{},'id':'old'},
+        {'name':'relay_local_payload','args':{},'id':'new'}])
+    result = require_draft_tool_result(response,'response_grounded_preparation',[],None)
+    assert 'execute_local_pipeline' not in str(result.content)
+    assert 'Prepared' in str(result.content)
+    assert [c['name'] for c in result.tool_calls] == ['relay_local_payload']

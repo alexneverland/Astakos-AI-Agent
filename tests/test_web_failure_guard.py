@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("offline_behavioral_io")
+
 from core.utils import (
     looks_like_web_tool_error,
     filter_recent_web_tool_results,
@@ -17,6 +19,27 @@ from core.utils import (
 )
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage, SystemMessage
 from core.i18n import t
+
+
+@pytest.fixture(autouse=True)
+def isolated_draft_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give direct node tests the isolated draft and entry guard used by the graph."""
+    import config
+    import core.agents as agents
+    import core.approval as approval
+    from core.messenger_draft import capture_draft_write_guard
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(tmp_path / "draft.json"))
+    monkeypatch.setattr(approval, "PENDING_FILE", str(tmp_path / "pending.json"))
+    # These tests exercise tool binding and failure handling, not live retrieval.
+    monkeypatch.setattr(agents, "build_prompt", lambda history, base, **kwargs: base)
+    monkeypatch.setattr("core.utils.build_prompt", lambda history, base, **kwargs: base)
+    boundary = agents.messenger_lifecycle_boundary
+    def guarded(state: dict, history: list, agent: str, invoke: Any) -> tuple:
+        """Supply graph-entry identity only when the test calls the node directly."""
+        if "messenger_draft_write_guard" not in state:
+            state = {**state, "messenger_draft_write_guard": capture_draft_write_guard(history)}
+        return boundary(state, history, agent, invoke)
+    monkeypatch.setattr(agents, "messenger_lifecycle_boundary", guarded)
 
 
 # 1. Detect web error sentinel
@@ -482,6 +505,8 @@ def test_web_agent_retries_empty_synthesis_before_returning_to_user(monkeypatch)
             return FakeBoundLLM()
 
         def invoke(self, messages):
+            if "MESSENGER_PREPARATION_DECISION" in str(messages[0].content):
+                return AIMessage(content='{"prepare":false}')
             self.retry_calls += 1
             return AIMessage(content="Βρήκα νωπό κοτόπουλο στον Μασούτη.")
 
@@ -530,6 +555,8 @@ def test_web_agent_never_returns_raw_results_after_empty_retries(monkeypatch):
             return FakeBoundLLM()
 
         def invoke(self, messages):
+            if "MESSENGER_PREPARATION_DECISION" in str(messages[0].content):
+                return AIMessage(content='{"prepare":false}')
             self.retry_calls += 1
             return AIMessage(content="")
 
@@ -580,6 +607,8 @@ def test_web_agent_skips_empty_retries_when_all_web_tools_failed(monkeypatch):
             return FakeBoundLLM()
 
         def invoke(self, messages):
+            if "MESSENGER_PREPARATION_DECISION" in str(messages[0].content):
+                return AIMessage(content='{"prepare":false}')
             self.retry_calls += 1
             return AIMessage(content="should not be used")
 
@@ -899,6 +928,8 @@ def test_web_agent_synthesizes_without_tools_after_research_budget(monkeypatch):
             return FakeBoundLLM()
 
         def invoke(self, messages):
+            if "MESSENGER_PREPARATION_DECISION" in str(messages[0].content):
+                return AIMessage(content='{"prepare":false}')
             self.synthesis_calls += 1
             self.synthesis_messages.append(messages)
             return AIMessage(content="Research synthesis from verified sources.")
@@ -1088,7 +1119,7 @@ def test_web_agent_keeps_draft_tool_for_mixed_search_and_known_recipient(
 ) -> None:
     """A mixed Web mention may still create a reversible recipient draft."""
     from core.agents import web_agent_node
-    monkeypatch.setattr("core.agents.resolve_contextual_draft_request", lambda *_: True)
+    monkeypatch.setattr("services.messenger_intent.resolve_contextual_draft_request", lambda *a, **k: True)
 
     bound_tool_names: list[str] = []
 
@@ -1097,7 +1128,10 @@ def test_web_agent_keeps_draft_tool_for_mixed_search_and_known_recipient(
             return AIMessage(content="plain reply")
 
     class FakeLLM:
-        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+        def invoke(self, messages: Any) -> AIMessage:
+            return AIMessage(content='{}')
+
+        def bind_tools(self, tools: list[Any], **kwargs: Any) -> FakeBoundLLM:
             bound_tool_names.extend(tool.name for tool in tools)
             return FakeBoundLLM()
 
@@ -1173,7 +1207,7 @@ def test_web_agent_exposes_reversible_draft_tool_for_natural_recipient_request(
     """The Web LLM can persist a naturally phrased recipient-specific draft request."""
     from core.agents import web_agent_node
     from services.messenger_intent import classify_messenger_intent
-    monkeypatch.setattr("core.agents.resolve_contextual_draft_request", lambda *_: True)
+    monkeypatch.setattr("services.messenger_intent.resolve_contextual_draft_request", lambda *a, **k: True)
 
     bound_tool_names: list[str] = []
     request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
@@ -1186,9 +1220,13 @@ def test_web_agent_exposes_reversible_draft_tool_for_natural_recipient_request(
             return AIMessage(content="plain reply")
 
     class FakeLLM:
-        """Capture the tools exposed to the Web agent."""
+        """Capture bindings while excluding semantic decisions from synthesis counts."""
 
-        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return no lifecycle decision outside the explicitly stubbed resolver."""
+            return AIMessage(content='{}')
+
+        def bind_tools(self, tools: list[Any], **kwargs: Any) -> FakeBoundLLM:
             """Record the tool names and return the deterministic bound model."""
             bound_tool_names.extend(tool.name for tool in tools)
             return FakeBoundLLM()
@@ -1217,7 +1255,7 @@ def test_natural_recipient_request_persists_draft_through_chat_graph(
     import config
     from core.graph import build_graph
     from services.messenger_intent import classify_messenger_intent
-    monkeypatch.setattr("core.agents.resolve_contextual_draft_request", lambda *_: True)
+    monkeypatch.setattr("services.messenger_intent.resolve_contextual_draft_request", lambda *a, **k: True)
 
     request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
     draft_file = tmp_path / "messenger_draft.json"
@@ -1245,15 +1283,18 @@ def test_natural_recipient_request_persists_draft_through_chat_graph(
             )
 
     class FakeLLM:
+        def invoke(self, messages: Any) -> AIMessage:
+            return AIMessage(content='{}')
+
         """Provide deterministic routing and Chat tool selection."""
 
         def with_structured_output(self, _schema: Any) -> "FakeLLM":
             """Return self because registry routing avoids LLM routing output."""
             return self
 
-        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+        def bind_tools(self, tools: list[Any], **kwargs: Any) -> FakeBoundLLM:
             """Require the canonical Chat path to expose the draft writer."""
-            if not draft_requested:
+            if kwargs.get("tool_choice"):
                 assert "relay_local_payload" in {tool.name for tool in tools}
             return FakeBoundLLM()
 

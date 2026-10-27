@@ -212,6 +212,7 @@ def extract_and_update_context_flags(
             daily_rows = load_daily_state_messages(now=current, **history_options)
         except (ValueError, OSError):
             if daily_resolution_flags is not None:
+                _record_daily_resolution("resolution_error", daily_resolution_flags, channel)
                 return None
             # A bounded view failure must not disable an explicit current report.
             # The missing day reference is never permission to infer an old plan.
@@ -457,6 +458,8 @@ def extract_and_update_context_flags(
         reconcile_context_message(user_text)
 
     except Exception as exc:
+        if daily_resolution_flags is not None:
+            _record_daily_resolution("resolution_error", daily_resolution_flags, channel)
         print(f"[ContextExtractor Error]: {exc!r}")
         return empty_result
 

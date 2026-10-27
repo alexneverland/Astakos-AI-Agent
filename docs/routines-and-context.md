@@ -88,12 +88,18 @@ supposedly saved message. Chat/Web preparation must produce a native draft-write
 receipt: a prose-only model answer gets one required-tool retry, then an explicit
 failure if no write is requested. Successful writes display the saved tool result
 without another synthesis call. For a missed mixed request, one bounded semantic
-recheck uses the candidate reply as untrusted reference and the owner turn as
-the permission source. Preparation finishes before sending: any send call batched
+decision uses the candidate reply as untrusted reference and the owner turn as
+the permission source. It replaces the earlier pre-generation semantic check,
+so ordinary conversation does not pay for both checks. Pending-draft sends first
+defer to preparation when the owner also requests a new draft. Recovery retains
+the existing active-draft/contact boundary and excludes tool content from its
+owner dialogue; same-turn external-content action guards remain authoritative. Preparation finishes before sending: any send call batched
 with that write is removed, leaving the normal reviewed-draft approval path.
 Bare send, declined preparation and explanatory questions cannot authorize a new
-draft from an unsolicited candidate reply. This recovery adds at most one
-decision call before the existing required-tool retry.
+draft from an unsolicited candidate reply. The required-tool retry receives the candidate as
+untrusted text reference, including after a Web failure. Historical tool messages
+do not veto a new owner request, while an external result in the current turn
+can still block its write through the existing approval guard.
 Send requests for a stored draft enter the normal
 external approval path; expired drafts cannot be sent or recreated by that request.
 An owner can retire an unwanted draft through ordinary conversation, including
