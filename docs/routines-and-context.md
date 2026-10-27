@@ -30,6 +30,17 @@ presence remains owned by its source-validated writer. A repeated observation of
 the same shift retains an existing later schedule expiry. An explicit dated
 correction or cancellation can still change it. History and state-version guards
 prevent a delayed live result from overwriting a newer decision.
+Queued reconciliation carries the saved owner row identity and its history path.
+The channel enqueues it only after persistence. Later unrelated owner messages
+do not discard that source; the semantic shift decision considers the bounded
+later reports and cannot reinstate a superseded schedule. The final history and
+state guards still reject changes that arrive during inference.
+The shared observation-expiry policy retains a later or unbounded same-value
+schedule unless the semantic result explicitly identifies a schedule revision.
+Provider failures leave a bounded diagnostic event and do not invent a shift or
+start an automatic retry loop. Existing explicit non-shift routine requests use
+their established path under a final history-version guard; old queued sources
+cannot apply those lexical changes.
 
 Child-with-partner presence is not exclusive custody. A presence-only condition
 that suppresses an activity when the child is with the partner does not suppress
@@ -39,6 +50,9 @@ routine names and channels. Unknown or stale owner co-presence does not grant
 that exception. Other conditions, including extended absence, work, location and
 already-started/completed activity state, still apply independently. Clarification
 accounts for both child co-presence flags when evaluating these conditions.
+Supported single-flag and direct key/value condition payloads share the same
+normalization and clarification dependencies, including the single-flag default
+when `equals` is null.
 
 Current source (Unreleased) uses bounded, trusted owner-day references for routine
 feedback, so an earlier activity is not treated as skipped merely because a later

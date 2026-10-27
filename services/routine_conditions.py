@@ -115,14 +115,31 @@ def evaluate_routine_condition(condition: dict, context: dict, now: datetime | N
     }
 
 
+def context_flag_pairs(payload: dict) -> dict:
+    """Normalize the supported structured forms without interpreting user text."""
+    if payload.get("flag"):
+        return {payload["flag"]: True if payload.get("equals") is None else payload["equals"]}
+    return {key: value for key, value in payload.items() if key not in ("flag", "equals")}
+
+
+def context_flag_dependencies(payload: dict, mode: str) -> set[str]:
+    """Expose every input used by canonical context-flag evaluation."""
+    pairs = context_flag_pairs(payload)
+    dependencies = set(pairs)
+    if (mode == "suppress_when_true"
+            and str(pairs.get("kid1_with_partner")).lower() == "true"):
+        dependencies.add("kid1_with_user")
+    return dependencies
+
+
 def _evaluate_context_flag(payload: dict, mode: str, context: dict) -> dict:
     flag = payload.get("flag")
-    expected = payload.get("equals")
+    pairs = context_flag_pairs(payload)
 
     # Handle direct key-value payload if "flag" is missing
     # Example: {"kid1_present": True, "family_at_home": True}
     if not flag:
-        direct_pairs = {k: v for k, v in payload.items() if k not in ("flag", "equals")}
+        direct_pairs = pairs
         if not direct_pairs:
             return {
                 "allowed": False,
@@ -145,6 +162,11 @@ def _evaluate_context_flag(payload: dict, mode: str, context: dict) -> dict:
                     "actual_value": actual,
                 }
 
+        if (mode == "suppress_when_true"
+                and str(pairs.get("kid1_with_partner")).lower() == "true"
+                and str(context.get("kid1_with_user")).lower() == "true"):
+            return {"allowed": True, "matched": False,
+                    "reason": "child_also_with_user", "actual_value": "multiple_match"}
         # If all keys matched
         return {
             "allowed": True if mode == "allow_when_true" else False,
@@ -155,6 +177,7 @@ def _evaluate_context_flag(payload: dict, mode: str, context: dict) -> dict:
 
     # Standard format: {"flag": "something", "equals": "true"}
     actual = context.get(flag)
+    expected = pairs[flag]
     
     # Normalize comparison to strings
     actual_str = str(actual).lower() if actual is not None else "null"

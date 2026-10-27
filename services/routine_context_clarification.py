@@ -68,13 +68,8 @@ def _condition_flags(condition: Mapping[str, Any]) -> set[str]:
     kind = condition.get("condition_type")
     flag = payload.get("flag")
     if kind == "context_flag":
-        if isinstance(flag, str):
-            if (flag == "kid1_with_partner"
-                    and condition.get("condition_mode") == "suppress_when_true"
-                    and str(payload.get("equals", True)).lower() == "true"):
-                return {"kid1_with_partner", "kid1_with_user"}
-            return {flag} & set(VOLATILE_FLAGS)
-        return set(payload) & set(VOLATILE_FLAGS)
+        from services.routine_conditions import context_flag_dependencies
+        return context_flag_dependencies(payload, condition.get("condition_mode") or "allow_when_true") & set(VOLATILE_FLAGS)
     if kind == "location":
         if flag in {"user_at_home", "user_out_of_home", "out_of_home"}:
             return {"user_out_of_home"}

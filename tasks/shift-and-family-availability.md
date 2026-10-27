@@ -62,3 +62,38 @@ still needs natural observation of a fresh report after the source change.
 The owner subsequently requested a PR and review-comment inspection. Publish
 this scoped branch and inspect complete top-level, inline and issue comments.
 No merge, branch deletion or automatic additional review cycle is authorized.
+
+## Review repair (authorized after PR263 review)
+
+Reviewed head: `6efa363ffbb328d7dca487e78df0aa2698be78d0`.
+All eight Sourcery inline comments were inspected against that head. Six new
+regressions initially failed for payload normalization, semantic expiry retention
+and provider-error diagnostics. Additional native-store and full-handler tests
+cover exact queued identity, custom history paths, later unrelated/correcting
+reports and the final non-shift history guard.
+
+- 4391416090: Preserve existing explicit non-shift routine handling instead of
+  deleting it. Fence its final writes with the owner-history version. An older
+  queued source can apply only a semantic shift decision informed by later
+  reports. Live shifts no longer fall back to lexical shift-state rules.
+- 4391416103: One observation-expiry policy covers both writers, including
+  unbounded schedules. Validated semantic `schedule_revision=true` allows a real
+  shortening; cancellation remains explicit. Missing revision means observation.
+- 4391416116: Web/Telegram enqueue after saving the report, and all three channel
+  paths carry the exact row and database path. No polling for an unsaved message.
+- 4391416130: Normalize supported condition forms once and derive clarification
+  dependencies from that same representation.
+- 4391416134: Carry the explicit history path through ordinary extraction and
+  queued reconciliation instead of reopening the global store.
+- 4391416144: Record `live_shift_inference_failed` with only the error type.
+  Keep known state and fail closed; no automatic cloud retry cycle.
+- 4391416156: Assert accepted observation writes as well as retained expiry.
+- 4391416163: Seed state before the report and assert the model callback plus
+  the actual CAS rejection. The original review's claim that inference never
+  runs was inaccurate: that timestamp check followed inference. The stronger
+  test now distinguishes history rejection from state-CAS rejection.
+
+Final review-repair verification: **517 distinct offline cases passed** in two
+focused groups (404 context/routine cases; 113 Matrix/Web handler cases), with
+outbound transport blocked. Syntax compilation and `git diff --check` passed.
+No live data or runtime intervention, no full suite, and no extra review request.

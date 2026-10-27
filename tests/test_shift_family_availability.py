@@ -66,8 +66,9 @@ def test_same_shift_observation_does_not_shorten_week(isolated_shift: tuple) -> 
     """A live observation is not an explicit revision of a weekly schedule."""
     routine_db.set_context_state("current_shift", "morning", "2026-10-30")
     expected = {"current_shift": routine_db.get_context_state("current_shift")}
-    extractor._persist_context_payload({"current_shift": "morning"}, set(),
-                                       "2026-10-27", expected)
+    applied = extractor._persist_context_payload({"current_shift": "morning"}, set(),
+                                                "2026-10-27", expected)
+    assert applied == frozenset({"current_shift"})
     assert resolve_current_shift(TUESDAY + timedelta(days=1)) == "morning"
 
 
@@ -157,12 +158,16 @@ def test_live_schedule_cannot_overwrite_newer_decision(
     model, history, path = isolated_shift
     text = "Στη δουλειά αυτή την εβδομάδα είμαι πρωινός."
     now = datetime.now(ATHENS)
+    routine_db.set_context_states_if_unchanged(
+        {"current_shift": ("night", "2026-10-30")}, {"current_shift": None},
+        recorded_at=now-timedelta(hours=1))
     history.append_message(role="user", channel="matrix", content=text,
                            timestamp=now, db_path=path)
-    routine_db.set_context_state("current_shift", "night", "2026-10-30")
+    invoked = []
 
     def reply(messages: list) -> SimpleNamespace:
         """Inject a competing canonical update while the semantic call runs."""
+        invoked.append(True)
         if race == "history":
             history.append_message(role="user", channel="web", content="Αλλαγή, τελικά νύχτα.",
                                    timestamp=now + timedelta(seconds=1), db_path=path)
@@ -171,7 +176,19 @@ def test_live_schedule_cannot_overwrite_newer_decision(
         return SimpleNamespace(content=json.dumps([_shift()]))
 
     model.invoke = reply
+    native_write = extractor.set_context_states_if_unchanged
+    writes = []
+
+    def write(*args, **kwargs) -> bool:
+        """Observe the real CAS result, not just the pre-seeded final value."""
+        result = native_write(*args, **kwargs)
+        writes.append(result)
+        return result
+
+    monkeypatch.setattr(extractor, "set_context_states_if_unchanged", write)
     extractor.reconcile_context_message(text)
+    assert invoked == [True]
+    assert writes == ([] if race == "history" else [False])
     assert routine_db.get_context_state("current_shift")["value"] == (
         "night" if race == "history" else "afternoon")
 
@@ -268,9 +285,62 @@ def test_live_semantic_correction_can_shorten_or_cancel_week(
             return TUESDAY + timedelta(seconds=30)
 
     monkeypatch.setattr(extractor, "datetime", Clock)
-    decision = {**_shift(until, value), "context_operation": operation}
+    decision = {**_shift(until, value), "context_operation": operation, "schedule_revision": True}
     model.invoke = lambda messages: SimpleNamespace(content=json.dumps([decision]))
     extractor.reconcile_context_message(text)
     stored = routine_db.get_context_state("current_shift")
     assert stored["expires_at"] == until
     assert stored["value"] == ("" if operation == "clear" else value)
+
+
+@pytest.mark.parametrize("payload", [
+    {"flag": "kid1_with_partner", "equals": None}, {"kid1_with_partner": True},
+    {"kid1_with_partner": True, "family_at_home": True},
+])
+def test_all_supported_presence_payloads_share_evaluation(payload: dict) -> None:
+    """Legacy payload shapes must use the same presence policy and dependencies."""
+    from services.routine_context_clarification import _condition_flags
+    condition = {**_partner_condition(), "condition_payload": payload}
+    assert evaluate_routine_conditions([condition], {"kid1_with_partner": True,
+        "kid1_with_user": True, "family_at_home": True})["allowed"]
+    assert "kid1_with_user" in _condition_flags(condition)
+
+
+@pytest.mark.usefixtures("offline_behavioral_io")
+@pytest.mark.parametrize("until", ["2026-10-30", None])
+def test_live_observation_cannot_shorten_existing_shift(
+    isolated_shift: tuple, until: str | None,
+) -> None:
+    """Both semantic and ordinary writers retain the established observation scope."""
+    model, history, path = isolated_shift
+    at = datetime.now(ATHENS)
+    text = "Η βάρδιά μου εξακολουθεί να είναι πρωινή."
+    routine_db.set_context_states_if_unchanged(
+        {"current_shift": ("morning", until)}, {"current_shift": None},
+        recorded_at=at-timedelta(hours=1))
+    history.append_message(role="user", channel="matrix", content=text, timestamp=at, db_path=path)
+    model.invoke = lambda messages: SimpleNamespace(content=json.dumps([_shift(at.date().isoformat())]))
+    extractor.reconcile_context_message(text)
+    assert routine_db.get_context_state("current_shift")["expires_at"] == until
+    expected = {"current_shift": routine_db.get_context_state("current_shift")}
+    assert extractor._persist_context_payload({"current_shift": "morning"}, set(),
+        at.date().isoformat(), expected) == frozenset({"current_shift"})
+    assert routine_db.get_context_state("current_shift")["expires_at"] == until
+
+
+@pytest.mark.usefixtures("offline_behavioral_io")
+def test_provider_failure_leaves_diagnostic_receipt(
+    isolated_shift: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider error must remain distinguishable from a no-impact decision."""
+    model, _, _ = isolated_shift
+    events = []
+    monkeypatch.setattr("memory.event_log.log_event", lambda *a, **k: events.append((a, k)))
+
+    def fail(messages: list) -> SimpleNamespace:
+        raise RuntimeError("offline provider failure")
+
+    model.invoke = fail
+    reconciler.infer_routine_reconciliation_directives("Δεν έχω επιβεβαιώσει το πρόγραμμα.",
+        category="family", reason="live_message_context", now=TUESDAY)
+    assert any(a[1] == "live_shift_inference_failed" for a, k in events)

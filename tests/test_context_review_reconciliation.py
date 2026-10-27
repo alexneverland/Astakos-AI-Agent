@@ -65,6 +65,7 @@ def test_matrix_mixed_answer_keeps_durable_reconciliation_without_repeating_live
     hooks = background.MatrixBackgroundHooks(
         enqueue_fast_task=lambda *args: None,
         enqueue_slow_task=lambda fn, *args: queued.append((fn, args)),
+        conversation_db_path=config.CONVERSATION_DB_FILE,
     )
     hooks.on_exchange_completed(message, "Σημειώθηκε.", "Chat_Agent", "matrix",
                                 context_flags_processed=True, context_reconciliation_pending=True)

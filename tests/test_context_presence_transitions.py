@@ -41,7 +41,7 @@ def transition_store(tmp_path, monkeypatch) -> tuple:
     )
     history.append_message(role="user", channel="web", content="ναι φιλε σιγα σιγα ετοιμαζομαι",
                            timestamp=EVENT_AT.replace(hour=9, minute=31, second=40), db_path=path)
-    monkeypatch.setattr(extractor, "reconcile_context_message", lambda _: None)
+    monkeypatch.setattr(extractor, "reconcile_context_message", lambda *a, **k: None)
     monkeypatch.setattr(extractor, "load_recent_state_messages",
                         lambda **_: history.load_daily_state_messages(now=EVENT_AT, db_path=path))
     return history, db, extractor, path, shared
@@ -197,7 +197,7 @@ def test_no_state_change_preserves_existing_routine_request_handling(
                            timestamp=EVENT_AT, db_path=path)
     previous = db.get_context_state("partner_with_user")
     requests = []
-    monkeypatch.setattr(extractor, "reconcile_context_message", requests.append)
+    monkeypatch.setattr(extractor, "reconcile_context_message", lambda text, *a, **k: requests.append(text))
     monkeypatch.setattr(extractor, "safe_gemini_call", lambda _: SimpleNamespace(
         text='{"flags": {}, "event_rowid": null, "support_rowids": []}'))
     extractor.extract_and_update_context_flags(text, channel="matrix", now=EVENT_AT,
@@ -214,7 +214,7 @@ def test_old_turn_cannot_borrow_latest_source(transition_store, monkeypatch, sha
                            timestamp=EVENT_AT, db_path=path)
     previous = db.get_context_state("partner_with_user")
     requests = []
-    monkeypatch.setattr(extractor, "reconcile_context_message", requests.append)
+    monkeypatch.setattr(extractor, "reconcile_context_message", lambda text, *a, **k: requests.append(text))
     payload = ({"flags": {}, "event_rowid": None, "support_rowids": []}
                if shape == "empty" else {"partner_with_user": False})
     monkeypatch.setattr(extractor, "safe_gemini_call",

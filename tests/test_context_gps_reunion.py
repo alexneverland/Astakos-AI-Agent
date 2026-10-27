@@ -49,7 +49,7 @@ def test_reunion_survives_newer_agreeing_gps(tmp_path, monkeypatch, refresh_duri
             "event_rowid": source["rowid"], "support_rowids": [source["rowid"]]}))
 
     monkeypatch.setattr(extractor, "safe_gemini_call", model)
-    monkeypatch.setattr(extractor, "reconcile_context_message", lambda _: None)
+    monkeypatch.setattr(extractor, "reconcile_context_message", lambda *a, **k: None)
     extractor.extract_and_update_context_flags(REPORT, channel="matrix", now=NOW,
         conversation_db_path=path)
     for key in ("partner_with_user", "kid1_with_user", "kid1_with_partner"):
@@ -80,7 +80,7 @@ def test_newer_contrary_evidence_blocks_old_reunion(tmp_path, monkeypatch, durin
             "flags": {"user_out_of_home": True, "partner_with_user": True},
             "event_rowid": source["rowid"], "support_rowids": [source["rowid"]]}))
     monkeypatch.setattr(extractor, "safe_gemini_call", model)
-    monkeypatch.setattr(extractor, "reconcile_context_message", lambda _: None)
+    monkeypatch.setattr(extractor, "reconcile_context_message", lambda *a, **k: None)
     extractor.extract_and_update_context_flags(REPORT, now=NOW, conversation_db_path=path)
     assert db.get_context_state("partner_with_user") is None
     assert db.get_context_state("user_out_of_home")["value"] == "false"

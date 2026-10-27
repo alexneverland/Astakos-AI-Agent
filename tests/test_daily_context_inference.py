@@ -45,7 +45,7 @@ def test_unrelated_history_during_model_does_not_lose_owner_update(tmp_path, mon
             "support_rowids":[source["rowid"]]}
         return SimpleNamespace(text=json.dumps(payload))
     monkeypatch.setattr(extractor, "safe_gemini_call", model)
-    monkeypatch.setattr(extractor, "reconcile_context_message", lambda _:None)
+    monkeypatch.setattr(extractor, "reconcile_context_message", lambda *a, **k: None)
     if mode == "ordinary":
         extractor.extract_and_update_context_flags("Έφυγα μόνος", now=NOW, conversation_db_path=path)
     else:
@@ -105,7 +105,7 @@ def test_daily_plan_combines_with_departure_before_question(tmp_path, monkeypatc
             "user_out_of_home": True}, "event_rowid": source["rowid"],
             "support_rowids": [source["rowid"]]}))
     monkeypatch.setattr(extractor, "safe_gemini_call", model)
-    monkeypatch.setattr(extractor, "reconcile_context_message", lambda _: None)
+    monkeypatch.setattr(extractor, "reconcile_context_message", lambda *a, **k: None)
     extractor.extract_and_update_context_flags(text, channel=channel, now=NOW, conversation_db_path=path)
     assert db.get_context_state("partner_with_user")["value"] == "false"
     assert db.get_context_state("user_out_of_home")["value"] == "true"
@@ -143,7 +143,7 @@ def test_new_user_message_during_inference_cannot_commit(tmp_path, monkeypatch):
             "user_out_of_home": True}, "event_rowid": source["rowid"],
             "support_rowids": [source["rowid"]]}))
     monkeypatch.setattr(extractor, "safe_gemini_call", model)
-    monkeypatch.setattr(extractor, "reconcile_context_message", lambda _: None)
+    monkeypatch.setattr(extractor, "reconcile_context_message", lambda *a, **k: None)
     extractor.extract_and_update_context_flags(text, now=NOW, conversation_db_path=path)
     assert db.get_context_state("user_out_of_home") is None
 
@@ -260,7 +260,7 @@ def test_unavailable_daily_context_preserves_explicit_current_report(tmp_path, m
         raise ValueError("bounded source view unavailable")
     monkeypatch.setattr(extractor, "load_daily_state_messages", unavailable)
     monkeypatch.setattr(extractor, "safe_gemini_call", lambda _:SimpleNamespace(text='{"partner_with_user":false}'))
-    monkeypatch.setattr(extractor, "reconcile_context_message", lambda _:None)
+    monkeypatch.setattr(extractor, "reconcile_context_message", lambda *a, **k: None)
     extractor.extract_and_update_context_flags("Δεν είμαι με τη Σοφία τώρα", now=NOW,
         conversation_db_path=str(tmp_path/"history.db"))
     assert db.get_context_state("partner_with_user")["value"] == "false"
