@@ -23,6 +23,23 @@ can also contain additional facts, memories or unrelated requests; they are not
 restricted to a yes/no command. Interpretation depends on the configured model.
 Offline regressions verify persistence and safety, not every live interpretation.
 
+Current source (Unreleased) also reconciles explicitly reported work shifts from
+live owner messages through the dated semantic schedule path, including reports
+made at home after work. The live pass accepts only shift results; ordinary
+presence remains owned by its source-validated writer. A repeated observation of
+the same shift retains an existing later schedule expiry. An explicit dated
+correction or cancellation can still change it. History and state-version guards
+prevent a delayed live result from overwriting a newer decision.
+
+Child-with-partner presence is not exclusive custody. A presence-only condition
+that suppresses an activity when the child is with the partner does not suppress
+it when effective evidence also confirms the child is with the owner. This is
+shared condition evaluation for existing and future routines, independent of
+routine names and channels. Unknown or stale owner co-presence does not grant
+that exception. Other conditions, including extended absence, work, location and
+already-started/completed activity state, still apply independently. Clarification
+accounts for both child co-presence flags when evaluating these conditions.
+
 Current source (Unreleased) uses bounded, trusted owner-day references for routine
 feedback, so an earlier activity is not treated as skipped merely because a later
 activity is mentioned. Completion follows the routine's purpose: actual play or

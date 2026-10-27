@@ -42,8 +42,12 @@ def test_matrix_mixed_answer_keeps_durable_reconciliation_without_repeating_live
 ):
     """The real Matrix background path must preserve a future shift update."""
     from services import matrix_background as background
+    import config
+    from memory.conversation_history import append_message
 
     message = "Όχι, δεν είμαστε μαζί. Από αύριο δουλεύω πρωί όλη την εβδομάδα."
+    append_message(role="user", channel="matrix", content=message,
+                   db_path=config.CONVERSATION_DB_FILE)
     monkeypatch.setattr(extractor, "safe_gemini_call", lambda prompt: SimpleNamespace(text=
         '{"relation":"related","flags":{"partner_with_user":false},"continue_conversation":true}'))
     result = extractor.extract_and_update_context_flags(
@@ -78,11 +82,16 @@ def test_reconcile_only_preserves_schedule_without_model_or_live_writes(
     isolated_context, monkeypatch,
 ):
     """A separate mode can retain durable reconciliation after a guarded answer."""
+    import config
+    from memory.conversation_history import append_message
+
+    message = "Όχι, δεν είμαστε μαζί. Από αύριο δουλεύω πρωί όλη την εβδομάδα."
     routine_db.set_context_state("partner_with_user", "false")
+    append_message(role="user", channel="matrix", content=message,
+                   db_path=config.CONVERSATION_DB_FILE)
     monkeypatch.setattr(extractor, "infer_routine_reconciliation_directives",
                         lambda *args, **kwargs: _durable_shift_and_stale_presence())
-    extractor.reconcile_context_message(
-        "Όχι, δεν είμαστε μαζί. Από αύριο δουλεύω πρωί όλη την εβδομάδα.")
+    extractor.reconcile_context_message(message)
     assert routine_db.get_context_state("current_shift")["value"] == "morning"
     assert routine_db.get_context_state("partner_with_user")["value"] == "false"
 

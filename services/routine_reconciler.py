@@ -1524,7 +1524,7 @@ def _infer_llm_reconciliation_candidates(
     LLM-first extraction layer.
     Returns candidate directives in the same schema as rule-based candidates.
     """
-    if reason not in {"user_stated", "agent_inferred"}:
+    if reason not in {"user_stated", "agent_inferred", "live_message_context"}:
         return []
 
     try:
@@ -1572,6 +1572,13 @@ def _infer_llm_reconciliation_candidates(
         fact=fact
     )
 
+    if reason == "live_message_context":
+        prompt += ("\nFor this live-message pass, return only an explicit owner work-shift "
+                   "schedule or cancellation (context_key=current_shift). Other live "
+                   "presence flags have a separate source-validated writer. A current "
+                   "shift report is valid even when the owner is now at home after work. "
+                   "Do not infer a schedule from the assistant's acknowledgement.\n")
+
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])
         raw = getattr(resp, "content", "") or ""
@@ -1582,6 +1589,11 @@ def _infer_llm_reconciliation_candidates(
     out: list[dict] = []
     for impact in impacts:
         for directive in _llm_impact_to_directives(impact):
+            if reason == "live_message_context" and not (
+                directive.get("kind") == "context_state_set"
+                and directive.get("key") == "current_shift"
+            ):
+                continue
             if directive.get("key") == "current_shift":
                 value = directive.get("value")
                 operation = impact.get("context_operation", "set")

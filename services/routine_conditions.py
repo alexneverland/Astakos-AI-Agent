@@ -162,6 +162,14 @@ def _evaluate_context_flag(payload: dict, mode: str, context: dict) -> dict:
     
     matched = (actual_str == expected_str)
 
+    if (flag == "kid1_with_partner" and mode == "suppress_when_true"
+            and expected_str == "true" and matched
+            and str(context.get("kid1_with_user")).lower() == "true"):
+        # The child can be with both adults. This presence-only exclusion is
+        # about availability to the owner, not exclusive custody by the partner.
+        return {"allowed": True, "matched": False,
+                "reason": "child_also_with_user", "actual_value": actual}
+
     if mode == "allow_when_true":
         return {
             "allowed": matched,

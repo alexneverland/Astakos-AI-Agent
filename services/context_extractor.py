@@ -467,12 +467,50 @@ def extract_and_update_context_flags(
 def reconcile_context_message(user_text: str) -> None:
     """Apply durable routine updates without reinterpreting guarded live flags."""
     try:
+        from memory.conversation_history import guard_owner_history_version
+        from memory.event_log import log_event
+
+        current = datetime.now(ZoneInfo("Europe/Athens"))
+        options = {"db_path": config.CONVERSATION_DB_FILE}
+        marker = get_latest_trusted_user_rowid(**options)
+        rows = load_daily_state_messages(now=current, **options)
+        source = next((row for row in rows if row["rowid"] == marker), None)
+        if source is None or source["content"] != user_text:
+            return
+        expected_shift = get_context_state("current_shift")
         inferred = infer_routine_reconciliation_directives(
-            user_text, category="family", reason="live_message_context", now=datetime.now(),
+            user_text, category="family", reason="live_message_context", now=current,
         )
+        if get_latest_trusted_user_rowid(**options) != marker:
+            return
         live_keys = _CONTEXT_BOOLEAN_FLAGS | {"kid1_absence_scope", "state:kid1:outing"}
         directives = [item for item in inferred if not (
             item.get("kind") == "context_state_set" and item.get("key") in live_keys)]
+        shifts = [item for item in directives if item.get("kind") == "context_state_set"
+                  and item.get("key") == "current_shift"]
+        if shifts:
+            # The semantic date/value contract is validated by the reconciler.
+            # Its live caller adds the same history/state concurrency guards as
+            # ordinary context extraction instead of using an unguarded writer.
+            if len(shifts) != 1:
+                return
+            shift = shifts[0]
+            recorded_at = datetime.fromisoformat(source["timestamp"]) if source else current
+            if recorded_at.tzinfo is None:
+                recorded_at = recorded_at.replace(tzinfo=current.tzinfo)
+            from services.routine_context_evidence import _recorded_time
+            previous_at = _recorded_time((expected_shift or {}).get("updated_at"), current)
+            if expected_shift and (previous_at is None or previous_at > recorded_at):
+                return
+            value = "" if shift.get("context_operation") == "clear" else shift["value"]
+            with guard_owner_history_version(marker, **options) as valid:
+                saved = valid and set_context_states_if_unchanged(
+                    {"current_shift": (value, shift.get("until_date"))},
+                    {"current_shift": expected_shift}, recorded_at=recorded_at)
+            log_event("routines", "live_shift_reconciliation",
+                      outcome="applied" if saved else "state_changed",
+                      debug_type="reconciler_applied", debug_source="context_extractor")
+            directives = [item for item in directives if item not in shifts]
         if directives:
             apply_routine_reconciliation_directives(directives)
             print(f"[ContextExtractor] Applied {len(directives)} reconciler directive(s) from live message")
@@ -599,7 +637,16 @@ def _persist_context_payload(
         updates["kid1_away_reason"] = ("", today)
     for key in _CONTEXT_ENUM_VALUES:
         if key in payload and key != "kid1_absence_scope":
-            updates[key] = (payload[key], today)
+            expiry = today
+            previous = expected.get(key)
+            if (key == "current_shift" and previous
+                    and previous.get("value") == payload[key]
+                    and isinstance(previous.get("expires_at"), str)
+                    and previous["expires_at"] > today):
+                # Observing today's same shift does not revise its schedule.
+                # An explicit dated correction is owned by reconciliation.
+                expiry = previous["expires_at"]
+            updates[key] = (payload[key], expiry)
     if recorded_at is not None:
         from services.routine_context_evidence import _recorded_time
 

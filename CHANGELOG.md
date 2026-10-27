@@ -37,6 +37,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Live owner reports now reach the semantic dated work-shift reconciler instead
+  of relying only on legacy rules. Repeated same-shift observations preserve an
+  existing weekly expiry; source/state guards protect newer schedule decisions.
+- Child activity conditions no longer treat the partner's presence as exclusive
+  when fresh evidence also places the child with the owner. Clarification tracks
+  both co-presence flags; other activity and schedule restrictions remain active.
+
 - Recover missed Messenger preparation in mixed conversational requests through
   a bounded semantic recheck and native draft-write receipt. Preparation cannot
   batch an old draft send; subsequent sends retain revision-bound approval.
