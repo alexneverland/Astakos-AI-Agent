@@ -420,8 +420,27 @@ class RoutineFeedbackStore:
         Delivery callers must omit question metadata for Messenger draft offers
         and critical tool approvals, which use separate authorization paths.
         """
+        return self._delivered_question(now=now, reply_channel=reply_channel,
+                                        reply_event_id=reply_event_id, completed_only=False)
+
+    def completed_reply_question(self, *, now: datetime, reply_channel: str,
+                                 reply_event_id: str) -> RoutineFeedbackQuestion | RoutineFeedbackGroupQuestion | None:
+        """Resolve a completed exact receipt for correction-only interpretation.
+
+        This is not pending feedback or permission to replay an external action.
+        Callers must restrict selection to retraction of the returned date.
+        """
+        return self._delivered_question(now=now, reply_channel=reply_channel,
+                                        reply_event_id=reply_event_id, completed_only=True)
+
+    def _delivered_question(self, *, now: datetime, reply_channel: str | None,
+                            reply_event_id: str | None, completed_only: bool,
+                            ) -> RoutineFeedbackQuestion | RoutineFeedbackGroupQuestion | None:
+        """Validate canonical receipt identity for pending or completed feedback."""
         now = aware(now)
         explicit = reply_channel is not None or reply_event_id is not None
+        if completed_only and not explicit:
+            return None
         if explicit and (reply_channel not in ("web", "matrix", "telegram")
                          or not isinstance(reply_event_id, str) or not reply_event_id.strip()
                          or len(reply_event_id) > 512):
@@ -430,8 +449,9 @@ class RoutineFeedbackStore:
         try:
             rows = connection.execute("""SELECT routine_id, occurrence_date, delivered_at,
                 receipt_id, question_text, delivery_channel FROM routine_occurrences
-                WHERE delivered_at IS NOT NULL AND feedback IS NULL
-                AND question_text IS NOT NULL AND delivery_channel IS NOT NULL""")
+                WHERE delivered_at IS NOT NULL AND feedback IS ?
+                AND question_text IS NOT NULL AND delivery_channel IS NOT NULL""",
+                ("complete" if completed_only else None,))
             matches: list[RoutineFeedbackQuestion] = []
             identities: set[tuple[object, ...]] = set()
             for rid, day_text, sent_text, receipt, question, channel in rows:

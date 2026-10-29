@@ -82,3 +82,26 @@ unchanged. The canonical completion_retracted event records the correction.
 No context flags, history messages, other routine outcomes or baselines were
 manually changed. This manual repair is separate from offline verification and
 does not claim a live-model interpretation test.
+
+## Codex follow-up: completed reminder replies
+
+Review 4409627298 at 7996ccb correctly identified that an explicit reply to a
+completed reminder returns before inference: pending_question excludes complete
+feedback, although receipt ownership still routes that exact reply here.
+Owner authorized this narrow repair. Reuse one canonical delivered-question
+resolver with a completed-only mode requiring an explicit authenticated channel
+and receipt. Only when no pending question exists, resolve the completed target
+for correction-only selection, limit candidate dates to its exact occurrence,
+and reject all concrete actions except a single retract_complete. Recheck the
+same correlation, candidate revision and owner history before committing.
+Unknown receipts and external approvals remain closed; normal pending feedback
+keeps its existing resolver and permissions. No additional live data repair.
+
+Verification: 16 new native reply cases (13 initially failed / 3 guards passed).
+After repair, 329 feedback/store/reference cases, 211 channel/runtime/dispatch
+cases, and the nine-case Matrix file passed separately: 549 distinct relevant
+cases, with outbound sockets blocked. Exact current/past receipts invoke the
+production selector; wrong date/channel/receipt, untrusted input, owner/ledger
+races and non-correction actions preserve completion. Compile and diff checks
+pass. The previously reproduced combined-order Matrix draft failure remains
+documented above; no tests were skipped or unrelated fixtures changed.

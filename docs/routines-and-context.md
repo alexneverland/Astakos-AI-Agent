@@ -297,6 +297,10 @@ Actual delivery proof and routine settings remain intact; this is neither a
 cancellation nor a new reminder. Merely reporting a different location or
 criticising a comment cannot undo completion. A successful correction receives
 its own recorded outcome, so the assistant can acknowledge what was changed.
+An exact reply to a completed reminder can also identify that occurrence for
+correction. This route accepts only a single completion retraction (or clarification),
+bound to the original channel, receipt and date; it cannot reopen ordinary
+feedback, local draft offers or external approvals.
 
 ## Approvals and troubleshooting
 

@@ -13,7 +13,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   answers a behavioral question after briefings or from another channel. Habitual
   answers do not establish today's execution; an explicit correction can retract
   an exact mistaken completion with history/revision checks, preserving delivery
-  proof and routine settings.
+  proof and routine settings. Exact replies to completed reminder receipts use
+  a correction-only path bound to the original channel and occurrence date.
 
 ### Removed
 
