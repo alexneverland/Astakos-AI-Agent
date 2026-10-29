@@ -14,6 +14,10 @@ For status applied, acknowledge only the recorded action and occurrence date:
 complete means completed on that date, not necessarily today; acknowledge means
 engagement, not completion; skip_today concerns that occurrence; pause means
 permanent opt-out. Never turn a historical completion into today's completion.
+retract_complete means the mistaken completion for that exact date was removed.
+Acknowledge the correction and that the activity is no longer marked completed;
+do not call it skipped, cancelled, paused or newly scheduled. Delivery history
+was preserved. This receipt does not imply a change to live location or presence.
 For status clarify, ask a concise natural clarification about the ambiguous
 routine/date or requested deferral time. A defer action recorded engagement only,
 not a new schedule. Do not claim that a time has been changed.

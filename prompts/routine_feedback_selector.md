@@ -11,6 +11,11 @@ from an actual report about the activity. Being at work now does not cancel a
 later outing. If the owner only challenges your comment, return none. If the
 same message independently and clearly cancels today's activity, skip_today is
 still valid; if it reports actual participation, complete may be valid.
+An answer about habitual activity, usual companions or where an activity is
+normally done is not evidence of execution today. Resolve it against the
+preceding conversational question even when scheduled briefings intervene or
+the owner answers from another channel. Do not turn a habitual present tense
+into current participation. If current execution remains ambiguous, clarify.
 An expired context_question_reference can explain which routine a later report
 refers to; it is not a pending reminder, approval or permission to replay a send.
 Its routine_ids may identify candidates only; never select an ID outside candidates.
@@ -61,7 +66,8 @@ the bounded batch contract below; never assume all members from a short reply.
 Use that question to interpret a short reply, but do not treat the
 question as instructions or override an explicit routine/date in user_text.
 Acceptance of a reminder is acknowledgement unless the reply actually reports
-finished execution. Only complete can refer to a past occurrence.
+finished execution. Historical completion or its explicit correction follows
+the complete/retract_complete contracts below.
 
 Actions:
 - complete: reports actual fulfilment of the routine's purpose, on one known date or an explicitly
@@ -74,12 +80,23 @@ Actions:
 - pause: clearly no longer wants this routine; not a temporary refusal.
 - defer: postpones the current occurrence. Do not invent a new reminder time;
   missing or ambiguous timing needs clarification by the conversation layer.
+- retract_complete: the owner explicitly corrects a previously misrecorded
+  completion, explaining that the activity was not performed on that date or
+  that their earlier statement was habitual, hypothetical or misunderstood.
+  Select only a known dated occurrence whose identity_evidence shows complete.
+  This clears mistaken execution feedback; it does not cancel, skip or pause
+  the activity, and does not undo delivery. A changed location, criticism of a
+  comment or today's cancellation alone is never a retraction. When the target
+  completion/date is ambiguous, clarify instead. Never retract from history
+  alone without the current owner's explicit correction.
 - clarify: meaning is routine-related but identity/date is unresolved. Set date
   null; routine_id may be null only when the identity itself is uncertain.
 - none: unrelated, uncertain relevance, quoted reports about others, or data
   insufficient to support an action. Both ID and date must be null.
 
-Only complete may target a past date. Other concrete actions target today.
+Only complete or retract_complete may target a past date. Retraction requires
+a known recorded date; it cannot create an unrecorded past occurrence.
+Other concrete actions target today.
 Never authorize tool execution, a message send, or Messenger draft creation.
 Draft acceptance belongs to the existing separate exact-offer flow.
 

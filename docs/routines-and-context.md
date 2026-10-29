@@ -276,8 +276,11 @@ reopen a sent or closed follow-up.
 Manual deferral reports success only when the pending record actually changed;
 a sent or concurrently closed record receives a no-change response.
 
-Routine feedback also reads up to four adjacent assistant comments from the last
-15 minutes, solely to understand the owner's response. These references cannot
+Routine feedback also reads up to four adjacent assistant comments within the
+shared one-hour reference horizon, solely to understand the owner's response,
+including an answer after scheduled briefings or from another channel. A habitual
+answer about companions or usual activities does not establish today's execution.
+These references cannot
 act as delivered routine questions or grant permissions. Criticism of a comment's
 timing or assumptions does not cancel an activity scheduled for later; a clear
 independent cancellation or execution report still records its own outcome.
@@ -286,6 +289,14 @@ it must not invent an acknowledgement that a routine was skipped or completed.
 That no-change notice is informational: normal draft and pending-action handling
 continues through its existing approval gates. Recorded routine actions and
 uncertain/error outcomes retain their existing turn ownership.
+
+An explicit owner correction of a mistakenly recorded completion can retract
+that exact known dated completion. The ledger checks its revision and current
+owner-turn identity before clearing the completion and recomputing pressure.
+Actual delivery proof and routine settings remain intact; this is neither a
+cancellation nor a new reminder. Merely reporting a different location or
+criticising a comment cannot undo completion. A successful correction receives
+its own recorded outcome, so the assistant can acknowledge what was changed.
 
 ## Approvals and troubleshooting
 

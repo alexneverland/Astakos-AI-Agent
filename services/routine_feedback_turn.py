@@ -54,10 +54,12 @@ def _feedback_conversation_reference(*, now: datetime, rowid: int, db_path: str)
             stamp = stamp.replace(tzinfo=now.tzinfo) if stamp.tzinfo is None else aware(stamp)
         except (TypeError, ValueError):
             continue
-        if timedelta(0) <= now-stamp <= timedelta(minutes=15):
+        # Reuse the shared state-reference horizon. Scheduled briefings can
+        # intervene before the owner answers a conversational question.
+        if timedelta(0) <= now-stamp <= timedelta(hours=1):
             content = str(row.get("content") or "")
             if len(content) <= 2000:
-                commentary.append({**row, "kind": "conversation_reference"})
+                commentary.append({**row, "timestamp": stamp.isoformat(), "kind": "conversation_reference"})
     rows += commentary[-4:]
     rows.sort(key=lambda row: (row["timestamp"], row["rowid"]))
     requests = None
@@ -425,9 +427,13 @@ def process_feedback_turn(
                 return FeedbackTurnResult("stale")
             return FeedbackTurnResult("applied", selection,
                                       routine_name=candidates.get(selection.routine_id))
-        applied = store.record_feedback(selection.routine_id, selection.occurrence_date,
-            selection.action, at=now, expected_revision=revisions[selection.routine_id],
-            is_current=is_current)
+        if selection.action == "retract_complete":
+            applied = store.retract_completion(selection.routine_id, selection.occurrence_date,
+                at=now, expected_revision=revisions[selection.routine_id], is_current=is_current)
+        else:
+            applied = store.record_feedback(selection.routine_id, selection.occurrence_date,
+                selection.action, at=now, expected_revision=revisions[selection.routine_id],
+                is_current=is_current)
         if not applied:
             return FeedbackTurnResult("stale", selection)
         return FeedbackTurnResult("clarify" if selection.action == "defer" else "applied",

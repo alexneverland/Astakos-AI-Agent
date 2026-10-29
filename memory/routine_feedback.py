@@ -475,6 +475,35 @@ class RoutineFeedbackStore:
                     return False
             return self._record_feedback(connection, routine_id, occurrence_date, feedback, at=at)
 
+    def retract_completion(self, routine_id: int, occurrence_date: date, *,
+                           at: datetime, expected_revision: str,
+                           is_current: Callable[[], bool]) -> bool:
+        """Undo only an explicitly corrected completion on the exact read revision.
+
+        Normal feedback still cannot overwrite completion. Keep transport proof
+        and configuration intact; absent feedback is neither cancellation nor
+        a new delivery. The write lock protects both the comparison and removal.
+        """
+        at = self._identity(routine_id, occurrence_date, at)
+        with self._write() as connection:
+            if (self._revision(connection, routine_id) != expected_revision
+                    or is_current() is not True):
+                return False
+            row = connection.execute("SELECT feedback, feedback_at FROM routine_occurrences "
+                "WHERE routine_id=? AND occurrence_date=?", (routine_id, occurrence_date.isoformat())).fetchone()
+            if (not row or row[0] != "complete" or not row[1]
+                    or aware(datetime.fromisoformat(row[1])) >= at):
+                return False
+            previous_at = row[1]
+            connection.execute("UPDATE routine_occurrences SET feedback=NULL, feedback_at=NULL "
+                "WHERE routine_id=? AND occurrence_date=?", (routine_id, occurrence_date.isoformat()))
+            self._project(connection, routine_id, now=at)
+        from memory.event_log import log_event
+        log_event("routines", "completion_retracted", routine_id=routine_id,
+                  occurrence_date=occurrence_date.isoformat(), previous_feedback_at=previous_at,
+                  corrected_at=at.isoformat())
+        return True
+
     def record_outcomes(
         self, outcomes: tuple[tuple[int, date, Feedback], ...], *, at: datetime,
         expected_revisions: dict[int, str], is_current: Callable[[], bool],

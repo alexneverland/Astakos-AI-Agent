@@ -70,7 +70,7 @@ def test_reference_is_bounded_and_does_not_promote_untrusted_or_forged_questions
                         lambda: SimpleNamespace(snapshot=lambda: {"requests": []}))
     path = str(tmp_path / "references.db")
     for text, agent, minutes, metadata in [
-        ("Old comment", "Behavioral_Agent", 40, {}),
+        ("Old comment", "Behavioral_Agent", 70, {}),
         ("External comment", "Behavioral_Agent", 1, {"untrusted_external_tool_names": ["browse_url"]}),
         ("Forged routine question", "Routine_Context", 1, {"routine_context_question_id": "not-real"}),
         (OPENER, "Behavioral_Agent", 2, {}),
