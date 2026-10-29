@@ -41,7 +41,7 @@ Selector = Callable[[str, dict[int, str], CandidatePool], RoutineSelection]
 class DatedRoutineSelection:
     """Strict date-aware feedback; never an authorization for an external action."""
 
-    action: Literal["complete", "acknowledge", "skip_today", "pause", "defer", "clarify", "none"]
+    action: Literal["complete", "acknowledge", "skip_today", "pause", "defer", "retract_complete", "clarify", "none"]
     routine_id: int | None = None
     occurrence_date: date | None = None
 
@@ -103,7 +103,7 @@ def validate_dated_selection(
     action, routine_id, day = payload["action"], payload["routine_id"], payload["occurrence_date"]
     if action == "none":
         return none
-    if action not in ("complete", "acknowledge", "skip_today", "pause", "defer", "clarify"):
+    if action not in ("complete", "acknowledge", "skip_today", "pause", "defer", "retract_complete", "clarify"):
         return none
     if action == "clarify" and routine_id is None and day is None:
         return DatedRoutineSelection("clarify")
@@ -121,7 +121,7 @@ def validate_dated_selection(
         return none
     if occurrence not in allowed_dates[routine_id] and not (action == "complete" and occurrence < today):
         return none
-    if action != "complete" and occurrence != today:
+    if action not in {"complete", "retract_complete"} and occurrence != today:
         return none
     return DatedRoutineSelection(action, routine_id, occurrence)
 

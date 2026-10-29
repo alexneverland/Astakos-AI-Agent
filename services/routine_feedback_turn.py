@@ -54,10 +54,12 @@ def _feedback_conversation_reference(*, now: datetime, rowid: int, db_path: str)
             stamp = stamp.replace(tzinfo=now.tzinfo) if stamp.tzinfo is None else aware(stamp)
         except (TypeError, ValueError):
             continue
-        if timedelta(0) <= now-stamp <= timedelta(minutes=15):
+        # Reuse the shared state-reference horizon. Scheduled briefings can
+        # intervene before the owner answers a conversational question.
+        if timedelta(0) <= now-stamp <= timedelta(hours=1):
             content = str(row.get("content") or "")
             if len(content) <= 2000:
-                commentary.append({**row, "kind": "conversation_reference"})
+                commentary.append({**row, "timestamp": stamp.isoformat(), "kind": "conversation_reference"})
     rows += commentary[-4:]
     rows.sort(key=lambda row: (row["timestamp"], row["rowid"]))
     requests = None
@@ -288,8 +290,13 @@ def process_stored_feedback_turn(
     if trusted is not True:
         return FeedbackTurnResult("none")
     try:
-        pending = store.pending_question(now=now, reply_channel=reply_channel,
-                                         reply_event_id=reply_event_id)
+        question_loader = store.pending_question
+        pending = question_loader(now=now, reply_channel=reply_channel, reply_event_id=reply_event_id)
+        correction_only = False
+        if pending is None and reply_channel is not None and reply_event_id is not None:
+            question_loader = store.completed_reply_question
+            pending = question_loader(now=now, reply_channel=reply_channel, reply_event_id=reply_event_id)
+            correction_only = pending is not None
         if (reply_channel is not None or reply_event_id is not None) and pending is None:
             return FeedbackTurnResult("none")
         if reply_event_id is not None:
@@ -299,13 +306,27 @@ def process_stored_feedback_turn(
                 return FeedbackTurnResult("none")
             candidates = {rid: candidates[rid] for rid in member_ids}
             allowed_dates = {rid: allowed_dates.get(rid, frozenset()) for rid in member_ids}
+            if correction_only:
+                allowed_dates = {rid: days & frozenset({pending.occurrence_date})
+                                 for rid, days in allowed_dates.items()}
+                original_selector = selector
+
+                def select_correction(*args, **kwargs) -> DatedRoutineSelection:
+                    """A resolved receipt cannot reopen ordinary feedback or approvals."""
+                    selection = original_selector(*args, **kwargs)
+                    if (isinstance(selection, DatedRoutineSelection)
+                            and selection.action in {"retract_complete", "none", "clarify"}):
+                        return selection
+                    return DatedRoutineSelection("none")
+
+                selector = select_correction
 
         def correlation_is_current() -> bool:
             """Reload the same delivery/outcome, including response-window expiry."""
             if catalog_is_current is not None and not catalog_is_current():
                 return False
-            return store.pending_question(now=clock(), reply_channel=reply_channel,
-                                          reply_event_id=reply_event_id) == pending
+            return question_loader(now=clock(), reply_channel=reply_channel,
+                                   reply_event_id=reply_event_id) == pending
 
         fresh = make_feedback_freshness(user_rowid=user_rowid,
             db_path=conversation_db_path, now=now, clock=clock,
@@ -425,9 +446,13 @@ def process_feedback_turn(
                 return FeedbackTurnResult("stale")
             return FeedbackTurnResult("applied", selection,
                                       routine_name=candidates.get(selection.routine_id))
-        applied = store.record_feedback(selection.routine_id, selection.occurrence_date,
-            selection.action, at=now, expected_revision=revisions[selection.routine_id],
-            is_current=is_current)
+        if selection.action == "retract_complete":
+            applied = store.retract_completion(selection.routine_id, selection.occurrence_date,
+                at=now, expected_revision=revisions[selection.routine_id], is_current=is_current)
+        else:
+            applied = store.record_feedback(selection.routine_id, selection.occurrence_date,
+                selection.action, at=now, expected_revision=revisions[selection.routine_id],
+                is_current=is_current)
         if not applied:
             return FeedbackTurnResult("stale", selection)
         return FeedbackTurnResult("clarify" if selection.action == "defer" else "applied",
