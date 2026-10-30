@@ -484,6 +484,13 @@ def append_to_chat_history(
         )
         shared_message_id = saved.get("id")
         shared_message_rowid = saved.get("rowid")
+        if mirror_target is not None:
+            try:
+                print("[WebMirror]: " + json.dumps({"event": "mirror_queued",
+                    "message_id": shared_message_id, "rowid": shared_message_rowid,
+                    "channel": mirror_target}), flush=True)
+            except (OSError, UnicodeError, ValueError):
+                pass
         if role == "user":
             from services.behavioral_event_scheduler import schedule_persisted_user_intake
 
@@ -1052,25 +1059,6 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         context_answer_graph_context, try_context_question_reply,
     )
 
-    context_answer = await asyncio.to_thread(
-        try_context_question_reply, user_input, "web", trusted_owner=True,
-        external_derived=bool(photo_path),
-    )
-    if context_answer.consumed and not context_answer.continue_conversation:
-        reply = context_answer.reply
-        user_saved = append_to_chat_history(
-            "user", user_input, return_saved=True, mirror_target=mirror_target,
-        )
-        assistant_saved = append_to_chat_history(
-            "assistant", reply, agent="Routine_Context", return_saved=True,
-            mirror_target=mirror_target,
-        )
-        enqueue_fast_task(log_exchange, user_input, reply, "Routine_Context", "web")
-        return JSONResponse({
-            "agent": "Routine_Context", "response": reply,
-            "user_rowid": user_saved["rowid"], "assistant_rowid": assistant_saved["rowid"],
-        })
-
     # Persist this authenticated turn before routine-completion inference/mutation.
     # Reuse the identity on every subsequent path rather than inserting it again.
     asset_history_kwargs = {}
@@ -1087,6 +1075,24 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             or not current_history_id):
         logging.error("Web turn stopped: user history identity was not persisted")
         return JSONResponse({"error": t("api.server.internal_error")}, status_code=503)
+
+    context_answer = await asyncio.to_thread(
+        try_context_question_reply, user_input, "web", trusted_owner=True,
+        external_derived=bool(photo_path),
+    )
+    if context_answer.consumed and not context_answer.continue_conversation:
+        reply = context_answer.reply
+        user_saved = current_history_saved
+        assistant_saved = append_to_chat_history(
+            "assistant", reply, agent="Routine_Context", return_saved=True,
+            mirror_target=mirror_target,
+        )
+        enqueue_fast_task(log_exchange, user_input, reply, "Routine_Context", "web")
+        return JSONResponse({
+            "agent": "Routine_Context", "response": reply,
+            "user_rowid": user_saved["rowid"], "assistant_rowid": assistant_saved["rowid"],
+        })
+
     if context_answer.context_flags_processed and context_answer.continue_conversation:
         from config import CONVERSATION_DB_FILE
         from services.context_extractor import reconcile_context_message

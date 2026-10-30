@@ -16,6 +16,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Optional Messenger preparation recovery no longer runs during unrelated
+  tool-only steps, reuses identical guarded evidence and has a local request
+  budget. Web input is queued for mirroring before context inference; mirror
+  diagnostics distinguish queue age from delivery duration.
+
 - Messenger preparation and pending-draft decisions read structured provider
   answer text instead of stringifying content blocks. Mixed requests still
   require native draft persistence, and sending retains revision-bound approval.

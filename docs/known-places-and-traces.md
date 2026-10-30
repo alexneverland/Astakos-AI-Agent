@@ -74,6 +74,16 @@ To investigate a slow reply, find its trace ID, compare pre-graph spans, model
 calls and backoffs, and inspect long named stages or uncovered time. Historical
 traces lack these spans; their missing intervals cannot be reconstructed.
 
+Web text input is persisted and queued for display mirroring after authentication
+and the firewall, before context-question inference. Context-owned early replies
+reuse that same owner row instead of inserting it again. `[WebMirror]:` JSON
+events correlate `mirror_queued`, `mirror_delivery_started`, `mirror_delivered`,
+`mirror_pending` and `mirror_ack_failed` by message ID and row ID. Delivery
+events show queue age and attempt duration without message text. Queue age also
+includes previous failed attempts; it alone does not prove scheduler starvation.
+Mirrors remain on the existing serial scheduler and retain ordered, selected
+channel delivery and confirmed-receipt acknowledgement.
+
 ### Agent/tool evidence
 
 Matrix graph turns use the shared ExecutionTrace recorder. Day files in

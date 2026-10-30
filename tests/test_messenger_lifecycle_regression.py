@@ -17,6 +17,9 @@ def lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
     import core.graph as graph
     import core.approval as approval
     import tools.web as web
+    # These legacy model doubles predate request options. The native SDK budget
+    # is verified separately; preserve their semantic/persistence scenarios.
+    monkeypatch.setattr(agents, "invoke_messenger_decision", lambda model, rows: model.invoke(rows))
     from core.messenger_draft import save_draft
     monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(tmp_path / "draft.json"))
     monkeypatch.setattr(approval, "PENDING_FILE", str(tmp_path / "pending.json"))

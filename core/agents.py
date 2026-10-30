@@ -7,6 +7,7 @@
 
 from copy import copy
 from services.messenger_lifecycle import messenger_lifecycle_boundary, require_draft_tool_result, recover_preparation_reason
+from core.brain import invoke_messenger_decision
 from core.i18n import t
 import json
 import os
@@ -706,7 +707,11 @@ def chat_agent_node(state: AgentState):
 
     invoke_started = perf_counter()
     response = bound_llm.invoke(final_messages)
-    draft_tool_reason = recover_preparation_reason(history, response, draft_tool_reason, lambda messages: llm.invoke(messages))
+    preparation_decisions = dict(state.get("messenger_preparation_decisions") or {})
+    draft_tool_reason = recover_preparation_reason(
+        history, response, draft_tool_reason, lambda messages: invoke_messenger_decision(llm, messages),
+        decision_cache=preparation_decisions,
+    )
     response = require_draft_tool_result(response, draft_tool_reason, final_messages, llm)
     invoke_ms = int((perf_counter() - invoke_started) * 1000)
 
@@ -722,6 +727,7 @@ def chat_agent_node(state: AgentState):
         "current_agent": "Chat_Agent",
         "messages": [response],
         "messenger_draft_preparation_authorized": bool(draft_tool_reason),
+        "messenger_preparation_decisions": preparation_decisions,
         "active_draft_edit_context_isolated": active_draft_edit_context_isolated,
     }
 
@@ -1227,6 +1233,8 @@ def web_agent_node(state: AgentState):
         ]
         print("[Web Search]: requested result limit reached; hiding additional search tools.")
 
+    preparation_decisions = dict(state.get("messenger_preparation_decisions") or {})
+
     if web_errors and not web_successes:
         guarded_reply = build_web_failure_reply(
             latest_user_text,
@@ -1234,12 +1242,16 @@ def web_agent_node(state: AgentState):
         )
         from langchain_core.messages import AIMessage as _AIMsg
         failure = _AIMsg(content=guarded_reply)
-        draft_tool_reason = recover_preparation_reason(history, failure, draft_tool_reason, lambda messages: llm.invoke(messages))
+        draft_tool_reason = recover_preparation_reason(
+            history, failure, draft_tool_reason, lambda messages: invoke_messenger_decision(llm, messages),
+            decision_cache=preparation_decisions,
+        )
         failure = require_draft_tool_result(failure, draft_tool_reason, final_messages, llm)
         return {
             "messages": [failure],
             "current_agent": "Web_Agent",
             "messenger_draft_preparation_authorized": bool(draft_tool_reason),
+            "messenger_preparation_decisions": preparation_decisions,
         }
 
     if _has_exhausted_web_research_budget(history):
@@ -1258,7 +1270,10 @@ def web_agent_node(state: AgentState):
     else:
         result = llm.bind_tools(web_tools).invoke(final_messages)
 
-    draft_tool_reason = recover_preparation_reason(history, result, draft_tool_reason, lambda messages: llm.invoke(messages))
+    draft_tool_reason = recover_preparation_reason(
+        history, result, draft_tool_reason, lambda messages: invoke_messenger_decision(llm, messages),
+        decision_cache=preparation_decisions,
+    )
     result = require_draft_tool_result(result, draft_tool_reason, final_messages, llm)
     result = _trim_web_research_tool_calls(result, history)
 
@@ -1284,6 +1299,7 @@ def web_agent_node(state: AgentState):
         "current_agent": "Web_Agent",
         "messages": [result],
         "messenger_draft_preparation_authorized": bool(draft_tool_reason),
+        "messenger_preparation_decisions": preparation_decisions,
         "active_draft_edit_context_isolated": active_draft_edit_context_isolated,
     }
 

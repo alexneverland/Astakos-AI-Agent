@@ -165,6 +165,19 @@ def get_voice_provider_adapter() -> AIProviderAdapter:
     return _voice_provider_adapter
 
 
+def invoke_messenger_decision(model: Any, messages: list[Any]) -> Any:
+    """Bound the optional tool-free recovery call without changing main inference.
+
+    Google translates max_retries to SDK total attempts, so one disables retries
+    for this helper. Other providers keep their existing SDK retry policy while
+    receiving an invocation-local request timeout.
+    """
+    options: dict[str, Any] = {"timeout": 15.0}
+    if _effective_provider_name in {"gemini", "vertex"}:
+        options["max_retries"] = 1
+    return model.invoke(messages, **options)
+
+
 def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
     from time import perf_counter
     """
