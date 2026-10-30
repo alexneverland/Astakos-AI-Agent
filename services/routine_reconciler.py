@@ -1309,6 +1309,28 @@ def _rule_user_at_work(normalized: str, dates: list[str], now) -> list[dict]:
     return [d_state]
 
 
+def _reconciler_answer_text(content: object) -> str:
+    """Assemble only answer text without inserting bytes into structured JSON.
+
+    Scalar text and legacy string fragments remain supported. Structured blocks
+    must identify themselves as text; reasoning, tools and other metadata never
+    become an answer merely because they carry a text field.
+    """
+    if isinstance(content, str):
+        return content
+    blocks = [content] if isinstance(content, dict) else content
+    if not isinstance(blocks, list):
+        return ""
+    parts: list[str] = []
+    for block in blocks:
+        if isinstance(block, str):
+            parts.append(block)
+        elif (isinstance(block, dict) and block.get("type") == "text"
+                and isinstance(block.get("text"), str)):
+            parts.append(block["text"])
+    return "".join(parts)
+
+
 def _safe_json_list(raw: str) -> list[dict]:
     try:
         from core.utils import extract_json_from_text
@@ -1603,10 +1625,8 @@ def _infer_llm_reconciliation_candidates(
             prompt += format_untrusted_tool_result("queued shift reference", json.dumps(shift_reference, ensure_ascii=False))
 
     try:
-        from core.ai_provider import normalize_provider_text_content
-
         resp = llm.invoke([HumanMessage(content=prompt)])
-        raw = normalize_provider_text_content(getattr(resp, "content", ""))
+        raw = _reconciler_answer_text(getattr(resp, "content", ""))
     except Exception as exc:
         if reason == "live_message_context":
             from memory.event_log import log_event

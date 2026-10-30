@@ -9,9 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
-- Work-shift reconciliation normalizes structured provider text blocks before
-  parsing, preserving the stated weekly endpoint instead of silently leaving
-  only a daily observation. Explicit single-day schedules retain their own date.
+- Work-shift reconciliation assembles only provider answer text losslessly before
+  parsing, preserving weekly endpoints and fragmented JSON strings. Reasoning and
+  tool metadata cannot supply state updates. Explicit single-day schedules retain
+  their own date.
 
 - Dated routine feedback retains delayed conversational references when an owner
   answers a behavioral question after briefings or from another channel. Habitual

@@ -15,7 +15,7 @@ WEEKLY = "και βαρδια σου εχω πει αυτη την εβδομα�
 
 
 @pytest.mark.usefixtures("offline_behavioral_io")
-@pytest.mark.parametrize("shape", ["string", "text_blocks", "split_blocks", "thinking_and_text"])
+@pytest.mark.parametrize("shape", ["string", "text_blocks", "split_blocks", "split_value", "thinking_and_text"])
 @pytest.mark.parametrize("scope", ["week", "day"])
 def test_full_shift_extraction_preserves_provider_schedule(
     isolated_shift: tuple, monkeypatch: pytest.MonkeyPatch, shape: str, scope: str,
@@ -40,6 +40,9 @@ def test_full_shift_extraction_preserves_provider_schedule(
         raw = [{"type": "text", "text": payload, "extras": {"signature": "opaque-provider-metadata"}}]
     elif shape == "split_blocks":
         raw = [{"type": "text", "text": "["}, {"type": "text", "text": payload[1:]}]
+    elif shape == "split_value":
+        split = payload.index("morning")+3
+        raw = [{"type": "text", "text": payload[:split]}, {"type": "text", "text": payload[split:]}]
     elif shape == "thinking_and_text":
         raw = [{"type": "thinking", "thinking": json.dumps([_shift("2026-10-28", "night")])},
                {"type": "text", "text": payload}]
@@ -72,6 +75,8 @@ def test_full_shift_extraction_preserves_provider_schedule(
     [{"type": "tool_call", "name": "set_context_state", "args": {"current_shift": "night"}}],
     [{"type": "text", "text": "not JSON"}],
     [{"type": "text", "text": json.dumps([_shift("not-a-date", "night")])}],
+    [{"type": "reasoning", "text": json.dumps([_shift("2026-10-30", "night")])}],
+    [{"type": "tool_result", "text": json.dumps([_shift("2026-10-30", "night")])}],
 ])
 def test_invalid_provider_content_cannot_replace_known_schedule(isolated_shift: tuple, content: object) -> None:
     """Non-answer metadata, malformed output and invalid dates confer no write."""
@@ -82,7 +87,36 @@ def test_invalid_provider_content_cannot_replace_known_schedule(isolated_shift: 
     before = routine_db.get_context_state("current_shift")
     saved = history.append_message(role="user", content="Δεν έχω επιβεβαιώσει αλλαγή.", channel="matrix",
                                    timestamp=WEDNESDAY, db_path=path)
-    model.invoke = lambda messages: SimpleNamespace(content=content)
+    calls = []
+
+    def reply(messages: list) -> SimpleNamespace:
+        """Prove the source reached inference before asserting a rejected write."""
+        calls.append(True)
+        return SimpleNamespace(content=content)
+
+    model.invoke = reply
     extractor.reconcile_context_message(saved["content"], saved["rowid"], path,
                                         WEDNESDAY+timedelta(seconds=30))
+    assert calls == [True]
     assert routine_db.get_context_state("current_shift") == before
+
+
+@pytest.mark.usefixtures("offline_behavioral_io")
+def test_reconciliation_before_ordinary_observation_keeps_week(
+    isolated_shift: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The later same-report writer must retain a committed weekly endpoint."""
+    model, history, path = isolated_shift
+    event = history.append_message(role="user", content=WEEKLY, channel="web",
+                                   timestamp=WEDNESDAY, db_path=path)
+    responses = iter([json.dumps([_shift()]), "[]"])
+    model.invoke = lambda messages: SimpleNamespace(content=next(responses))
+    extractor.reconcile_context_message(WEEKLY, event["rowid"], path, WEDNESDAY+timedelta(seconds=1))
+    assert routine_db.get_context_state("current_shift")["expires_at"] == "2026-10-30"
+    monkeypatch.setattr(extractor, "_recent_user_context_hint", lambda channel: "")
+    monkeypatch.setattr(extractor, "safe_gemini_call", lambda prompt: SimpleNamespace(text=json.dumps({
+        "flags": {"current_shift": "morning"}, "event_rowid": event["rowid"],
+        "support_rowids": [event["rowid"]]})))
+    extractor.extract_and_update_context_flags(WEEKLY, channel="web", conversation_db_path=path,
+                                              now=WEDNESDAY+timedelta(seconds=2))
+    assert routine_db.get_context_state("current_shift")["expires_at"] == "2026-10-30"

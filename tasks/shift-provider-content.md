@@ -72,3 +72,31 @@ effective morning shift. A bounded owner_authorized_shift_expiry_repair event
 records this repair. No other context, routine, baseline, credentials or runtime
 was manually changed. Scoped commit/push/PR are now authorized; merge, branch
 deletion and review polling remain separate actions.
+
+## Review repair authorization
+
+Owner authorized review repairs after complete review retrieval at 616bee0.
+Codex 4420911645: valid shift JSON in non-answer reasoning/tool_result text can
+currently reach persistence. Sourcery 4420902686: joining answer fragments with
+spaces alters JSON strings such as morning. Reproduce both with native stores;
+replace the general display normalizer at this structured-output boundary with
+an answer-only, lossless assembler. Keep shared display normalization unchanged.
+
+Sourcery 4420902682 claims later ordinary extraction can truncate the same-report
+weekly expiry. Existing observed_shift_expiry is already used by that writer.
+Verify the exact reconciliation-first/ordinary-second order without production
+changes; do not remove the established observation-expiry policy.
+
+Verified RED at the reviewed commit: the split morning value left a daily expiry,
+and both reasoning/text and tool_result/text containing valid shift JSON changed
+native state to night (3 failed / 15 passed). The reconciliation-first ordering
+test passed before repair: ordinary _persist_context_payload already delegates
+to observed_shift_expiry, which retains the longer Friday endpoint.
+
+The final boundary owns an answer-only assembler instead of the general display
+normalizer: scalar/legacy text is retained, only type=text structured blocks
+contribute text, and fragments concatenate without added or stripped characters.
+The shared provider/display normalizer remains unchanged. Verification: 84
+shift/provenance cases plus 320 context/reconciler cases passed (404 distinct),
+with 18 new cases in this PR. Compile and diff checks pass. No new live data,
+config, provider or runtime operation was performed during review repair.
