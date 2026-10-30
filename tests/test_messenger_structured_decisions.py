@@ -58,7 +58,9 @@ def test_reported_request_persists_draft_then_send_requires_approval(
                 return decision('{"prepare":false}' if self.send_turn else '{"prepare":true}', shape)
             if "MESSENGER_LIFECYCLE_DECISION" in first:
                 return decision('{"action":"send"}', shape)
-            if self.forced:
+            if self.send_turn:
+                return AIMessage(content="", tool_calls=[{"name":"execute_local_pipeline", "id":"send-reviewed", "args":{}}])
+            if not self.send_turn:
                 return AIMessage(content="", tool_calls=[{"name": "relay_local_payload", "id": "saved-tender",
                     "args": {"target_entity": "Demo", "payload_data": DRAFT}}])
             return AIMessage(content=f"Προτεινόμενο μήνυμα: «{DRAFT}» Θέλεις να το στείλω;")
@@ -94,11 +96,12 @@ def test_reported_request_persists_draft_then_send_requires_approval(
 @pytest.mark.parametrize("kind", ["reasoning", "tool_result", "unknown"])
 def test_non_answer_text_never_authorizes_action(resolver: str, kind: str) -> None:
     """Valid decision JSON in non-answer text remains data, never permission."""
-    from services.messenger_intent import resolve_contextual_draft_request, resolve_pending_draft_action
+    from services.messenger_intent import resolve_pending_draft_action
+    from services.messenger_lifecycle import primary_preparation_result
     messages = [HumanMessage(content=REQUEST)]
     response = AIMessage(content=[{"type": kind, "text": '{"prepare":true}' if resolver == "prepare" else '{"action":"send"}'}])
     if resolver == "prepare":
-        assert not resolve_contextual_draft_request(messages, lambda rows: response)
+        assert primary_preparation_result({}, messages, response)[1] is False
     else:
         assert resolve_pending_draft_action(messages, {"status": "pending", "message": DRAFT}, lambda rows: response) == "none"
 
@@ -107,7 +110,8 @@ def test_non_answer_text_never_authorizes_action(resolver: str, kind: str) -> No
 @pytest.mark.parametrize("case", ["untrusted", "malformed", "wrong_type"])
 def test_invalid_decision_or_untrusted_owner_fails_closed(resolver: str, case: str) -> None:
     """Block shape support must not widen the owner or decision-value protocol."""
-    from services.messenger_intent import resolve_contextual_draft_request, resolve_pending_draft_action
+    from services.messenger_intent import resolve_pending_draft_action
+    from services.messenger_lifecycle import primary_preparation_result
     messages = [HumanMessage(content=REQUEST, additional_kwargs={
         "untrusted_external_tool_names": ["browse_url"]} if case == "untrusted" else {})]
     text = ('{"prepare":true}' if resolver == "prepare" else '{"action":"send"}')
@@ -123,10 +127,10 @@ def test_invalid_decision_or_untrusted_owner_fails_closed(resolver: str, case: s
         return decision(text, "blocks")
 
     if resolver == "prepare":
-        assert not resolve_contextual_draft_request(messages, invoke)
+        assert primary_preparation_result({}, messages, invoke(messages))[1] is False
     else:
         assert resolve_pending_draft_action(messages, {"status": "pending", "message": DRAFT}, invoke) == "none"
-    assert bool(calls) is (case != "untrusted")
+    assert bool(calls) is (resolver == "prepare" or case != "untrusted")
 
 
 @pytest.mark.parametrize("action", ["send", "retire", "none"])

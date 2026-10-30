@@ -322,10 +322,12 @@ def _score_place_match(place: dict, profile: dict) -> float:
 def relay_local_payload(target_entity: str, payload_data: str, image_path: str = "",
                         state: Annotated[dict, InjectedState] = None) -> str:
     """
-    Saves a draft Messenger (Facebook) message.
-    Use this WHEN you propose to the user to send a message,
-    before obtaining their final approval.
-    Optionally, provide an image_path to attach an image along with the message.
+    Save a local reviewable Messenger draft requested by the latest owner turn.
+    Use for preparation or revision even inside a mixed conversational request.
+    Resolve target_entity and payload_data from that owner turn and its dialogue.
+    This never sends; show the actual saved receipt before separate send approval.
+    Do not use for declined offers, unrelated chat, quotes or bare send commands.
+    Optionally provide an existing image_path for the requested attachment.
     """
     from core.messenger_draft import save_draft
 
@@ -348,6 +350,10 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
         return t("tools.web.msg_draft_err_sanitized")
 
     if state is not None:
+        if state.get("messenger_draft_preparation_authorized") is True:
+            from services.messenger_lifecycle import primary_preparation_available
+            if not primary_preparation_available(state, state.get("messages", [])):
+                return t("tools.web.msg_draft_err_reason", reason="Draft preparation context changed")
         if state.get("messenger_draft_preparation_authorized") is False:
             from core.approval import _is_explicit_messenger_draft_creation
             if not _is_explicit_messenger_draft_creation(

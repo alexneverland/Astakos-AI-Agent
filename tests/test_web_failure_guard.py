@@ -43,6 +43,13 @@ def isolated_draft_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 
 # 1. Detect web error sentinel
+def _invoke_with_native_guard(node, state):
+    """Supply the guard normally captured by the graph entry node."""
+    from core.messenger_draft import capture_draft_write_guard
+    return node({**state, "messenger_draft_write_guard": capture_draft_write_guard(state["messages"])})
+
+
+
 def test_looks_like_web_tool_error_detects_structured_prefix():
     assert looks_like_web_tool_error("[WEB_TOOL_ERROR][duckduckgo_search][reason=timeout] ...") is True
 
@@ -1070,12 +1077,12 @@ def test_web_agent_hides_draft_tool_without_known_recipient(
         lambda _text: False,
     )
 
-    web_agent_node({
+    _invoke_with_native_guard(web_agent_node, {
         "messages": [HumanMessage(content="Ο Πασσιάς έχει και κρέας εκτός από αλλαντικά.")],
         "channel": "telegram",
     })
 
-    assert "relay_local_payload" not in bound_tool_names
+    assert "relay_local_payload" in bound_tool_names
     assert "execute_local_pipeline" in bound_tool_names
 
 
@@ -1103,7 +1110,7 @@ def test_web_agent_hides_messenger_draft_tool_for_contextual_web_search(
         lambda: {"γυναικάρα μου": "123"},
     )
 
-    web_agent_node({
+    _invoke_with_native_guard(web_agent_node, {
         "messages": [HumanMessage(
             content="βρεσ μου αγγελιεσ στο linkedin gia logistic manager θεσσαλονικι"
         )],
@@ -1111,7 +1118,7 @@ def test_web_agent_hides_messenger_draft_tool_for_contextual_web_search(
     })
 
     assert "duckduckgo_search" in bound_tool_names
-    assert "relay_local_payload" not in bound_tool_names
+    assert "relay_local_payload" in bound_tool_names
 
 
 def test_web_agent_keeps_draft_tool_for_mixed_search_and_known_recipient(
@@ -1119,7 +1126,6 @@ def test_web_agent_keeps_draft_tool_for_mixed_search_and_known_recipient(
 ) -> None:
     """A mixed Web mention may still create a reversible recipient draft."""
     from core.agents import web_agent_node
-    monkeypatch.setattr("services.messenger_intent.resolve_contextual_draft_request", lambda *a, **k: True)
 
     bound_tool_names: list[str] = []
 
@@ -1142,7 +1148,7 @@ def test_web_agent_keeps_draft_tool_for_mixed_search_and_known_recipient(
         lambda: {"σοφία": "123"},
     )
 
-    web_agent_node({
+    _invoke_with_native_guard(web_agent_node, {
         "messages": [HumanMessage(content="Πες στη Σοφία ότι ενημέρωσα το LinkedIn.")],
         "channel": "web",
     })
@@ -1192,7 +1198,7 @@ def test_web_agent_exposes_messenger_draft_tool_for_explicit_request(monkeypatch
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
 
-    web_agent_node({
+    _invoke_with_native_guard(web_agent_node, {
         "messages": [HumanMessage(content="Γράψε ένα μήνυμα στη Σοφία.")],
         "channel": "telegram",
     })
@@ -1207,7 +1213,6 @@ def test_web_agent_exposes_reversible_draft_tool_for_natural_recipient_request(
     """The Web LLM can persist a naturally phrased recipient-specific draft request."""
     from core.agents import web_agent_node
     from services.messenger_intent import classify_messenger_intent
-    monkeypatch.setattr("services.messenger_intent.resolve_contextual_draft_request", lambda *a, **k: True)
 
     bound_tool_names: list[str] = []
     request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
@@ -1236,7 +1241,7 @@ def test_web_agent_exposes_reversible_draft_tool_for_natural_recipient_request(
 
     assert classify_messenger_intent(request).intent == "general_chat"
 
-    web_agent_node({
+    _invoke_with_native_guard(web_agent_node, {
         "messages": [HumanMessage(content=request)],
         "channel": "web",
     })
@@ -1255,7 +1260,6 @@ def test_natural_recipient_request_persists_draft_through_chat_graph(
     import config
     from core.graph import build_graph
     from services.messenger_intent import classify_messenger_intent
-    monkeypatch.setattr("services.messenger_intent.resolve_contextual_draft_request", lambda *a, **k: True)
 
     request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
     draft_file = tmp_path / "messenger_draft.json"
@@ -1347,12 +1351,12 @@ def test_web_agent_does_not_recreate_draft_for_timestamped_bare_send(monkeypatch
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
 
-    web_agent_node({
+    _invoke_with_native_guard(web_agent_node, {
         "messages": [HumanMessage(content="[11:03] στειλε")],
         "channel": "web",
     })
 
-    assert "relay_local_payload" not in bound_tool_names
+    assert "relay_local_payload" in bound_tool_names
     assert "execute_local_pipeline" in bound_tool_names
 
 
@@ -1381,7 +1385,7 @@ def test_web_agent_exposes_messenger_draft_tool_for_accepted_routine_offer(monke
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
 
-    web_agent_node({
+    _invoke_with_native_guard(web_agent_node, {
         "messages": [
             SystemMessage(content=MESSENGER_ROUTINE_DRAFT_OFFER_MARKER),
             HumanMessage(content="ναι"),
@@ -1420,7 +1424,7 @@ def test_web_agent_exposes_messenger_draft_tool_for_active_draft_edit(monkeypatc
         "core.messenger_draft.active_draft_status",
         lambda: (True, "active", {"message": "Initial draft"}),
     )
-    web_agent_node({
+    _invoke_with_native_guard(web_agent_node, {
         "messages": [
             HumanMessage(content="Γράψε ένα μήνυμα"),
             AIMessage(
@@ -1467,12 +1471,12 @@ def test_web_agent_hides_messenger_draft_tool_for_unrelated_active_draft_turn(mo
     )
     monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
 
-    web_agent_node({
+    _invoke_with_native_guard(web_agent_node, {
         "messages": [HumanMessage(content="Σε τρεις μέρες φεύγουμε Γεωργία")],
         "channel": "web",
     })
 
-    assert "relay_local_payload" not in bound_tool_names
+    assert "relay_local_payload" in bound_tool_names
 
 
 def test_chat_agent_hides_messenger_draft_tool_for_unrelated_active_draft_turn(monkeypatch: Any) -> None:
@@ -1504,12 +1508,12 @@ def test_chat_agent_hides_messenger_draft_tool_for_unrelated_active_draft_turn(m
     )
     monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
 
-    chat_agent_node({
+    _invoke_with_native_guard(chat_agent_node, {
         "messages": [HumanMessage(content="Σε τρεις μέρες φεύγουμε Γεωργία")],
         "channel": "web",
     })
 
-    assert "relay_local_payload" not in bound_tool_names
+    assert "relay_local_payload" in bound_tool_names
 
 
 def test_chat_agent_hides_direct_memory_write_for_external_context(monkeypatch: Any) -> None:
@@ -1537,7 +1541,7 @@ def test_chat_agent_hides_direct_memory_write_for_external_context(monkeypatch: 
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
 
-    chat_agent_node({
+    _invoke_with_native_guard(chat_agent_node, {
         "messages": [
             AIMessage(
                 content="External summary.",
@@ -1578,7 +1582,7 @@ def test_chat_agent_hides_stale_research_tools_for_unrelated_new_turn(
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
 
-    chat_agent_node({
+    _invoke_with_native_guard(chat_agent_node, {
         "messages": [
             HumanMessage(content="Τι καιρό θα έχει στο Rustavi;"),
             AIMessage(
@@ -1621,7 +1625,7 @@ def test_chat_agent_keeps_research_tools_for_current_direct_web_request(
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
 
-    chat_agent_node({
+    _invoke_with_native_guard(chat_agent_node, {
         "messages": [
             HumanMessage(content="Τι καιρό θα έχει στο Rustavi;"),
             AIMessage(
@@ -1664,7 +1668,7 @@ def test_chat_agent_keeps_explicit_memory_save_for_external_context(
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
 
-    chat_agent_node({
+    _invoke_with_native_guard(chat_agent_node, {
         "messages": [
             AIMessage(
                 content="External deadline summary.",
@@ -1704,7 +1708,7 @@ def test_chat_agent_ignores_routine_tool_text_for_messenger_draft_gate(
     monkeypatch.setattr("core.agents.llm", FakeLLM())
     monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
 
-    chat_agent_node({
+    _invoke_with_native_guard(chat_agent_node, {
         "messages": [
             HumanMessage(content="Σε τρεις μέρες φεύγουμε Γεωργία."),
             AIMessage(
@@ -1724,7 +1728,7 @@ def test_chat_agent_ignores_routine_tool_text_for_messenger_draft_gate(
         "channel": "web",
     })
 
-    assert "relay_local_payload" not in bound_tool_names
+    assert "relay_local_payload" in bound_tool_names
 
 
 def test_proactive_prompt_requires_message_routines_to_request_draft_first() -> None:

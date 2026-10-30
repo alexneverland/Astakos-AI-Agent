@@ -185,48 +185,6 @@ def preparation_owner_history(messages: list[Any]) -> list[Any]:
     return []
 
 
-def contextual_preparation_eligible(messages: list[Any]) -> bool:
-    """Preserve the existing active-draft/contact boundary for semantic recovery."""
-    from core.messenger_draft import has_active_draft
-    from tools.web import has_known_messenger_contact_reference
-    owner = preparation_owner_history(messages)
-    return bool(owner) and (not has_active_draft()
-        or has_known_messenger_contact_reference(str(owner[-1].content)))
-
-
-@trace_stage("messenger_preparation_decision")
-def resolve_contextual_draft_request(
-    messages: list, invoke: Callable[[list], Any], *, candidate_reply: str | None = None,
-) -> bool:
-    """Resolve local preparation intent from bounded dialogue, never tool text."""
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-    from core.untrusted_content import (
-        is_direct_user_message, external_content_source_names, format_untrusted_tool_result,
-    )
-    from core.utils import extract_json_from_text
-    messages = preparation_owner_history(messages)
-    if not messages:
-        return False
-    if external_content_source_names(getattr(messages[-1], "additional_kwargs", {})):
-        return False
-    dialogue = [{"role": row.type, "content": str(row.content)[:1800]}
-                for row in messages[-8:] if row.type in {"human", "ai"}
-                and not external_content_source_names(getattr(row, "additional_kwargs", {}))
-                and (row.type != "human" or is_direct_user_message(row))]
-    try:
-        prompt = (Path(__file__).resolve().parents[1] / "prompts" /
-                  "messenger_preparation_decision.md").read_text(encoding="utf-8")
-        reference: Any = dialogue
-        if candidate_reply is not None:
-            reference = {"dialogue": dialogue, "candidate_reply": candidate_reply[:2400]}
-        response = invoke([SystemMessage(content=prompt), HumanMessage(content=
-            format_untrusted_tool_result("owner dialogue for local draft intent",
-                json.dumps(reference, ensure_ascii=False)))])
-        result = extract_json_from_text(AIMessage(content=response.content).text)
-        return isinstance(result, dict) and set(result) == {"prepare"} and result["prepare"] is True
-    except Exception:
-        return False
-
 
 @trace_stage("messenger_lifecycle_decision")
 def resolve_pending_draft_action(messages: list, draft: dict, invoke: Callable[[list], Any]) -> str:

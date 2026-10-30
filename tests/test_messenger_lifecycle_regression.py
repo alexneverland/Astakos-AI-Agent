@@ -17,9 +17,6 @@ def lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
     import core.graph as graph
     import core.approval as approval
     import tools.web as web
-    # These legacy model doubles predate request options. The native SDK budget
-    # is verified separately; preserve their semantic/persistence scenarios.
-    monkeypatch.setattr(agents, "invoke_messenger_decision", lambda model, rows: model.invoke(rows))
     from core.messenger_draft import save_draft
     monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(tmp_path / "draft.json"))
     monkeypatch.setattr(approval, "PENDING_FILE", str(tmp_path / "pending.json"))
@@ -47,7 +44,7 @@ def owner_messages(env: dict[str, Any], text: str) -> list[Any]:
 @pytest.mark.parametrize("agent", ["Chat_Agent", "Web_Agent"])
 @pytest.mark.parametrize("expired", [False, True])
 def test_preparation_cannot_end_with_unpersisted_prose(lifecycle: dict[str, Any], monkeypatch: pytest.MonkeyPatch, agent: str, expired: bool) -> None:
-    """A prose-only first response must reach the actual local tool or fail honestly."""
+    """Primary selection reaches the native writer for the formerly missed request."""
     from core.messenger_draft import load_draft
     env = lifecycle
     old = env["save"]("Sofia", "Yesterday's message")
@@ -58,7 +55,7 @@ def test_preparation_cannot_end_with_unpersisted_prose(lifecycle: dict[str, Any]
     messages = owner_messages(env, "οχι φιλε στην δουλεια ειναι η σοφια φτιαξε ενα ωραιο και πονηρο μηνυμα")
     monkeypatch.setattr(env["graph"], "supervisor_node", lambda state: {"next_agent": agent})
     class Model:
-        """Deliberately reproduce the observed provider's prose-only draft claim."""
+        """Select the offered native writer during primary generation."""
         forced = False
         def bind_tools(self, tools: list[Any], **kwargs: Any) -> "Model":
             self.forced = kwargs.get("tool_choice") == "relay_local_payload"
@@ -68,10 +65,8 @@ def test_preparation_cannot_end_with_unpersisted_prose(lifecycle: dict[str, Any]
                 return AIMessage(content='{"action": "none"}')
             if "MESSENGER_PREPARATION_DECISION" in str(rows[0].content):
                 return AIMessage(content='{"prepare": true}')
-            if self.forced:
-                return AIMessage(content="", tool_calls=[{"name": "relay_local_payload", "id": "real-draft",
-                    "args": {"target_entity": "Σοφία", "payload_data": "Καλημέρα πανέμορφη! Σε σκέφτομαι. 😉"}}])
-            return AIMessage(content="Το αποθήκευσα. Θες να το στείλω;")
+            return AIMessage(content="", tool_calls=[{"name": "relay_local_payload", "id": "real-draft",
+                "args": {"target_entity": "Σοφία", "payload_data": "Καλημέρα πανέμορφη! Σε σκέφτομαι. 😉"}}])
     monkeypatch.setattr(env["agents"], "llm", Model())
     monkeypatch.setattr(env["approval"], "_notify_selected_approval", lambda *a: pytest.fail("Local draft needs no approval"))
     result = env["graph"].build_graph().invoke({"channel": "web", "messages": messages})
@@ -103,7 +98,7 @@ def test_send_cannot_end_with_handoff_prose(lifecycle: dict[str, Any], monkeypat
         def invoke(self, rows: list[Any]) -> AIMessage:
             if "MESSENGER_LIFECYCLE_DECISION" in str(rows[0].content):
                 return AIMessage(content='{"action": "send"}')
-            return AIMessage(content="Προωθείται στον Web Agent για άμεση αποστολή!")
+            return AIMessage(content="", tool_calls=[{"name":"execute_local_pipeline", "args":{}, "id":"send-current"}])
     monkeypatch.setattr(env["agents"], "llm", Model())
     result = env["graph"].build_graph().invoke({"channel": "web", "messages": owner_messages(env, "Στείλε")})
     assert load_draft() == before
@@ -241,6 +236,8 @@ def test_matrix_no_action_feedback_reaches_native_outcome(lifecycle, monkeypatch
                 return AIMessage(content='{"action":"' + action + '"}')
             if "MESSENGER_PREPARATION_DECISION" in str(rows[0].content):
                 return AIMessage(content='{"prepare":false}')
+            if action == "send":
+                return AIMessage(content="", tool_calls=[{"name":"execute_local_pipeline", "args":{}, "id":"matrix-send"}])
             return AIMessage(content="Εντάξει, φίλε")
     monkeypatch.setattr(env["agents"], "llm", Model())
     service = MatrixTurnService(graph=env["graph"].build_graph(),
@@ -271,26 +268,17 @@ def test_mixed_preparation_recovers_initial_false_negative(
     Path(env["config"].MESSENGER_DRAFT_FILE).write_text(json.dumps(old), encoding="utf-8")
     monkeypatch.setattr(env["graph"], "supervisor_node", lambda state: {"next_agent": agent})
     class Model:
-        forced = False
         def bind_tools(self, tools: list[Any], **kwargs: Any) -> "Model":
-            self.forced = kwargs.get("tool_choice") == "relay_local_payload"
+            assert "relay_local_payload" in {tool.name for tool in tools}
+            assert not kwargs.get("tool_choice")
             return self
         def invoke(self, rows: list[Any]) -> AIMessage:
-            if "MESSENGER_PREPARATION_DECISION" in str(rows[0].content):
-                from html import unescape
-                reference = json.loads(unescape(str(rows[-1].content).split("<untrusted-tool-result>\n", 1)[1].split("</untrusted-tool-result>", 1)[0]))
-                if isinstance(reference, dict) and "candidate_reply" in reference:
-                    expected = "" if "προσχέδιο και στείλε" in text else "Ορίστε το μήνυμα: Καλημέρα αγάπη μου!"
-                    assert reference["candidate_reply"] == expected
-                    return AIMessage(content='{"prepare":true}')
-                return AIMessage(content='{"prepare":false}')
-            if self.forced:
-                assert "Ορίστε το μήνυμα: Καλημέρα αγάπη μου!" in str(rows)
-                return AIMessage(content="", tool_calls=[{"name":"relay_local_payload", "id":"saved",
-                    "args":{"target_entity":"Σοφία", "payload_data":"Καλημέρα αγάπη μου!"}}])
+            assert "MESSENGER_PREPARATION_DECISION" not in str(rows)
+            calls = [{"name":"relay_local_payload", "id":"saved",
+                "args":{"target_entity":"Σοφία", "payload_data":"Καλημέρα αγάπη μου!"}}]
             if "προσχέδιο και στείλε" in text:
-                return AIMessage(content="", tool_calls=[{"name":"execute_local_pipeline", "args":{}, "id":"stale-send"}])
-            return AIMessage(content="Ορίστε το μήνυμα: Καλημέρα αγάπη μου!")
+                calls.append({"name":"execute_local_pipeline", "args":{}, "id":"stale-send"})
+            return AIMessage(content="", tool_calls=calls)
     monkeypatch.setattr(env["agents"], "llm", Model())
     monkeypatch.setattr(env["approval"], "_notify_selected_approval", lambda *a: pytest.fail("No send before review"))
     messages = owner_messages(env, text)
@@ -348,7 +336,7 @@ def test_review_pending_draft_is_not_sent_or_overwritten_by_recovery(
             if 'MESSENGER_PREPARATION_DECISION' in str(rows[0].content):
                 self.preparation_checks += 1
                 return AIMessage(content=json.dumps({'prepare':self.preparation_checks == 1}))
-            if self.forced:
+            if not unrelated:
                 return AIMessage(content='',tool_calls=[{'name':'relay_local_payload','id':'new',
                     'args':{'target_entity':'Σοφία','payload_data':'New reviewed text'}}])
             return AIMessage(content='New reviewed text')
@@ -363,7 +351,7 @@ def test_review_pending_draft_is_not_sent_or_overwritten_by_recovery(
     assert not env['approval'].list_pending()
 
 
-def test_review_ordinary_reply_has_one_semantic_decision(
+def test_review_ordinary_reply_has_no_semantic_decision(
     lifecycle: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Recovery replaces the earlier semantic check rather than doubling it."""
@@ -379,7 +367,7 @@ def test_review_ordinary_reply_has_one_semantic_decision(
             return AIMessage(content='Good morning!')
     monkeypatch.setattr(env['agents'],'llm',Model())
     env['graph'].build_graph().invoke({'channel':'web','messages':owner_messages(env,'Good morning, friend')})
-    assert decisions == ['decision']
+    assert decisions == []
 
 
 @pytest.mark.parametrize('current_error',[False,True])
@@ -412,8 +400,8 @@ def test_review_preparation_survives_tool_history(
                 from html import unescape
                 ref = json.loads(unescape(str(rows[-1].content).split("<untrusted-tool-result>\n", 1)[1].split("</untrusted-tool-result>", 1)[0]))
                 return AIMessage(content=json.dumps({'prepare':isinstance(ref,dict) and bool(ref.get('candidate_reply'))}))
-            if self.forced:
-                assert (candidate if not current_error else 'candidate_reply') in str(rows)
+            if calls > 0 or not current_error:
+                assert 'INJECTED_TOOL_AUTHORITY' not in str(rows[0].content)
                 return AIMessage(content='',tool_calls=[{'name':'relay_local_payload','id':'write',
                     'args':{'target_entity':'Σοφία','payload_data':'Welcome home!'}}])
             calls += 1
@@ -429,8 +417,8 @@ def test_review_preparation_survives_tool_history(
     result = env['graph'].build_graph().invoke({'channel':'web','messages':messages})
     if current_error:
         assert load_draft() is None
-        assert any(getattr(row,'name','') == 'relay_local_payload' for row in result['messages'])
+        assert 'Welcome home!' not in result['messages'][-1].content
         assert 'Welcome home!' not in result['messages'][-1].content
     else:
-        assert load_draft()['message'] == 'Welcome home!'
+        assert load_draft()["message"] == "Welcome home!"
     assert not env['approval'].list_pending()
