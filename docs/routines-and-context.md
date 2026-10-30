@@ -125,33 +125,40 @@ supposedly saved message. Semantic preparation and pending-draft decisions read
 only provider answer text, including fragmented text blocks; reasoning/tool
 blocks cannot authorize preparation or sending. A routine acknowledgement does
 not establish that a draft was saved.
-Chat/Web preparation must produce a native draft-write
-receipt: a prose-only model answer gets one required-tool retry, then an explicit
-failure if no write is requested. Successful writes display the saved tool result
-without another synthesis call. For a missed mixed request, one bounded semantic
-decision uses the candidate reply as untrusted reference and the owner turn as
-the permission source. It replaces the earlier pre-generation semantic check,
-so ordinary conversation does not pay for both checks. Pending-draft sends first
-defer to preparation when the owner also requests a new draft. Recovery retains
-the existing active-draft/contact boundary and excludes tool content from its
-owner dialogue; same-turn external-content action guards remain authoritative. Preparation finishes before sending: any send call batched
-with that write is removed, leaving the normal reviewed-draft approval path.
-Bare send, declined preparation and explanatory questions cannot authorize a new
-draft from an unsolicited candidate reply. The required-tool retry receives the candidate as
-untrusted text reference, including after a Web failure. Historical tool messages
-do not veto a new owner request, while an external result in the current turn
-can still block its write through the existing approval guard.
-Recovery waits for a conversational candidate during non-Messenger tool-only
-steps; draft/send tool calls still pass the recovery boundary before action.
-Identical owner dialogue, candidate and native draft/history guard reuse the
-same decision within that graph turn. New candidates or changed owner/draft
-state invalidate reuse. The optional recovery request has a local 15-second
-HTTP timeout; Google uses one SDK attempt. Other providers retain their own SDK
-retry policy with the per-request timeout. These are request options, not a
-guarantee that the entire reply finishes in 15 seconds. A recovery timeout grants
-no new preparation or sending permission; main generation is unchanged.
+Chat/Web preparation must produce a native draft-write receipt. Existing
+explicitly recognized preparation paths enforce one required-tool retry for a
+prose-only answer, then an explicit failure if no write is requested.
+Successful writes display the saved tool result
+without another synthesis call. Chat/Web expose the reversible writer for
+current direct-owner turns with a native history/draft guard and clean provenance.
+The primary tool-selecting generation evaluates mixed requests and accepted
+conversation offers. A phrase classifier is not a prerequisite to make the
+writer available. The broad post-generation preparation classifier, its cache,
+request budget and decision prompt are removed.
+
+Primary selection is validated again against native owner/history/draft state
+before persistence; a newer turn or revision prevents a stale write. Current
+external tool output and externally derived owner messages do not authorize
+preparation. Historical tool content remains subject to the existing provenance
+and active-edit isolation rules. The local writer cannot grant transport
+permission. Any send call batched with a draft replacement is removed, leaving
+separate review and revision-bound sending. Other tools remain available for
+mixed requests, each subject to its own policy. Existing explicitly recognized
+preparation/offer/edit paths retain one required-tool correction if the primary
+model returns prose instead of the writer; this is not a semantic recheck of
+ordinary conversation. If that correction fails, preparation fails visibly.
+
+Pending-draft lifecycle interpretation remains scoped to a real pending draft;
+it can retire an unwanted revision under the native guard. Its send decision
+returns to primary generation to evaluate all clauses, without another
+preparation classifier. Bare/stale sends retain the inactive-draft outcome and
+cannot create a replacement. Offline tests establish binding, native outcomes
+and safety, not the accuracy of live model intent recognition.
 Send requests for a stored draft enter the normal
 external approval path; expired drafts cannot be sent or recreated by that request.
+Primary stored-draft send calls retain only the captured native revision;
+model-supplied recipient/text overrides cannot enter that approval or bypass
+the native draft claim when approval is later executed.
 An owner can retire an unwanted draft through ordinary conversation, including
 after expiry. Retirement checks the observed owner turn and draft revision under
 the writer lock, preserves the remaining conversation, and supplies no routine

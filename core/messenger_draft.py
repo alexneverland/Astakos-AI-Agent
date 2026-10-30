@@ -73,7 +73,8 @@ def capture_draft_write_guard(messages: list, *, db_path: str | None = None) -> 
         draft_file, _ = _settings()
         with FileLock(draft_file + ".lock", timeout=10):
             return {"valid": True, "history_version": version, "history_path": path,
-                    "draft_fingerprint": _draft_fingerprint()}
+                    "draft_fingerprint": _draft_fingerprint(),
+                    "draft_revision": (load_draft() or {}).get("revision", "")}
     except Exception:
         return {"valid": False, "unavailable": True}
 

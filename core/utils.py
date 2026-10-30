@@ -93,8 +93,6 @@ class AgentState(TypedDict):
     # Captured by graph entry before routing/model work; never supplied by a tool.
     messenger_draft_preparation_authorized: NotRequired[bool]
     # Set by canonical Chat/Web binding decisions, not model tool arguments.
-    messenger_preparation_decisions: NotRequired[dict]
-    # Current graph turn only; guarded owner/candidate digest and semantic result.
     bug_diagnosis_read_only: NotRequired[bool]
     # Set by the Supervisor only for the current accepted bug-investigation turn.
     bug_followup_routed: NotRequired[bool]

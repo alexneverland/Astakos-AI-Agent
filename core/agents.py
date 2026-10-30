@@ -6,8 +6,10 @@
 # ================================================================
 
 from copy import copy
-from services.messenger_lifecycle import messenger_lifecycle_boundary, require_draft_tool_result, recover_preparation_reason
-from core.brain import invoke_messenger_decision
+from services.messenger_lifecycle import (
+    messenger_lifecycle_boundary, primary_preparation_available, primary_preparation_result,
+    require_draft_tool_result,
+)
 from core.i18n import t
 import json
 import os
@@ -635,6 +637,10 @@ def chat_agent_node(state: AgentState):
         include_behavioral_context=True,
     )
 
+    from pathlib import Path as _PromptPath
+    system_prompt += "\n" + (_PromptPath(BASE_DIR) / "prompts" /
+        "messenger_primary_preparation.md").read_text(encoding="utf-8")
+
     safe_history = sanitize_history_for_gemini(prompt_history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
 
@@ -677,42 +683,28 @@ def chat_agent_node(state: AgentState):
         static_chat_tools,
         latest_user_text,
     )
-    draft_tool_reason = None
-    # Tool results can contain routine names such as "message".  Only the
-    # latest direct user turn may authorize creating or editing a draft.
-    if is_create_draft_intent(latest_user_text):
-        draft_tool_reason = "explicit_create"
-    elif has_accepted_routine_draft_offer(
-        history,
-        state_authorized=state.get("routine_draft_offer_authorized"),
-    ):
-        draft_tool_reason = "accepted_routine_offer"
-    elif active_draft_edit_context_isolated:
-        draft_tool_reason = "active_draft_edit"
-    if draft_tool_reason:
-        print(f"[Messenger Tool Gate]: Chat_Agent enabled relay_local_payload ({draft_tool_reason}).")
-        if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
-            static_chat_tools = [relay_local_payload, update_goal_milestones_tool]
-        else:
-            static_chat_tools.append(relay_local_payload)
+    preparation_available = primary_preparation_available(state, prompt_history)
+    if preparation_available:
+        static_chat_tools.extend([relay_local_payload, execute_local_pipeline])
     from core.agent_tools import get_registered_tools_for_agent
     chat_tools = get_registered_tools_for_agent("Chat_Agent", static_chat_tools)
-    if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
-        chat_tools = _draft_edit_tools_only(chat_tools, include_goal_milestones=(
-            draft_tool_reason != "active_draft_edit" and not active_draft_edit_context_isolated))
-
+    explicit_reason = (
+        "explicit_create" if is_create_draft_intent(latest_user_text) else
+        "accepted_routine_offer" if has_accepted_routine_draft_offer(
+            history, state_authorized=state.get("routine_draft_offer_authorized")) else
+        "active_draft_edit" if active_draft_edit_context_isolated else None
+    )
+    if explicit_reason:
+        chat_tools = [tool for tool in chat_tools if getattr(tool, "name", "") != "execute_local_pipeline"]
     bind_started = perf_counter()
     bound_llm = llm.bind_tools(chat_tools)
     bind_ms = int((perf_counter() - bind_started) * 1000)
 
     invoke_started = perf_counter()
     response = bound_llm.invoke(final_messages)
-    preparation_decisions = dict(state.get("messenger_preparation_decisions") or {})
-    draft_tool_reason = recover_preparation_reason(
-        history, response, draft_tool_reason, lambda messages: invoke_messenger_decision(llm, messages),
-        decision_cache=preparation_decisions,
-    )
-    response = require_draft_tool_result(response, draft_tool_reason, final_messages, llm)
+    if explicit_reason and preparation_available:
+        response = require_draft_tool_result(response, explicit_reason, final_messages, llm)
+    response, preparation_selected = primary_preparation_result(state, prompt_history, response)
     invoke_ms = int((perf_counter() - invoke_started) * 1000)
 
     _attach_phase_timing(response, "chat_bind_ms", bind_ms)
@@ -726,8 +718,7 @@ def chat_agent_node(state: AgentState):
     return {
         "current_agent": "Chat_Agent",
         "messages": [response],
-        "messenger_draft_preparation_authorized": bool(draft_tool_reason),
-        "messenger_preparation_decisions": preparation_decisions,
+        "messenger_draft_preparation_authorized": preparation_selected,
         "active_draft_edit_context_isolated": active_draft_edit_context_isolated,
     }
 
@@ -1044,18 +1035,6 @@ def _isolate_active_draft_edit_history(history: list[Any]) -> list[Any]:
     return isolated_history
 
 
-def _draft_edit_tools_only(tools: list[Any], *, include_goal_milestones: bool = False) -> list[Any]:
-    """Keep draft preparation narrow; active revisions never update goals."""
-    allowed = {"relay_local_payload"}
-    if include_goal_milestones:
-        allowed.add("update_goal_milestones_tool")
-    return [
-        tool
-        for tool in tools
-        if getattr(tool, "name", "") in allowed
-    ]
-
-
 def web_agent_node(state: AgentState):
     from core.utils import (
         load_agent_prompt,
@@ -1175,6 +1154,10 @@ def web_agent_node(state: AgentState):
         include_persisted_context=not active_draft_edit_context_isolated,
     )
 
+    from pathlib import Path as _PromptPath
+    system_prompt += "\n" + (_PromptPath(BASE_DIR) / "prompts" /
+        "messenger_primary_preparation.md").read_text(encoding="utf-8")
+
     safe_history = sanitize_history_for_gemini(prompt_history)
     final_messages = [SystemMessage(content=system_prompt)] + safe_history
 
@@ -1204,36 +1187,26 @@ def web_agent_node(state: AgentState):
         process_and_clear_linkedin_post, search_google_places, execute_local_pipeline, browse_url, search_supermarket_prices,
         morning_briefing, hn_briefing, update_goal_milestones_tool,
     ]
-    draft_tool_reason = None
-    if is_create_draft_intent(latest_user_text):
-        draft_tool_reason = "explicit_create"
-    elif has_accepted_routine_draft_offer(
-        history,
-        state_authorized=state.get("routine_draft_offer_authorized"),
-    ):
-        draft_tool_reason = "accepted_routine_offer"
-    elif active_draft_edit_context_isolated:
-        draft_tool_reason = "active_draft_edit"
-    if draft_tool_reason:
-        print(f"[Messenger Tool Gate]: Web_Agent enabled relay_local_payload ({draft_tool_reason}).")
-        if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
-            static_web_tools = [relay_local_payload, update_goal_milestones_tool]
-        else:
-            static_web_tools.append(relay_local_payload)
+    preparation_available = primary_preparation_available(state, prompt_history)
+    if preparation_available:
+        static_web_tools.append(relay_local_payload)
     from core.agent_tools import get_registered_tools_for_agent
     web_tools = get_registered_tools_for_agent("Web_Agent", static_web_tools)
-    if draft_tool_reason in {"explicit_create", "accepted_routine_offer", "active_draft_edit"}:
-        web_tools = _draft_edit_tools_only(web_tools, include_goal_milestones=(
-            draft_tool_reason != "active_draft_edit" and not active_draft_edit_context_isolated))
-    elif _research_web_filled_requested_limit(history):
+    explicit_reason = (
+        "explicit_create" if is_create_draft_intent(latest_user_text) else
+        "accepted_routine_offer" if has_accepted_routine_draft_offer(
+            history, state_authorized=state.get("routine_draft_offer_authorized")) else
+        "active_draft_edit" if active_draft_edit_context_isolated else None
+    )
+    if explicit_reason:
+        web_tools = [tool for tool in web_tools if getattr(tool, "name", "") != "execute_local_pipeline"]
+    if _research_web_filled_requested_limit(history):
         web_tools = [
             tool
             for tool in web_tools
             if getattr(tool, "name", "") not in {"research_web", "duckduckgo_search"}
         ]
         print("[Web Search]: requested result limit reached; hiding additional search tools.")
-
-    preparation_decisions = dict(state.get("messenger_preparation_decisions") or {})
 
     if web_errors and not web_successes:
         guarded_reply = build_web_failure_reply(
@@ -1242,16 +1215,11 @@ def web_agent_node(state: AgentState):
         )
         from langchain_core.messages import AIMessage as _AIMsg
         failure = _AIMsg(content=guarded_reply)
-        draft_tool_reason = recover_preparation_reason(
-            history, failure, draft_tool_reason, lambda messages: invoke_messenger_decision(llm, messages),
-            decision_cache=preparation_decisions,
-        )
-        failure = require_draft_tool_result(failure, draft_tool_reason, final_messages, llm)
+        failure, preparation_selected = primary_preparation_result(state, prompt_history, failure)
         return {
             "messages": [failure],
             "current_agent": "Web_Agent",
-            "messenger_draft_preparation_authorized": bool(draft_tool_reason),
-            "messenger_preparation_decisions": preparation_decisions,
+            "messenger_draft_preparation_authorized": preparation_selected,
         }
 
     if _has_exhausted_web_research_budget(history):
@@ -1270,11 +1238,9 @@ def web_agent_node(state: AgentState):
     else:
         result = llm.bind_tools(web_tools).invoke(final_messages)
 
-    draft_tool_reason = recover_preparation_reason(
-        history, result, draft_tool_reason, lambda messages: invoke_messenger_decision(llm, messages),
-        decision_cache=preparation_decisions,
-    )
-    result = require_draft_tool_result(result, draft_tool_reason, final_messages, llm)
+    if explicit_reason and preparation_available:
+        result = require_draft_tool_result(result, explicit_reason, final_messages, llm)
+    result, preparation_selected = primary_preparation_result(state, prompt_history, result)
     result = _trim_web_research_tool_calls(result, history)
 
     if _is_stale_messenger_send_call(result):
@@ -1298,8 +1264,7 @@ def web_agent_node(state: AgentState):
     return {
         "current_agent": "Web_Agent",
         "messages": [result],
-        "messenger_draft_preparation_authorized": bool(draft_tool_reason),
-        "messenger_preparation_decisions": preparation_decisions,
+        "messenger_draft_preparation_authorized": preparation_selected,
         "active_draft_edit_context_isolated": active_draft_edit_context_isolated,
     }
 

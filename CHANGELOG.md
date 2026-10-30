@@ -16,6 +16,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Messenger preparation uses primary-agent tool selection for mixed owner
+  requests, with native provenance/freshness checks and separate send approval.
+  Removed the broad post-generation preparation classifier and its cache;
+  ordinary chat no longer pays for that helper call.
+
 - Optional Messenger preparation recovery no longer runs during unrelated
   tool-only steps, reuses identical guarded evidence and has a local request
   budget. Web input is queued for mirroring before context inference; mirror

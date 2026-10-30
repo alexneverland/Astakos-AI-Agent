@@ -5,6 +5,66 @@ from core.i18n import t
 from core.utils import AgentState
 
 
+def primary_preparation_available(state: dict, history: list[Any]) -> bool:
+    """Expose a local writer only for a native current owner and clean context.
+
+    This validates provenance and freshness, not ordinary wording. The primary
+    model chooses whether the user actually requests preparation.
+    """
+    from core.messenger_draft import capture_draft_write_guard
+    from core.untrusted_content import (
+        external_content_source_names, has_untrusted_result_in_active_history,
+        is_direct_user_message,
+    )
+    from services.messenger_intent import preparation_owner_history
+
+    if state.get("active_draft_edit_context_isolated") is True:
+        # Reuse the exact isolation applied during primary generation. Approval
+        # still validates the active recipient/image for its provenance exception.
+        from core.agents import _isolate_active_draft_edit_history
+        history = _isolate_active_draft_edit_history(history)
+    owner = preparation_owner_history(history)
+    if not owner or not is_direct_user_message(owner[-1]):
+        return False
+    if external_content_source_names(getattr(owner[-1], "additional_kwargs", {})):
+        return False
+    if has_untrusted_result_in_active_history(history):
+        return False
+    guard = state.get("messenger_draft_write_guard")
+    return (isinstance(guard, dict) and guard.get("valid") is True
+            and capture_draft_write_guard(owner) == guard)
+
+
+def primary_preparation_result(
+    state: dict, history: list[Any], response: AIMessage,
+) -> tuple[AIMessage, bool]:
+    """Validate primary selection and separate reversible writes from sends."""
+    calls = response.tool_calls or []
+    if not any(call.get("name") == "relay_local_payload" for call in calls):
+        if any(call.get("name") == "execute_local_pipeline" for call in calls):
+            from core.messenger_draft import active_draft_status, inactive_draft_message, capture_draft_write_guard
+            guard = state.get("messenger_draft_write_guard")
+            if not guard or guard.get("valid") is not True or capture_draft_write_guard(history) != guard:
+                return AIMessage(content=t("core.messenger_draft.request_superseded")), False
+            active, reason, _ = active_draft_status()
+            if not active:
+                return AIMessage(content=inactive_draft_message(reason)), False
+            if not guard.get("draft_revision"):
+                return AIMessage(content=t("core.messenger_draft.request_superseded")), False
+            # This path approves the stored draft only. Direct-send payload
+            # overrides would bypass claim_draft_send and its revision checks.
+            bound_calls = [{**call, "args": {
+                "expected_draft_revision": guard.get("draft_revision", "")}}
+                if call.get("name") == "execute_local_pipeline" else call for call in calls]
+            return AIMessage(content=response.text, tool_calls=bound_calls), False
+        return response, False
+    if not primary_preparation_available(state, history):
+        return AIMessage(content=t("core.messenger_draft.preparation_failed")), False
+    # Never allow an old stored revision to be sent beside its replacement.
+    kept = [call for call in calls if call.get("name") != "execute_local_pipeline"]
+    return AIMessage(content=response.text, tool_calls=kept), True
+
+
 def messenger_lifecycle_boundary(state: AgentState, history: list[Any], agent: str, invoke: Callable[[list], Any]) -> tuple[list[Any], dict | None]:
     """Ground draft outcomes in native receipts and route sends through approval."""
     from core.messenger_draft import active_draft_status, clear_draft, capture_draft_write_guard, inactive_draft_message
@@ -38,26 +98,10 @@ def messenger_lifecycle_boundary(state: AgentState, history: list[Any], agent: s
     if current_guard != guard:
         return history, {"current_agent": agent, "messages": [AIMessage(content=t("core.messenger_draft.request_superseded"))]}
     if action == "send":
-        from services.messenger_intent import resolve_contextual_draft_request, contextual_preparation_eligible
-        if resolve_contextual_draft_request(history, invoke):
-            if not contextual_preparation_eligible(history):
-                return history, {"current_agent": agent, "messages": [AIMessage(content=t("core.messenger_draft.preparation_failed"))]}
-            # Carry this turn's decision forward; a second classification must
-            # not turn already-established preparation back into an old send.
-            decision = SystemMessage(
-                content="Local Messenger preparation was resolved from this owner turn; finish preparation before sending.",
-                additional_kwargs={"astakos_preparation_owner_id": getattr(history[-1], "id", None)},
-            )
-            return [*history[:-1], decision, history[-1]], None
-        active, reason, _ = active_draft_status()
-        if not active:
-            response = AIMessage(content=inactive_draft_message(reason))
-        else:
-            from uuid import uuid4
-            response = AIMessage(content="", tool_calls=[{
-                "name": "execute_local_pipeline", "args": {"expected_draft_revision": draft.get("revision", "")}, "id": uuid4().hex,
-            }])
-        return history, {"current_agent": agent, "messages": [response]}
+        # Let the primary agent evaluate every clause (including replacement
+        # preparation) with its normal tools. Do not launch a preparation judge
+        # or manufacture a send call before primary generation.
+        return history, None
     if clear_draft(write_guard=guard):
         # Keep processing the entire mixed owner turn; retirement is not a routine skip.
         receipt = SystemMessage(content=(
@@ -67,58 +111,6 @@ def messenger_lifecycle_boundary(state: AgentState, history: list[Any], agent: s
         ))
         return [*history[:-1], receipt, history[-1]], None
     return history, {"current_agent": agent, "messages": [AIMessage(content=t("core.messenger_draft.request_superseded"))]}
-
-
-def recover_preparation_reason(
-    history: list[Any], response: AIMessage, reason: str | None,
-    invoke: Callable[[list], Any], *, decision_cache: dict[str, Any] | None = None,
-) -> str | None:
-    """Recheck a missed mixed request against the candidate, never its claims alone."""
-    from services.messenger_intent import (
-        classify_messenger_intent, resolve_contextual_draft_request,
-        preparation_owner_history, contextual_preparation_eligible,
-    )
-    history = preparation_owner_history(history)
-    if reason or not history or not contextual_preparation_eligible(history):
-        return reason
-    owner_id = getattr(history[-1], "id", None)
-    if owner_id and any(getattr(row, "type", "") == "system" and
-            row.additional_kwargs.get("astakos_preparation_owner_id") == owner_id
-            for row in history):
-        return "response_grounded_preparation"
-    # Exact lifecycle commands cannot authorize creating a replacement draft.
-    if classify_messenger_intent(str(history[-1].content)).intent != "general_chat":
-        return reason
-    messenger_action = any(call.get("name") in {"relay_local_payload", "execute_local_pipeline"}
-                           for call in (response.tool_calls or []))
-    if response.tool_calls and not response.text.strip() and not messenger_action:
-        # An unfinished tool step has no proposed prose to recover. Let its
-        # result arrive before checking the final conversational candidate.
-        return reason
-    # A sibling tool result is not a new owner instruction. Reuse this semantic
-    # decision only while owner dialogue, candidate and native guard are identical.
-    key = None
-    if decision_cache is not None:
-        from core.messenger_draft import capture_draft_write_guard
-        from hashlib import sha256
-        import json
-        guard = capture_draft_write_guard(history)
-        if guard.get("valid") is True:
-            source = {"guard": guard, "candidate": str(response.content or "")[:2400], "dialogue": [
-                [row.type, str(row.content), getattr(row, "additional_kwargs", {})]
-                for row in history[-8:]]}
-            key = sha256(json.dumps(source, sort_keys=True, default=str).encode()).hexdigest()
-            if decision_cache.get("key") == key and type(decision_cache.get("prepare")) is bool:
-                return "response_grounded_preparation" if decision_cache["prepare"] else reason
-    prepare = resolve_contextual_draft_request(
-        history, invoke, candidate_reply=str(response.content or ""),
-    )
-    if key is not None and decision_cache is not None:
-        decision_cache.clear()
-        decision_cache.update(key=key, prepare=prepare)
-    if prepare:
-        return "response_grounded_preparation"
-    return reason
 
 
 def require_draft_tool_result(response: AIMessage, reason: str | None, messages: list[Any], model: Any) -> AIMessage:
