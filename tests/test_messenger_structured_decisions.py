@@ -8,8 +8,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from tests.test_messenger_lifecycle_regression import lifecycle, owner_messages
 
-REQUEST = "σπιτι ειναι η σοφια φιλε στειλε ενα μηνυμα με αγαπη εχουμε μιλησει απο το πρωι οποτε κατι τρυφερο"
-DRAFT = "Αγάπη μου, σου στέλνω ένα φιλάκι. Σε σκέφτομαι και σε αγαπώ πολύ!"
+REQUEST = "ο συνεργατης Demo ειναι στο γραφειο, στειλε ενα φιλικο μηνυμα για τη δοκιμαστικη συναντηση που συζητησαμε"
+DRAFT = "Καλημέρα Demo! Επιβεβαιώνω τη δοκιμαστική συνάντηση. Καλή συνέχεια!"
 pytestmark = pytest.mark.usefixtures("offline_behavioral_io")
 
 
@@ -33,7 +33,8 @@ def test_reported_request_persists_draft_then_send_requires_approval(
     from services.routine_completion_helper import DatedRoutineSelection
     from datetime import date
     env = lifecycle
-    old = env["save"]("Sofia", "Yesterday's message")
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"demo": "test-recipient"})
+    old = env["save"]("test-recipient", "Previously sent synthetic message")
     old["status"] = "sent"
     Path(env["config"].MESSENGER_DRAFT_FILE).write_text(json.dumps(old), encoding="utf-8")
     monkeypatch.setattr(env["graph"], "supervisor_node", lambda state: {"next_agent": "Web_Agent"})
@@ -46,10 +47,12 @@ def test_reported_request_persists_draft_then_send_requires_approval(
         send_turn = False
 
         def bind_tools(self, tools: list[Any], **kwargs: Any) -> "Model":
+            """Record whether native draft creation is required for this call."""
             self.forced = kwargs.get("tool_choice") == "relay_local_payload"
             return self
 
         def invoke(self, rows: list[Any]) -> AIMessage:
+            """Return synthetic decisions or the required local draft tool call."""
             first = str(rows[0].content)
             if "MESSENGER_PREPARATION_DECISION" in first:
                 return decision('{"prepare":false}' if self.send_turn else '{"prepare":true}', shape)
@@ -57,15 +60,15 @@ def test_reported_request_persists_draft_then_send_requires_approval(
                 return decision('{"action":"send"}', shape)
             if self.forced:
                 return AIMessage(content="", tool_calls=[{"name": "relay_local_payload", "id": "saved-tender",
-                    "args": {"target_entity": "Σοφία", "payload_data": DRAFT}}])
-            return AIMessage(content=f"Ορίστε κάτι τρυφερό: «{DRAFT}» Θέλεις να το στείλω;")
+                    "args": {"target_entity": "Demo", "payload_data": DRAFT}}])
+            return AIMessage(content=f"Προτεινόμενο μήνυμα: «{DRAFT}» Θέλεις να το στείλω;")
 
     model = Model()
     monkeypatch.setattr(env["agents"], "llm", model)
     messages = owner_messages(env, REQUEST)
-    messages[0] = AIMessage(content="Είναι μαζί σου η Σοφία τώρα ή να σου ετοιμάσω το πρωινό μήνυμα στο Messenger;")
+    messages[0] = AIMessage(content="Είναι διαθέσιμος ο Demo ή να ετοιμάσω το μήνυμα για τη δοκιμή;")
     messages.insert(0, build_dated_routine_feedback_context(FeedbackTurnResult("applied",
-        DatedRoutineSelection("acknowledge", 4, date(2026, 10, 30)), routine_name="Πρωινό μήνυμα στη Σοφία")))
+        DatedRoutineSelection("acknowledge", 101, date(2030, 1, 15)), routine_name="Δοκιμαστικό μήνυμα στον Demo")))
     result = env["graph"].build_graph().invoke({"channel": "web", "messages": messages})
     draft = load_draft()
     assert draft["revision"] != old["revision"]
@@ -73,7 +76,7 @@ def test_reported_request_persists_draft_then_send_requires_approval(
     assert DRAFT in result["messages"][-1].content
     assert not notified and not env["approval"].list_pending()
     # A new trusted send turn must approve the actual new revision, never yesterday's.
-    send = owner_messages(env, "πολυ καλο στειλε")[-1]
+    send = owner_messages(env, "Εγκρίνω το δοκιμαστικό κείμενο, προχώρησε στην αποστολή")[-1]
     model.forced = False
     model.send_turn = True
     result = env["graph"].build_graph().invoke({"channel": "web",
