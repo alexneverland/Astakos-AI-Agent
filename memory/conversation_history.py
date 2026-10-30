@@ -314,7 +314,7 @@ def load_pending_web_mirrors(
     with _conn(db_path) as conn:
         rows = conn.execute(
             """
-            SELECT o.message_id, o.target_channel, m.role,
+            SELECT o.message_id, o.target_channel, o.created_at, m.role,
                    COALESCE(o.content, m.content) AS content, m.rowid
             FROM web_mirror_outbox AS o
             JOIN conversation_messages AS m ON m.id = o.message_id

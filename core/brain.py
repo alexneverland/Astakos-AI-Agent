@@ -10,6 +10,7 @@ import warnings
 import os
 import time
 import threading
+from services.turn_timing import ModelTimingCallback, timing_span
 from langchain_google_genai import ChatGoogleGenerativeAI, HarmCategory, HarmBlockThreshold
 from rich.console import Console
 from google import genai
@@ -125,6 +126,9 @@ else:  # default to vertex
     vertex_client = genai.Client(**_client_kwargs)
     print("\033[92m[Brain]: Gemini Engines Loaded (Vertex AI)\033[0m")
 
+llm.callbacks = list(llm.callbacks or []) + [ModelTimingCallback(_effective_provider_name, FAST_MODEL)]
+llm_heavy.callbacks = list(llm_heavy.callbacks or []) + [ModelTimingCallback(_effective_provider_name, HEAVY_MODEL)]
+
 _active_provider_adapter: AIProviderAdapter | None = None
 _adapter_lock = threading.Lock()
 _voice_provider_adapter: AIProviderAdapter | None = None
@@ -161,6 +165,19 @@ def get_voice_provider_adapter() -> AIProviderAdapter:
     return _voice_provider_adapter
 
 
+def invoke_messenger_decision(model: Any, messages: list[Any]) -> Any:
+    """Bound the optional tool-free recovery call without changing main inference.
+
+    Google translates max_retries to SDK total attempts, so one disables retries
+    for this helper. Other providers keep their existing SDK retry policy while
+    receiving an invocation-local request timeout.
+    """
+    options: dict[str, Any] = {"timeout": 15.0}
+    if _effective_provider_name in {"gemini", "vertex"}:
+        options["max_retries"] = 1
+    return model.invoke(messages, **options)
+
+
 def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
     from time import perf_counter
     """
@@ -181,7 +198,8 @@ def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
     for attempt in range(retries):
         try:
             attempt_started = perf_counter()
-            response = llm_obj.invoke(input_)
+            with timing_span("safe_llm_attempt", kind="attempt", attempt=attempt + 1):
+                response = llm_obj.invoke(input_)
             attempt_ms = int((perf_counter() - attempt_started) * 1000)
 
             try:
@@ -219,7 +237,8 @@ def safe_llm_invoke(llm_obj, input_, retries: int = 3, base_delay: float = 2.0):
                     f"\033[93m[Brain]: Network/server error (attempt {attempt+1}/{retries}), "
                     f"retrying in {wait:.0f}s - {type(e).__name__}\033[0m"
                 )
-            time.sleep(wait)
+            with timing_span("safe_llm_backoff", kind="retry_wait", attempt=attempt + 1):
+                time.sleep(wait)
 
 
 _T = TypeVar("_T")
@@ -256,7 +275,8 @@ def safe_adapter_call(
 
     for attempt in range(retries):
         try:
-            return func(*args, **kwargs)
+            with timing_span("provider_adapter_attempt", kind="attempt", attempt=attempt + 1):
+                return func(*args, **kwargs)
         except Exception as e:
             err = str(e).lower()
             is_transient = any(t in err for t in _TRANSIENT)
@@ -286,4 +306,5 @@ def safe_adapter_call(
                     f"\033[93m[Brain]: Network/server error (attempt {attempt+1}/{retries}), "
                     f"retrying in {wait:.0f}s - {type(e).__name__}\033[0m"
                 )
-            time.sleep(wait)
+            with timing_span("provider_adapter_backoff", kind="retry_wait", attempt=attempt + 1):
+                time.sleep(wait)

@@ -52,7 +52,7 @@ def test_owner_reply_to_offer_reaches_saved_draft(
             bindings.append(self.names)
             return self
 
-        def invoke(self, messages: list[Any]) -> AIMessage:
+        def invoke(self, messages: list[Any], **kwargs: Any) -> AIMessage:
             """Choose the offered local draft, never the outbound send tool."""
             if "MESSENGER_PREPARATION_DECISION" in str(messages[0].content):
                 return AIMessage(content='{"prepare": false}' if scenario in {"unrelated", "unbound_call"} else '{"prepare": true}')

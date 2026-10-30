@@ -1,6 +1,8 @@
 """Semantic, fail-closed behavioral context for ordinary cross-channel chat."""
 from __future__ import annotations
 
+from services.turn_timing import trace_stage
+
 from collections.abc import Callable, Sequence
 from datetime import date
 import json
@@ -73,6 +75,7 @@ def _preference_context(prefs: list[dict[str, str]]) -> str:
     return "\n" + instruction + "\n" + data + "\n"
 
 
+@trace_stage("behavioral_reply_context")
 def prepare_behavioral_reply_context(
     history: Sequence[Any], *, channel: str | None, shared_recent: str = "",
     today: date | None = None, store: PreferenceStore | None = None,

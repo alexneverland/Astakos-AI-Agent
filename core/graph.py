@@ -1,4 +1,5 @@
 from core.i18n import t
+from services.turn_timing import trace_stage
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
@@ -46,29 +47,29 @@ def build_graph():
     workflow = StateGraph(AgentState)
 
     # Nodes
-    workflow.add_node("pre_check",    guarded_pre_check_node)
-    workflow.add_node("cancel_plan",  cancel_plan_node)
-    workflow.add_node("supervisor",   supervisor_node)
-    workflow.add_node("Chat_Agent",   chat_agent_node)
-    workflow.add_node("Home_Agent",   home_agent_node)
-    workflow.add_node("Web_Agent",    web_agent_node)
-    workflow.add_node("Tech_Agent",   tech_agent_node)
-    workflow.add_node("Git_Agent",    git_agent_node)
-    workflow.add_node("Mail_Agent",   mail_agent_node)
-    workflow.add_node("Dev_Agent",    dev_agent_node)
+    workflow.add_node("pre_check",    trace_stage("graph.pre_check")(guarded_pre_check_node))
+    workflow.add_node("cancel_plan",  trace_stage("graph.cancel_plan")(cancel_plan_node))
+    workflow.add_node("supervisor",   trace_stage("graph.supervisor")(supervisor_node))
+    workflow.add_node("Chat_Agent",   trace_stage("graph.Chat_Agent")(chat_agent_node))
+    workflow.add_node("Home_Agent",   trace_stage("graph.Home_Agent")(home_agent_node))
+    workflow.add_node("Web_Agent",    trace_stage("graph.Web_Agent")(web_agent_node))
+    workflow.add_node("Tech_Agent",   trace_stage("graph.Tech_Agent")(tech_agent_node))
+    workflow.add_node("Git_Agent",    trace_stage("graph.Git_Agent")(git_agent_node))
+    workflow.add_node("Mail_Agent",   trace_stage("graph.Mail_Agent")(mail_agent_node))
+    workflow.add_node("Dev_Agent",    trace_stage("graph.Dev_Agent")(dev_agent_node))
     workflow.add_node("tools",          ToolNode(all_tools, handle_tool_errors=True))
-    workflow.add_node("approval_check", approval_check_node)
+    workflow.add_node("approval_check", trace_stage("graph.approval_check")(approval_check_node))
     workflow.add_node(
         "consume_routine_draft_authorization",
         consume_successful_routine_draft_authorization,
     )
-    workflow.add_node("tool_loop_block", tool_loop_block_node)
-    workflow.add_node("planner",        planner_node)
-    workflow.add_node("task_executor",  task_executor_node)
-    workflow.add_node("validate_step",  validate_step_node)
-    workflow.add_node("replan_node",    replan_node)
-    workflow.add_node("end_check",      end_check_node)
-    workflow.add_node("capture_result", capture_result_node)
+    workflow.add_node("tool_loop_block", trace_stage("graph.tool_loop_block")(tool_loop_block_node))
+    workflow.add_node("planner",        trace_stage("graph.planner")(planner_node))
+    workflow.add_node("task_executor",  trace_stage("graph.task_executor")(task_executor_node))
+    workflow.add_node("validate_step",  trace_stage("graph.validate_step")(validate_step_node))
+    workflow.add_node("replan_node",    trace_stage("graph.replan_node")(replan_node))
+    workflow.add_node("end_check",      trace_stage("graph.end_check")(end_check_node))
+    workflow.add_node("capture_result", trace_stage("graph.capture_result")(capture_result_node))
 
     # Entry → pre_check (checks pending plan before the supervisor)
     workflow.set_entry_point("pre_check")
@@ -190,6 +191,7 @@ def tool_loop_block_node(state: AgentState):
     return {"messages": [AIMessage(content=text)]}
 
 
+@trace_stage("graph.route_supervisor")
 def _route_supervisor(state: AgentState) -> str:
     """
     Routing by supervisor.

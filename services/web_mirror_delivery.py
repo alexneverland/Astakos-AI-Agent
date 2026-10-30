@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from datetime import datetime
+import json
+import time
 
 from config import CONVERSATION_DB_FILE
 from core.i18n import t
@@ -21,6 +24,24 @@ from services.external_delivery import (
 _MATRIX_MIRROR_CHUNK_CHARS = 6000
 
 
+def _mirror_timing(event: str, item: dict, started: float, **fields: object) -> None:
+    """Log queue/transport timing without copying message or error payloads."""
+    try:
+        created = datetime.fromisoformat(str(item.get("created_at", ""))).timestamp()
+        age = max(0, round((time.time() - created) * 1000))
+    except (ValueError, TypeError, OverflowError):
+        age = None
+    try:
+        print("[WebMirror]: " + json.dumps({"event": event,
+            "message_id": item["message_id"], "rowid": item["rowid"],
+            "channel": item["target_channel"], "queue_age_ms": age,
+            "duration_ms": max(0, round((time.monotonic() - started) * 1000)),
+            **fields,
+        }), flush=True)
+    except (OSError, UnicodeError, ValueError):
+        pass
+
+
 def drain_web_mirrors(
     channel: ExternalChannel,
     *,
@@ -31,6 +52,8 @@ def drain_web_mirrors(
     """Deliver ordered pending copies; leave failures queued for a later run."""
     delivered = 0
     for item in load_pending_web_mirrors(channel, limit=limit, db_path=db_path):
+        started = time.monotonic()
+        _mirror_timing("mirror_delivery_started", item, started)
         key = (
             "services.web_mirror_delivery.user_label"
             if item["role"] == "user"
@@ -50,12 +73,15 @@ def drain_web_mirrors(
             else:
                 receipt = router.send_text_to(channel, text, silent=True)
         except ExternalDeliveryError as exc:
+            _mirror_timing("mirror_pending", item, started, error=type(exc).__name__)
             print(f"[WebMirror]: Delivery pending for {channel}: {exc}")
             break
         if not mark_web_mirror_delivered(
             item["message_id"], channel, receipt.external_id, db_path=db_path
         ):
+            _mirror_timing("mirror_ack_failed", item, started)
             print(f"[WebMirror]: Acknowledgement failed for {item['message_id']}")
             break
         delivered += 1
+        _mirror_timing("mirror_delivered", item, started)
     return delivered

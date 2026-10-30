@@ -1,6 +1,8 @@
 """Shared dated routine-feedback orchestration behind authenticated channel adapters."""
 from __future__ import annotations
 
+from services.turn_timing import trace_stage
+
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Callable, Literal, TYPE_CHECKING
@@ -136,6 +138,7 @@ class PersistedRoutineFeedbackHandler:
         return self._trusted_owner and self._store.is_delivered_question_target(
             channel=self._channel, event_id=event_id)
 
+    @trace_stage("routine_feedback")
     def __call__(self, user_text: str, saved_user: Mapping[str, object], *,
                  reply_event_id: str | None = None) -> SystemMessage | MatrixRoutineDraftOffer | None:
         """Use the saved identity and caller-authenticated exact reply correlation."""

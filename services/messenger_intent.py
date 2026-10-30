@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.turn_timing import trace_stage
+
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Callable
 import json
@@ -192,6 +194,7 @@ def contextual_preparation_eligible(messages: list[Any]) -> bool:
         or has_known_messenger_contact_reference(str(owner[-1].content)))
 
 
+@trace_stage("messenger_preparation_decision")
 def resolve_contextual_draft_request(
     messages: list, invoke: Callable[[list], Any], *, candidate_reply: str | None = None,
 ) -> bool:
@@ -225,6 +228,7 @@ def resolve_contextual_draft_request(
         return False
 
 
+@trace_stage("messenger_lifecycle_decision")
 def resolve_pending_draft_action(messages: list, draft: dict, invoke: Callable[[list], Any]) -> str:
     """Interpret the current owner's draft lifecycle request, failing closed."""
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage

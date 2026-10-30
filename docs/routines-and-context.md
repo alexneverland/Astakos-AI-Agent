@@ -141,6 +141,15 @@ draft from an unsolicited candidate reply. The required-tool retry receives the 
 untrusted text reference, including after a Web failure. Historical tool messages
 do not veto a new owner request, while an external result in the current turn
 can still block its write through the existing approval guard.
+Recovery waits for a conversational candidate during non-Messenger tool-only
+steps; draft/send tool calls still pass the recovery boundary before action.
+Identical owner dialogue, candidate and native draft/history guard reuse the
+same decision within that graph turn. New candidates or changed owner/draft
+state invalidate reuse. The optional recovery request has a local 15-second
+HTTP timeout; Google uses one SDK attempt. Other providers retain their own SDK
+retry policy with the per-request timeout. These are request options, not a
+guarantee that the entire reply finishes in 15 seconds. A recovery timeout grants
+no new preparation or sending permission; main generation is unchanged.
 Send requests for a stored draft enter the normal
 external approval path; expired drafts cannot be sent or recreated by that request.
 An owner can retire an unwanted draft through ordinary conversation, including

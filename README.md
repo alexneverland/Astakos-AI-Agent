@@ -226,6 +226,8 @@ The Home Agent can save named locations from fresh GPS alongside configured
 home/work. Matrix, Web and Telegram share diagnostic execution traces and print
 correlated agent/tool/result/timing evidence in their terminals with redacted previews. See
 [known places and execution evidence](docs/known-places-and-traces.md).
+Text-turn latency traces also show pre-graph processing, provider/model calls,
+retry backoffs and named stages in the debug panel and terminal.
 
 ---
 

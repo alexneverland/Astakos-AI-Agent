@@ -71,7 +71,7 @@ def messenger_lifecycle_boundary(state: AgentState, history: list[Any], agent: s
 
 def recover_preparation_reason(
     history: list[Any], response: AIMessage, reason: str | None,
-    invoke: Callable[[list], Any],
+    invoke: Callable[[list], Any], *, decision_cache: dict[str, Any] | None = None,
 ) -> str | None:
     """Recheck a missed mixed request against the candidate, never its claims alone."""
     from services.messenger_intent import (
@@ -89,9 +89,34 @@ def recover_preparation_reason(
     # Exact lifecycle commands cannot authorize creating a replacement draft.
     if classify_messenger_intent(str(history[-1].content)).intent != "general_chat":
         return reason
-    if resolve_contextual_draft_request(
+    messenger_action = any(call.get("name") in {"relay_local_payload", "execute_local_pipeline"}
+                           for call in (response.tool_calls or []))
+    if response.tool_calls and not response.text.strip() and not messenger_action:
+        # An unfinished tool step has no proposed prose to recover. Let its
+        # result arrive before checking the final conversational candidate.
+        return reason
+    # A sibling tool result is not a new owner instruction. Reuse this semantic
+    # decision only while owner dialogue, candidate and native guard are identical.
+    key = None
+    if decision_cache is not None:
+        from core.messenger_draft import capture_draft_write_guard
+        from hashlib import sha256
+        import json
+        guard = capture_draft_write_guard(history)
+        if guard.get("valid") is True:
+            source = {"guard": guard, "candidate": str(response.content or "")[:2400], "dialogue": [
+                [row.type, str(row.content), getattr(row, "additional_kwargs", {})]
+                for row in history[-8:]]}
+            key = sha256(json.dumps(source, sort_keys=True, default=str).encode()).hexdigest()
+            if decision_cache.get("key") == key and type(decision_cache.get("prepare")) is bool:
+                return "response_grounded_preparation" if decision_cache["prepare"] else reason
+    prepare = resolve_contextual_draft_request(
         history, invoke, candidate_reply=str(response.content or ""),
-    ):
+    )
+    if key is not None and decision_cache is not None:
+        decision_cache.clear()
+        decision_cache.update(key=key, prepare=prepare)
+    if prepare:
         return "response_grounded_preparation"
     return reason
 
