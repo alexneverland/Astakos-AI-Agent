@@ -156,6 +156,9 @@ cannot create a replacement. Offline tests establish binding, native outcomes
 and safety, not the accuracy of live model intent recognition.
 Send requests for a stored draft enter the normal
 external approval path; expired drafts cannot be sent or recreated by that request.
+Primary stored-draft send calls retain only the captured native revision;
+model-supplied recipient/text overrides cannot enter that approval or bypass
+the native draft claim when approval is later executed.
 An owner can retire an unwanted draft through ordinary conversation, including
 after expiry. Retirement checks the observed owner turn and draft revision under
 the writer lock, preserves the remaining conversation, and supplies no routine

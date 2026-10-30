@@ -28,8 +28,10 @@ def lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]
     monkeypatch.setattr(graph, "supervisor_node", lambda state: {"next_agent": "Chat_Agent"})
     monkeypatch.setattr("core.plan_judge.should_auto_plan", lambda text: False)
     monkeypatch.setattr(graph, "all_tools", [web.relay_local_payload, web.execute_local_pipeline])
+    native_pipeline = web.execute_local_pipeline.func
     monkeypatch.setattr(web.execute_local_pipeline, "func", lambda *a, **k: pytest.fail("Outbound send"))
-    return dict(config=config, agents=agents, graph=graph, approval=approval, save=save_draft)
+    return dict(config=config, agents=agents, graph=graph, approval=approval, save=save_draft,
+                native_pipeline=native_pipeline)
 
 
 def owner_messages(env: dict[str, Any], text: str) -> list[Any]:

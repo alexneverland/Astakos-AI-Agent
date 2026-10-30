@@ -66,3 +66,25 @@ This changes local preparation selection policy, not external-send authority.
   git diff --check passed. Owner subsequently authorized commit/push/PR and one
   Codex review if no automatic review starts; branch is
   codex/messenger-primary-preparation. No merge/deletion authorization yet.
+
+## PR268 Codex review repair
+
+Finding 4424617015 (P1) reproduced against 2c27ebc: primary send normalization
+preserved model-supplied target_name/message beside the native revision. Native
+pipeline treats those fields as a direct-send override, bypassing the stored
+draft claim. Three offline native graph/approval/pipeline cases failed before
+repair: unchanged sends used the wrong text/recipient; replacement and retirement
+after approval still reached the fake browser send.
+
+Primary stored-draft calls now allow only expected_draft_revision from the
+entry guard, discarding all model-supplied arguments for that call. No global
+pipeline API or unrelated direct-send policy changes. Tests restore the native
+pipeline from the fixture but replace Playwright and sleeps, retaining blocked
+outbound and isolated stores. Covers both overrides and either alone, combined
+with unchanged, replaced, retired and expired drafts after approval. The positive
+control sends exactly the reviewed native recipient/text and marks its revision
+sent; invalidated cases never start Playwright and preserve replacement state.
+
+Verification: 95 related cases passed, followed by all 12 expanded native
+override cases (three overlap), i.e. 104 distinct cases for this repair and 392
+distinct relevant passing cases across the PR. git diff --check passed.

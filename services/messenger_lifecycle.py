@@ -51,7 +51,9 @@ def primary_preparation_result(
                 return AIMessage(content=inactive_draft_message(reason)), False
             if not guard.get("draft_revision"):
                 return AIMessage(content=t("core.messenger_draft.request_superseded")), False
-            bound_calls = [{**call, "args": {**call.get("args", {}),
+            # This path approves the stored draft only. Direct-send payload
+            # overrides would bypass claim_draft_send and its revision checks.
+            bound_calls = [{**call, "args": {
                 "expected_draft_revision": guard.get("draft_revision", "")}}
                 if call.get("name") == "execute_local_pipeline" else call for call in calls]
             return AIMessage(content=response.text, tool_calls=bound_calls), False
