@@ -1603,8 +1603,10 @@ def _infer_llm_reconciliation_candidates(
             prompt += format_untrusted_tool_result("queued shift reference", json.dumps(shift_reference, ensure_ascii=False))
 
     try:
+        from core.ai_provider import normalize_provider_text_content
+
         resp = llm.invoke([HumanMessage(content=prompt)])
-        raw = getattr(resp, "content", "") or ""
+        raw = normalize_provider_text_content(getattr(resp, "content", ""))
     except Exception as exc:
         if reason == "live_message_context":
             from memory.event_log import log_event

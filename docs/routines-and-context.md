@@ -30,6 +30,10 @@ presence remains owned by its source-validated writer. A repeated observation of
 the same shift retains an existing later schedule expiry. An explicit dated
 correction or cancellation can still change it. History and state-version guards
 prevent a delayed live result from overwriting a newer decision.
+The reconciler normalizes scalar and structured provider text before parsing.
+An explicitly reported workweek keeps its resolved Friday endpoint, inclusive;
+a single-day report ends on its stated date. Expired weekday shifts become
+unknown, while the separate existing weekend policy returns off unless overridden.
 Queued reconciliation carries the saved owner row identity and its history path.
 The channel enqueues it only after persistence. Later unrelated owner messages
 do not discard that source; the semantic shift decision considers the bounded
