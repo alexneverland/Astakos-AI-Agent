@@ -196,7 +196,7 @@ def resolve_contextual_draft_request(
     messages: list, invoke: Callable[[list], Any], *, candidate_reply: str | None = None,
 ) -> bool:
     """Resolve local preparation intent from bounded dialogue, never tool text."""
-    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
     from core.untrusted_content import (
         is_direct_user_message, external_content_source_names, format_untrusted_tool_result,
     )
@@ -219,7 +219,7 @@ def resolve_contextual_draft_request(
         response = invoke([SystemMessage(content=prompt), HumanMessage(content=
             format_untrusted_tool_result("owner dialogue for local draft intent",
                 json.dumps(reference, ensure_ascii=False)))])
-        result = extract_json_from_text(str(response.content))
+        result = extract_json_from_text(AIMessage(content=response.content).text)
         return isinstance(result, dict) and set(result) == {"prepare"} and result["prepare"] is True
     except Exception:
         return False
@@ -227,7 +227,7 @@ def resolve_contextual_draft_request(
 
 def resolve_pending_draft_action(messages: list, draft: dict, invoke: Callable[[list], Any]) -> str:
     """Interpret the current owner's draft lifecycle request, failing closed."""
-    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
     from core.untrusted_content import (
         is_direct_user_message, external_content_source_names, format_untrusted_tool_result,
     )
@@ -251,7 +251,7 @@ def resolve_pending_draft_action(messages: list, draft: dict, invoke: Callable[[
         response = invoke([SystemMessage(content=prompt), HumanMessage(content=
             format_untrusted_tool_result("pending Messenger draft and owner dialogue",
                                          json.dumps(reference, ensure_ascii=False)))])
-        result = extract_json_from_text(str(response.content))
+        result = extract_json_from_text(AIMessage(content=response.content).text)
         if (isinstance(result, dict) and set(result) == {"action"}
                 and result["action"] in ("send", "retire", "none")):
             return result["action"]

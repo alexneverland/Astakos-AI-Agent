@@ -121,7 +121,11 @@ write. Internal injected state is hidden from the model's tool schema. Drafts
 include a unique revision even when their text and second-resolution times match.
 
 Messenger routine notifications offer local preparation without presenting a
-supposedly saved message. Chat/Web preparation must produce a native draft-write
+supposedly saved message. Semantic preparation and pending-draft decisions read
+only provider answer text, including fragmented text blocks; reasoning/tool
+blocks cannot authorize preparation or sending. A routine acknowledgement does
+not establish that a draft was saved.
+Chat/Web preparation must produce a native draft-write
 receipt: a prose-only model answer gets one required-tool retry, then an explicit
 failure if no write is requested. Successful writes display the saved tool result
 without another synthesis call. For a missed mixed request, one bounded semantic

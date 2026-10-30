@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Messenger preparation and pending-draft decisions read structured provider
+  answer text instead of stringifying content blocks. Mixed requests still
+  require native draft persistence, and sending retains revision-bound approval.
+
 - Work-shift reconciliation assembles only provider answer text losslessly before
   parsing, preserving weekly endpoints and fragmented JSON strings. Reasoning and
   tool metadata cannot supply state updates. Explicit single-day schedules retain
