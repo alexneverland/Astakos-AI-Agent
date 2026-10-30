@@ -38,6 +38,44 @@ Assistant acknowledgements are not proof that a flag was written.
 
 ## Matrix, Web and Telegram traces
 
+### End-to-end latency
+
+Text conversation handlers collect latency from entry through return, including
+pre-graph routine/context processing, graph execution and post-graph response
+work. The native trace uses that start time and is saved at handler exit, even
+for early intercepts and errors. `duration_ms` is handler wall time; it excludes
+transport work before handler dispatch and delivery after handler return. Matrix
+delivery is outside its turn service; it is not included in that duration.
+
+`latency` contains `total_ms`, `model_wall_ms`, `retry_wait_wall_ms`,
+`uncovered_ms`, `spans` and `dropped_spans`. Each span records its start offset,
+duration, stage and exception class when applicable. Model callbacks identify
+provider, configured model, call ID and the nested stage path; native adapter
+operations identify provider and operation. Spans never retain prompts, output,
+credentials or exception messages. Existing bounded trace previews are separate.
+Collection is capped at 512 spans per turn; `dropped_spans` makes truncation
+explicit. Closed contexts ignore late background work and are isolated across
+concurrent requests and worker threads.
+
+Model and backoff totals use the union of their intervals: nested/concurrent
+durations must not be added. `uncovered_ms` is wall time outside every recorded
+span, not time outside model calls, and is not a diagnosis of its cause.
+Application retries record each attempt and actual backoff duration. Model-call
+duration includes opaque provider SDK retries, connection setup and network wait;
+only retries exposed by callbacks are counted separately. It cannot separate
+Google server processing from network delay or reveal private model reasoning.
+
+The debug latency panel shows the totals and expandable timing spans. Terminal
+`[LatencyTrace]:` JSON lines share the native trace ID, with start/end events for
+stages and model calls. `model_started` identifies an ongoing call before it
+finishes. `latency_finished` is the authoritative handler-end timing; the native
+`turn_finished` graph/response event may precede post-graph delivery work.
+To investigate a slow reply, find its trace ID, compare pre-graph spans, model
+calls and backoffs, and inspect long named stages or uncovered time. Historical
+traces lack these spans; their missing intervals cannot be reconstructed.
+
+### Agent/tool evidence
+
 Matrix graph turns use the shared ExecutionTrace recorder. Day files in
 `logs/traces/YYYY-MM-DD.json` include channel, agent, tool argument/result previews,
 durations, model phase timings, final response preview and errors. Matrix event ID

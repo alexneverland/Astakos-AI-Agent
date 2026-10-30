@@ -6,6 +6,7 @@
 # ================================================================
 
 from core.i18n import t
+from services.turn_timing import trace_stage
 import re
 import json
 import os
@@ -683,6 +684,7 @@ SKIP_SEMANTIC_KEYWORDS = (
 # 5. THE BRAIN (Build Prompt)
 # ────────────────────────────────────────────────────────────────
 
+@trace_stage("prompt_build")
 def build_prompt(
     state_messages,
     agent_role="",

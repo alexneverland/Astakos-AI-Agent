@@ -17,6 +17,7 @@ from memory.conversation_history import (
     load_recent_context,
 )
 from memory.execution_trace import ExecutionTrace
+from services.turn_timing import trace_turn
 
 UserPersistedHook = Callable[[dict[str, Any]], None]
 ExchangeCompletedHook = Callable[[str, str, str, str], None]
@@ -179,6 +180,7 @@ class MatrixTurnService:
                 messages.append(AIMessage(content=formatted, additional_kwargs=kwargs))
         return messages
 
+    @trace_turn("matrix")
     def _run_sync(
         self,
         user_text: str,

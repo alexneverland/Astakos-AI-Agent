@@ -44,6 +44,7 @@ from rich.console import Console
 from zoneinfo import ZoneInfo
 
 from core.brain import llm, safe_llm_invoke
+from services.turn_timing import trace_turn
 from core.graph import graph, AgentState
 from core.agents import clean_message
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
@@ -1005,6 +1006,7 @@ def _enqueue_capability_gap_web(user_text: str, ai_text: str, agent: str, channe
 
 
 @server.post("/chat")
+@trace_turn("web")
 async def chat_endpoint(request: Request, _=Depends(require_token)):
     global last_interaction_time
 

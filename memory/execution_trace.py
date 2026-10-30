@@ -145,9 +145,14 @@ class ExecutionTrace:
 
     def __init__(self, channel: str, user_message: str, *,
                  console: bool = True, correlation_id: str | None = None) -> None:
+        from services.turn_timing import current_timing
+        timing = current_timing()
         self.trace_id       = str(uuid.uuid4())[:8]
         self.start_ts       = time.monotonic()
         self.timestamp      = datetime.now().isoformat(timespec="seconds")
+        if timing is not None:
+            self.trace_id, self.start_ts, self.timestamp = timing.trace_id, timing.start, timing.timestamp
+            timing.trace = self
         self.channel        = channel
         self.correlation_id = correlation_id or self.trace_id
         self._console = console and channel in {"matrix", "web", "telegram"}
@@ -303,6 +308,11 @@ class ExecutionTrace:
 
     def save(self):
         """Saves to logs/traces/YYYY-MM-DD.json (thread-safe append)."""
+        from services.turn_timing import current_timing
+        timing = current_timing()
+        if timing is not None:
+            timing.trace = self
+            return  # The handler owns the final save, including pre/post-graph work.
         try:
             os.makedirs(_TRACES_DIR, exist_ok=True)
             today     = datetime.now().strftime("%Y-%m-%d")
@@ -322,6 +332,7 @@ class ExecutionTrace:
                 "error":       self.error,
                 "duration_ms": getattr(self, "duration_ms", None),
                 "phase_timings": self.phase_timings,
+                "latency": getattr(self, "latency", None),
             }
 
             with _write_lock, FileLock(log_file + ".lock", timeout=5):

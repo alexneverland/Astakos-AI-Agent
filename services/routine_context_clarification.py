@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from services.turn_timing import trace_stage
+
 import json
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -427,6 +429,7 @@ def context_confirmation_conflict() -> bool:
                        for channel in ("web", "telegram", "matrix")))
 
 
+@trace_stage("context_question_reply")
 def try_context_question_reply(
     user_text: str, channel: str, *, trusted_owner: bool,
     external_derived: bool = False, reply_to_id: str | None = None,

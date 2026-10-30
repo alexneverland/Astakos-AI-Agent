@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from services.turn_timing import trace_provider_operation
+
 import base64
 import hashlib
 import logging
@@ -481,6 +483,7 @@ class OpenAIAdapter(AIProviderAdapter):
 
         return OpenAI(api_key=self.api_key)
 
+    @trace_provider_operation
     def generate_text(
         self,
         prompt: str,
@@ -501,6 +504,7 @@ class OpenAIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def analyze_vision(
         self,
         prompt: str,
@@ -522,6 +526,7 @@ class OpenAIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def transcribe_audio(
         self,
         audio_bytes: bytes,
@@ -572,6 +577,7 @@ class OpenAIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def synthesize_speech(self, text: str, locale: str) -> bytes:
         """Generate an MP3 response through OpenAI's speech endpoint."""
         language_name, _ = TTS_LANGUAGE_BY_LOCALE.get(
@@ -593,6 +599,7 @@ class OpenAIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def generate_image(
         self,
         prompt: str,
@@ -648,6 +655,7 @@ class OpenAIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def embed_text(
         self,
         texts: str | Sequence[str],
@@ -706,6 +714,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
         from google import genai
         return genai.Client(api_key=self.api_key)
 
+    @trace_provider_operation
     def generate_text(
         self,
         prompt: str,
@@ -726,6 +735,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def analyze_vision(
         self,
         prompt: str,
@@ -747,6 +757,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def transcribe_audio(
         self,
         audio_bytes: bytes,
@@ -877,6 +888,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
                 except Exception as del_err:
                     logger.warning(f"[Gemini] Failed to delete temporary uploaded audio file '{uploaded_file.name}': {del_err}")
 
+    @trace_provider_operation
     def synthesize_speech(self, text: str, locale: str) -> bytes:
         """Generate MP3 speech through Gemini using the configured API key."""
         _, language_code = TTS_LANGUAGE_BY_LOCALE.get(
@@ -910,6 +922,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def generate_image(
         self,
         prompt: str,
@@ -933,6 +946,7 @@ class GeminiAPIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def embed_text(
         self,
         texts: str | Sequence[str],
@@ -1026,6 +1040,7 @@ class VertexAIAdapter(AIProviderAdapter):
             kwargs["credentials"] = self._credentials
         return genai.Client(**kwargs)
 
+    @trace_provider_operation
     def generate_text(
         self,
         prompt: str,
@@ -1046,6 +1061,7 @@ class VertexAIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def analyze_vision(
         self,
         prompt: str,
@@ -1067,6 +1083,7 @@ class VertexAIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def transcribe_audio(
         self,
         audio_bytes: bytes,
@@ -1171,6 +1188,7 @@ class VertexAIAdapter(AIProviderAdapter):
 
             self._handle_exception(e)
 
+    @trace_provider_operation
     def synthesize_speech(self, text: str, locale: str) -> bytes:
         """Generate MP3 speech through Cloud TTS with Vertex credentials."""
         try:
@@ -1184,6 +1202,7 @@ class VertexAIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def generate_image(
         self,
         prompt: str,
@@ -1207,6 +1226,7 @@ class VertexAIAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def embed_text(
         self,
         texts: str | Sequence[str],
@@ -1269,6 +1289,7 @@ class AnthropicAdapter(AIProviderAdapter):
         temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
         return ChatAnthropic(model=model, temperature=temp, api_key=self.api_key)
 
+    @trace_provider_operation
     def generate_text(
         self,
         prompt: str,
@@ -1289,6 +1310,7 @@ class AnthropicAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def analyze_vision(
         self,
         prompt: str,
@@ -1310,6 +1332,7 @@ class AnthropicAdapter(AIProviderAdapter):
         except Exception as e:
             self._handle_exception(e)
 
+    @trace_provider_operation
     def transcribe_audio(
         self,
         audio_bytes: bytes,
@@ -1321,6 +1344,7 @@ class AnthropicAdapter(AIProviderAdapter):
             message="Audio transcription is not natively supported by Anthropic API alone. Multilingual local STT fallback will be configured in PR 3A.",
         )
 
+    @trace_provider_operation
     def generate_image(
         self,
         prompt: str,
@@ -1332,6 +1356,7 @@ class AnthropicAdapter(AIProviderAdapter):
             message="Image generation is not supported by Anthropic. Configure an OpenAI (DALL-E) or Google (Imagen) provider to generate images.",
         )
 
+    @trace_provider_operation
     def embed_text(
         self,
         texts: str | Sequence[str],
@@ -1476,6 +1501,7 @@ class LocalE5EmbeddingsAdapter:
                 original_error=exc,
             ) from exc
 
+    @trace_provider_operation
     def embed_text(
         self,
         texts: str | Sequence[str],

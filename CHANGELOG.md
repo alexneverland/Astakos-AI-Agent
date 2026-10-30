@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- End-to-end latency spans for Web, Matrix and Telegram text turns, named
+  pre-graph and graph stages, provider/model calls, application retry attempts
+  and backoffs. The debug panel shows overlapping intervals without double
+  counting and distinguishes uncovered time from provider call duration.
+
 ### Fixed
 
 - Messenger preparation and pending-draft decisions read structured provider

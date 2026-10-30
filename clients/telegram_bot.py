@@ -125,6 +125,7 @@ from services.context_extractor import extract_and_update_context_flags
 from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
 from core.exceptions import SchedulerCrashError, PendingTimeoutError, DBWriteError
 from core.brain import llm, safe_llm_invoke
+from services.turn_timing import trace_turn
 from core.graph import graph
 from core.agents import clean_message, filter_messages
 from memory.vector_store import memory
@@ -2086,6 +2087,7 @@ def _prepare_telegram_message(
     )
 
 
+@trace_turn("telegram")
 def handle_message(
     user_text: str,
     chat_id: str,

@@ -502,7 +502,8 @@ function renderLatencyPanel(traces) {
   }
   const phases = latest.phase_timings || {};
   const invokeEntries = Object.entries(phases).filter(([key]) => key.endsWith('_invoke_ms'));
-  const invokeMs = invokeEntries.length ? Math.max(...invokeEntries.map(([, value]) => Number(value) || 0)) : null;
+  const latency = latest.latency;
+  const invokeMs = latency?.model_wall_ms ?? (invokeEntries.length ? Math.max(...invokeEntries.map(([, value]) => Number(value) || 0)) : null);
   const toolMs = (latest.tool_calls || []).reduce((sum, item) => sum + (Number(item.duration_ms) || 0), 0);
   const sendMs = phases.telegram_send_ms ?? phases.telegram_voice_send_ms ?? phases.web_send_ms ?? phases.final_response_build_ms;
   const metrics = [
@@ -513,12 +514,14 @@ function renderLatencyPanel(traces) {
     ['Tools', toolMs || null],
     ['Send/build', sendMs],
   ];
+  if (latency) metrics.push(['Retry wait', latency.retry_wait_wall_ms], ['Uncovered', latency.uncovered_ms]);
   const maxMs = Math.max(...metrics.map(([, value]) => Number(value) || 0), 1);
   panel.innerHTML = `
     <div class="latency-summary" data-search="latency ${esc(latest.agent || '')}" data-channel="${esc(latest.channel || '')}">
       <div class="off" style="font-size:10px;text-transform:uppercase">Latest turn</div>
       <strong>${esc(latest.agent || 'Unknown agent')}</strong>
       <div class="off" style="margin-top:3px">${esc(latest.channel || '-')} - ${(latest.timestamp || '').slice(11,19)} - ${latest.tool_calls?.length || 0} tools</div>
+      ${latency ? `<div>Total: ${(latency.total_ms / 1000).toFixed(1)}s · ${esc(latest.trace_id || '')}</div>` : ''}
     </div>
     ${metrics.slice(1).map(([label, value]) => {
       const ms = value == null ? null : Number(value);
@@ -529,7 +532,16 @@ function renderLatencyPanel(traces) {
         <div class="metric-value" style="color:${color}">${ms == null ? '-' : ms >= 1000 ? `${(ms/1000).toFixed(1)}s` : `${Math.round(ms)}ms`}</div>
         <div class="metric-track"><div class="metric-fill" style="width:${width}%;background:${color}"></div></div>
       </div>`;
-    }).join('')}`;
+    }).join('')}
+    ${latency ? `<details style="grid-column:1/-1"><summary>Timing spans (${latency.spans.length})</summary>
+      <div class="off">Nested and parallel spans overlap; do not add their durations. Model time includes SDK retries; only exposed retries are counted. Uncovered is outside all recorded spans.</div>
+      <table><thead><tr><th>Start</th><th>Stage / call</th><th>Provider / model</th><th>Duration</th><th>Error</th></tr></thead><tbody>
+      ${latency.spans.slice().sort((a,b) => a.start_ms - b.start_ms).map(span => `<tr>
+        <td>${(span.start_ms / 1000).toFixed(1)}s</td>
+        <td>${esc(span.name)}${span.stage ? ` (${esc(span.stage)})` : ''}${span.attempt ? ` #${esc(span.attempt)}` : ''}</td>
+        <td>${esc(span.provider || '')} ${esc(span.model || '')}</td>
+        <td>${(span.duration_ms / 1000).toFixed(3)}s</td><td>${esc(span.error || '')}</td></tr>`).join('')}
+      </tbody></table>${latency.dropped_spans ? `<div>Omitted spans: ${esc(latency.dropped_spans)}</div>` : ''}</details>` : ''}`;
 }
 
 async function fetchAllNow() {

@@ -8,6 +8,7 @@
 import time
 from core.brain import llm
 from core.utils import clean_message
+from services.turn_timing import timing_span
 
 class MastroResponse:
     """
@@ -29,7 +30,8 @@ def safe_gemini_call(prompt: str, retries: int = 4, base_delay: float = 2.0):
     for attempt in range(retries):
         try:
             # Execution of call via the unified brain (LangChain)
-            response = llm.invoke(prompt)
+            with timing_span("helper_model_attempt", kind="attempt", attempt=attempt + 1):
+                response = llm.invoke(prompt)
             return MastroResponse(response.content)
 
         except Exception as e:
@@ -49,10 +51,12 @@ def safe_gemini_call(prompt: str, retries: int = 4, base_delay: float = 2.0):
             if is_quota:
                 wait = base_delay * (4 ** attempt)
                 print(f"\033[93m⚠️ [Gemini 429]: Quota limit! Waiting {wait:.1f}s before attempt {attempt+2}/{retries}...\033[0m")
-                time.sleep(wait)
+                with timing_span("helper_model_backoff", kind="retry_wait", attempt=attempt + 1):
+                    time.sleep(wait)
             elif is_server or is_timeout:
                 wait = base_delay * (2 ** attempt)
                 print(f"\033[93m⚠️ [Gemini Server/Timeout]: Waiting {wait:.1f}s before attempt {attempt+2}/{retries}...\033[0m")
-                time.sleep(wait)
+                with timing_span("helper_model_backoff", kind="retry_wait", attempt=attempt + 1):
+                    time.sleep(wait)
             else:
                 raise e
