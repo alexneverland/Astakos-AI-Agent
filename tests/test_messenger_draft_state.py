@@ -128,5 +128,131 @@ def test_relay_local_payload_accepts_known_contact(monkeypatch, tmp_path):
     assert "DRAFT" in result
     import json
     data = json.loads(draft_file.read_text(encoding="utf-8"))
-    assert data["target_name"] == "Sofia"
+    assert data["target_name"] == "123"
     assert data["message"] == "hello"
+
+
+def test_relay_local_payload_overwrites_draft_with_conversational_text(monkeypatch, tmp_path):
+    """Draft payload remains message content and overwrites the active draft."""
+    import config
+    from core.messenger_draft import save_draft
+    from tools.web import relay_local_payload
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    monkeypatch.setattr("tools.web._messenger_target_status", lambda target: (True, ""))
+    save_draft("Sofia", "Παλιό μήνυμα")
+
+    result = relay_local_payload.func("Sofia", "Ποιο draft λες; Θα το δω μετά.")
+
+    assert "DRAFT" in result
+    data = json.loads(draft_file.read_text(encoding="utf-8"))
+    assert data["message"] == "Ποιο draft λες; Θα το δω μετά."
+
+
+def test_relay_local_payload_accepts_bidirectional_greek_latin_contact_alias(monkeypatch, tmp_path):
+    """The draft writer resolves a Greek request against a Latin contact alias."""
+    import config
+    from tools.web import relay_local_payload
+
+    draft_file = tmp_path / "messenger_draft.json"
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"sofia": "123"})
+
+    result = relay_local_payload.func("Σοφία", "Νέο μήνυμα")
+
+    assert "DRAFT" in result
+    data = json.loads(draft_file.read_text(encoding="utf-8"))
+    assert data["target_name"] == "123"
+    assert data["message"] == "Νέο μήνυμα"
+
+
+def test_messenger_target_resolver_preserves_sophia_phonetic_alias(monkeypatch):
+    """Greek contact aliases retain the established Sophia-to-Sofia matching."""
+    from tools.web import _resolve_messenger_target
+
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
+
+    assert _resolve_messenger_target("Sophia") == ("123", "known contact")
+
+
+def test_contact_reference_reuses_canonical_partial_alias_matching(monkeypatch):
+    """Natural requests accept the same inflected contact form as draft persistence."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"νικος παπαδοπουλος": "123"},
+    )
+
+    assert has_known_messenger_contact_reference("Φτιάξε ένα όμορφο καλημέρα για τον Νίκο")
+    assert not has_known_messenger_contact_reference("Σε τρεις μέρες φεύγουμε Γεωργία")
+
+
+def test_contact_reference_ignores_short_word_inside_multiword_alias(monkeypatch):
+    """An unrelated short word must not match one component of a saved alias."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"γυναικάρα μου": "123"},
+    )
+
+    assert not has_known_messenger_contact_reference(
+        "βρεσ μου αγγελιεσ στο linkedin gia logistic manager θεσσαλονικι"
+    )
+    assert has_known_messenger_contact_reference(
+        "Στείλε ένα όμορφο μήνυμα στη γυναικάρα μου"
+    )
+
+
+def test_contact_reference_rejects_saved_ambiguous_alias(monkeypatch):
+    """Saved contacts cannot bypass the canonical ambiguous-target guard."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"friend": "123"},
+    )
+
+    assert not has_known_messenger_contact_reference("Πες στον friend ότι θα αργήσω")
+
+
+def test_contact_reference_preserves_short_leading_name_component(monkeypatch):
+    """A short leading name still identifies its saved multiword contact."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"sam smith": "123"},
+    )
+
+    assert has_known_messenger_contact_reference(
+        "Πες στον Sam ότι ενημέρωσα το LinkedIn"
+    )
+
+
+def test_contact_reference_rejects_lowercase_short_leading_alias_component(monkeypatch):
+    """A lowercase short alias component is not sufficient recipient evidence."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"my wife": "123"},
+    )
+
+    assert not has_known_messenger_contact_reference("Show my LinkedIn jobs")
+
+
+def test_contact_reference_preserves_capitalized_short_nonleading_name(monkeypatch):
+    """A capitalized short name may identify any component of a saved alias."""
+    from tools.web import has_known_messenger_contact_reference
+
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"smith sam": "123"},
+    )
+
+    assert has_known_messenger_contact_reference(
+        "Πες στον Sam ότι ενημέρωσα το LinkedIn"
+    )

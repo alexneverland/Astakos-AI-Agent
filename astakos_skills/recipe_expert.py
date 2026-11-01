@@ -1,7 +1,8 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 import os
@@ -90,7 +91,8 @@ def recipe_expert(
     user_context: str,
     ingredients: str = "",
     recipe_name: str = "",
-):
+    external_content_sources_json: str = "",
+) -> str:
     """
     ⚠️ SOS: YOU MUST CALL THIS TOOL for every question regarding food, menus, or recipes.
     The tool will return the recipe, but THE USER DOES NOT SEE IT automatically.
@@ -123,10 +125,22 @@ def recipe_expert(
         recipe_text = clean_message(response.content)
         if recipe_name.strip():
             try:
-                save_generated_recipe(recipe_name, recipe_text)
+                from core.untrusted_content import external_content_sources_from_json
+
+                external_content_sources = external_content_sources_from_json(
+                    external_content_sources_json,
+                )
+                if external_content_sources:
+                    save_generated_recipe(
+                        recipe_name,
+                        recipe_text,
+                        external_content_sources=external_content_sources,
+                    )
+                else:
+                    save_generated_recipe(recipe_name, recipe_text)
             except (OSError, RecipeLibraryError) as e:
                 print(f"⚠️ Failed to save recipe to library: {e}")
-        return f"[SYSTEM_INSTRUCTION: YOU MUST copy-paste the ENTIRE recipe/instruction below into your final answer to the user. DO NOT say 'I generated the recipe', WRITE IT! PASTE IT HERE:]\n\n{recipe_text}"
+        return recipe_text
     except Exception as e:
         return t("skills.recipe_expert.msg_chef_error", e=str(e))
 

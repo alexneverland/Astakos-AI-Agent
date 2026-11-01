@@ -1,16 +1,24 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 import config
 from core.i18n import t
+from core import nl_config
 import os
 import json
+import re
 import threading
 from datetime import datetime
 import sqlite3
+import tempfile
+from contextlib import closing
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Literal
 from langchain_core.messages import HumanMessage
 from config import WORKING_MEMORY_FILE, STATE_DB
 from memory.vector_store import memory, is_semantically_duplicate, memory_lock  # [MASTRO-FIX]: ONE lock, not two
@@ -50,7 +58,6 @@ def _validate_working_memory_tags(raw_text: str) -> str:
         "- ",
         "* ",
         "```",
-        ": ",
     )
     lowered = text.lower()
     if any(marker in lowered for marker in banned_markers):
@@ -81,6 +88,14 @@ def _validate_working_memory_tags(raw_text: str) -> str:
     return ", ".join(validated)
 
 
+def _has_standalone_marker(text: str, markers: tuple[str, ...]) -> bool:
+    """Return whether a configured marker appears without being part of a larger word."""
+    return any(
+        re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", text)
+        for marker in markers
+    )
+
+
 def _looks_like_operational_working_memory_exchange(user_text: str, ai_text: str) -> bool:
     """
     Skip foreground-memory extraction for operational routine/tool-management
@@ -107,33 +122,34 @@ def _looks_like_operational_working_memory_exchange(user_text: str, ai_text: str
         return True
 
     user_routine_admin = (
-        ("ρουτιν" in user_norm or "routine" in user_norm)
-        and any(token in user_norm for token in (
-            "mute", "unmute", "condition", "cooldown", "βαρδια", "βάρδια",
-            "δουλεια", "δουλειά", "μονο οταν", "μόνο όταν",
-        ))
+        any(marker in user_norm for marker in nl_config.WM_ROUTINE_REFERENCE_MARKERS)
+        and _has_standalone_marker(
+            user_norm,
+            nl_config.WM_ROUTINE_ADMIN_MARKERS,
+        )
     )
     if user_routine_admin:
         return True
 
-    ai_operational_markers = (
-        "matching routines:",
-        "condition:",
-        "conditions.",
-        "δεν έγινε προσθήκη ή αφαίρεση condition",
-        "απέκτησε condition",
-        "already had this condition",
-    )
-    if any(marker in ai_norm for marker in ai_operational_markers):
+    if any(marker in ai_norm for marker in nl_config.WM_OPERATIONAL_AI_MARKERS):
         return True
 
     return False
 
 
-def update_working_memory(user_text, ai_text):
-    """Instantly extracts context tags from the dialogue."""
+def update_working_memory(
+    user_text: str,
+    ai_text: str,
+    external_content_sources: Iterable[str] | None = None,
+) -> None:
+    """Instantly extracts context tags unless the exchange derives from external content."""
     try:
         print("\033[90m[System]: Started Foreground analysis...\033[0m")
+
+        if external_content_sources:
+            print("\033[90m[Foreground]: external-derived exchange - skip automatic memory write\033[0m")
+            print(f"{config.USER_NAME}: ", end="", flush=True)
+            return
 
         # We put on the "glasses" (Smart Parser) before cutting the characters
         safe_user = clean_message(user_text)
@@ -176,6 +192,71 @@ def update_working_memory(user_text, ai_text):
 # ════════════════════════════════════════════════════════════════
 # CAPABILITIES LOG — "Self-awareness"
 # ════════════════════════════════════════════════════════════════
+
+def list_capability_records() -> list[dict[str, object]]:
+    """List every capability row for an exact, human-auditable maintenance pass."""
+    with closing(sqlite3.connect(STATE_DB, timeout=30)) as conn:
+        rows = conn.execute(
+            "SELECT id, type, description, created_at FROM capabilities ORDER BY id"
+        ).fetchall()
+    return [
+        {"id": row[0], "type": row[1], "description": row[2], "created_at": row[3]}
+        for row in rows
+    ]
+
+
+def remove_capability_records(
+    expected_records: list[dict[str, object]], backup_path: Path
+) -> int:
+    """Archive and remove only exact capability rows in one SQLite transaction."""
+    if not expected_records:
+        return 0
+    backup_path = Path(backup_path)
+    ids = [item["id"] for item in expected_records]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Duplicate capability IDs in cleanup request")
+
+    with memory_lock, closing(sqlite3.connect(STATE_DB, timeout=30)) as conn:
+        if backup_path.exists():
+            raise FileExistsError(backup_path)
+        pending_path = None
+        deletes_finished = False
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                for item in expected_records:
+                    row = conn.execute(
+                        "SELECT type, description FROM capabilities WHERE id=?", (item["id"],)
+                    ).fetchone()
+                    if row != (item["type"], item["description"]):
+                        raise ValueError(f"Capability row {item['id']} is stale; no rows removed")
+
+                backup_path.parent.mkdir(parents=True, exist_ok=True)
+                fd, name = tempfile.mkstemp(
+                    prefix=f"{backup_path.name}.", suffix=".pending", dir=backup_path.parent
+                )
+                pending_path = Path(name)
+                with os.fdopen(fd, "w", encoding="utf-8") as backup:
+                    json.dump(
+                        {"removed_at": datetime.now().isoformat(), "records": expected_records},
+                        backup, ensure_ascii=False, indent=2,
+                    )
+                    backup.flush()
+                    os.fsync(backup.fileno())
+
+                for item in expected_records:
+                    conn.execute("DELETE FROM capabilities WHERE id=?", (item["id"],))
+                deletes_finished = True
+        except Exception:
+            if pending_path is not None and not deletes_finished:
+                pending_path.unlink(missing_ok=True)
+            raise
+
+        # Expose a completed archive only after the database commit succeeds.
+        # A finalization error leaves the staged file recoverable, never a false archive.
+        os.link(pending_path, backup_path)
+        pending_path.unlink()
+    return len(expected_records)
 
 def _load_capabilities() -> dict:
     default = {"can_do": [], "cannot_do": []}
@@ -250,6 +331,18 @@ def _save_capability(capability_type: str, description: str) -> str:
     return "error"
 
 
+def missing_capability_is_recorded(description: str) -> bool:
+    """Check the canonical capability store before a deferred external delivery."""
+    with memory_lock:
+        recorded = _load_capabilities()["cannot_do"]
+        return is_semantically_duplicate(description, recorded, threshold=0.88)
+
+
+def record_missing_capability(description: str) -> str:
+    """Commit a missing capability after its external proposal was delivered."""
+    return _save_capability("cannot", description)
+
+
 _USER_SUBJECT_MARKERS = (
     t("prompts.ext_str_252"), t("prompts.ext_str_250"), t("prompts.ext_str_424"), t("prompts.ext_str_381"), t("prompts.ext_str_171"), t("prompts.ext_str_170"),
     t("prompts.ext_str_186"), t("prompts.ext_str_190"), t("prompts.ext_str_224"), t("prompts.ext_str_203"), t("prompts.ext_str_145"), t("prompts.ext_str_137"),
@@ -286,7 +379,18 @@ def get_capability_context() -> str:
     return "\n".join(parts) if parts else ""
 
 
-def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
+@dataclass(frozen=True)
+class CapabilityObservation:
+    """A narrowly classified follow-up from one completed conversation turn."""
+
+    kind: Literal["missing_capability", "existing_behavior_bug"]
+    description: str
+
+
+def update_capabilities_from_exchange(
+    user_text: str, ai_text: str, agent: str, *, defer_missing_persistence: bool = False
+) -> CapabilityObservation | None:
+    """Classify an exchange, optionally deferring missing-capability persistence."""
     import re
     import json
     try:
@@ -298,7 +402,7 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
         
         resp_text = response.text if hasattr(response, 'text') else str(response)
         if not resp_text or resp_text.strip().lower() == "null":
-            return
+            return None
             
         raw = re.sub(r"```json|```", "", resp_text.strip()).strip()
         start = raw.find('{')
@@ -307,7 +411,7 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
             raw = raw[start:end+1]
             
         if raw.lower() == "null" or not raw:
-            return
+            return None
             
         data = json.loads(raw)
 
@@ -321,16 +425,31 @@ def update_capabilities_from_exchange(user_text: str, ai_text: str, agent: str):
                 elif result == "duplicate":
                     print(f"\033[90m[Self-awareness]: skip duplicate can_do: {data['can_do']}\033[0m")
             
-        if data.get("cannot_do") and str(data["cannot_do"]).lower() != "null":
+        issue_type = data.get("issue_type")
+        if issue_type == "existing_behavior_bug" and isinstance(data.get("bug"), str):
+            description = data["bug"].strip()
+            if description and description.casefold() != "null":
+                return CapabilityObservation("existing_behavior_bug", description[:500])
+
+        if issue_type == "missing_capability" and data.get("cannot_do") and str(data["cannot_do"]).lower() != "null":
             if _looks_like_user_fact_not_capability(data["cannot_do"]):
                 print(f"\033[90m[Self-awareness]: skip user fact, not cannot_do: {data['cannot_do']}\033[0m")
             else:
-                result = _save_capability("cannot", data["cannot_do"])
+                description = str(data["cannot_do"])
+                if defer_missing_persistence:
+                    if not missing_capability_is_recorded(description):
+                        return CapabilityObservation("missing_capability", description)
+                    result = "duplicate"
+                else:
+                    result = record_missing_capability(description)
                 if result == "inserted":
                     print(f"\033[91m[Self-awareness]: ❌ cannot_do: {data['cannot_do']}\033[0m")
+                    return CapabilityObservation("missing_capability", description)
                 elif result == "duplicate":
                     print(f"\033[90m[Self-awareness]: skip duplicate cannot_do: {data['cannot_do']}\033[0m")
             
     except Exception as e:
         print(f"\033[90m[Self-awareness Error]: {e}\033[0m")
+
+    return None
 

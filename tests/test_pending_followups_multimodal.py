@@ -1,22 +1,12 @@
-import memory.pending_followups as pf
-from memory.pending_followups import classify_followup_deferral_with_llm
+"""Multimodal provider responses retain the strict shared batch contract."""
 from services.gemini import MastroResponse
+from services.followup_update_selector import select_followup_updates
 
-def test_classify_followup_deferral_with_llm_multimodal_list(monkeypatch):
-    def mock_safe_gemini_call(prompt, *args, **kwargs):
-        # We simulate the exact scenario of the bug where the LLM response content was a list
-        return MastroResponse([{"type": "text", "text": '{"should_defer": true, "delay_minutes": 60, "target_window": "morning", "reason": "test", "confidence": 0.9}'}])
 
-    import services.gemini as sg
-    monkeypatch.setattr(sg, "safe_gemini_call", mock_safe_gemini_call)
-
-    result = classify_followup_deferral_with_llm(
-        topic="test",
-        subject="test",
-        source_user_text="test",
-        current_user_text="test"
-    )
-
-    assert result["should_defer"] is True
-    assert result["delay_minutes"] == 60
-    assert result["reason"] == "test"
+def test_followup_batch_adapter_multimodal_list(monkeypatch):
+    def model(prompt, *args, **kwargs):
+        return MastroResponse([{"type": "text", "text": '{"updates":[{"id":1,"action":"defer","delay_minutes":60,"target_window":"explicit_timer","reason":"test","confidence":0.9}]}'}])
+    monkeypatch.setattr("services.gemini.safe_gemini_call", model)
+    result = select_followup_updates(user_text="Later", candidates=[{
+        "id": 1, "status": "pending", "topic": "test", "subject": "Test", "source_user_text": "Plan"}])
+    assert result[0]["action"] == "defer" and result[0]["delay_minutes"] == 60

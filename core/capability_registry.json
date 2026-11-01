@@ -1,5 +1,28 @@
 [
   {
+    "name": "manage_known_places",
+    "description": "Save a named fresh owner GPS point, list known home/work/custom places, or locate the owner within their radii.",
+    "agent": "Home_Agent",
+    "risk_level": "WARNING",
+    "priority": 6,
+    "triggers": []
+  },
+  {
+    "name": "get_world_time",
+    "description": "Returns the current local time for a given city.",
+    "agent": "Chat_Agent",
+    "risk_level": "SAFE",
+    "priority": 9,
+    "triggers": [
+      "time in",
+      "what time is it in",
+      "ώρα σε",
+      "ώρα στο",
+      "τι ώρα είναι στο",
+      "τι ώρα έχει τώρα στο"
+    ]
+  },
+  {
     "name": "search_recipe_library",
     "description": "Search saved recipes and return compact ids, names, and favorite state.",
     "agent": "Chat_Agent",
@@ -256,8 +279,6 @@
     "risk_level": "CRITICAL",
     "priority": 15,
     "triggers": [
-      "linkedin",
-      "linked in",
       "ανάρτηση",
       "ανέβασε στο linkedin",
       "γράψε post",
@@ -299,10 +320,20 @@
   },
   {
     "name": "web_search",
-    "description": "Αναζήτηση στο internet με DuckDuckGo ή άνοιγμα URL.",
+    "description": "Αναζήτηση στο internet και επιλεκτική έρευνα σε Web/GitHub/Reddit/YouTube/LinkedIn με κοινό result contract.",
     "agent": "Web_Agent",
     "risk_level": "SAFE",
     "priority": 8,
+    "routing_override_triggers": [
+      "ψάξε στο web",
+      "ψαξε στο web",
+      "ψάξε web",
+      "ψαξε web",
+      "ψάξεις web",
+      "ψαξεις web",
+      "search web",
+      "search the web"
+    ],
     "triggers": [
       "ψάξε στο internet",
       "duckduckgo",
@@ -491,7 +522,6 @@
       "ρομπότ",
       "vacuum",
       "xiaomi",
-      "καθάρισε",
       "σκούπισε",
       "robot",
       "ρόμπα"
@@ -532,7 +562,12 @@
       "πλοήγηση",
       "οδηγίες",
       "πού βρίσκεται",
-      "απόσταση"
+      "απόσταση",
+      "σε πόση ώρα φτάνουμε",
+      "πόση ώρα φτάνουμε",
+      "χρόνος διαδρομής",
+      "εκτιμώμενη άφιξη",
+      "eta"
     ]
   },
   {

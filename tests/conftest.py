@@ -3,31 +3,37 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 
 # Ensure root is in path for config import
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-TEST_CUSTOM_INTENTS_PATH = os.path.join(os.path.dirname(__file__), '..', 'astakos_custom_intents.json')
-BACKUP_PATH = os.path.join(os.path.dirname(__file__), '..', 'astakos_custom_intents.json.bak')
+_PREVIOUS_CUSTOM_INTENTS_PATH = os.environ.get("ASTAKOS_CUSTOM_INTENTS_PATH")
+_TEST_CUSTOM_INTENTS_DIR = tempfile.mkdtemp(prefix="astakos_test_intents_")
+_TEST_MEMORY_IMPORT_DIR = tempfile.mkdtemp(prefix="astakos_test_memory_import_")
+_PREVIOUS_MEMORY_PATHS = {}
+TEST_CUSTOM_INTENTS_PATH = os.path.join(
+    _TEST_CUSTOM_INTENTS_DIR,
+    "astakos_custom_intents.json",
+)
+os.environ["ASTAKOS_CUSTOM_INTENTS_PATH"] = TEST_CUSTOM_INTENTS_PATH
 
 MOCK_CUSTOM_INTENTS = {
     "system_tool": {
         "family_markers": ["kid1", "partner", "σοφια", "αλεξανδρος"]
     },
+    "routines": {
+        "tokens": {
+            "_KID1_TOKENS": ["αλεξανδρ"],
+            "_PARTNER_TOKENS": ["σοφια"],
+        },
+        "inline": {
+            "partner_aliases": ["sofia", "σοφ"],
+        },
+    },
     "context_builder": {
         "partner_gift_words": ["σοφια", "ρολοι", "ρολόι", "δώρο", "παρτνερ", "partner"],
         "partner_gift_context": ["rosefield", "bangle", "δώρα", "ρολόι", "παρτνερ", "partner"]
-    },
-    "context_extractor": {
-        "park_words": ["πάρκο", "παιδική χαρά", "πλατεία", "park"],
-        "home_words": ["σπίτι", "βρίσκομαι σπίτι", "γύρισα", "έφτασα", "home"],
-        "work_words": ["δουλειά", "γραφείο", "βάρδια", "work"],
-        "partner_names": ["Σοφία", "σοφία", "sofia", "partner"],
-        "kid1_names": ["Αλέξανδρος", "αλέξανδρος", "alexandros", "άλεξ", "kid1"],
-        "leaving_words": ["αναχώρηση", "έφυγα", "φεύγω"],
-        "now_sitting_words": ["κάθομαι", "άραξα"],
-        "found_them_words": ["βρήκα", "συνάντησα"],
-        "all_together_words": ["μαζί", "όλοι"]
     },
     "routine_intent": {
         "control_verbs": ["παύση", "σταμάτα", "ακύρωση", "συνέχισε", "κοιμήθηκε", "ξύπνησε", "pause", "stop", "cancel", "continue"],
@@ -47,19 +53,37 @@ MOCK_CUSTOM_INTENTS = {
     }
 }
 
-def pytest_configure(config):
-    # Backup existing if any
-    if os.path.exists(TEST_CUSTOM_INTENTS_PATH):
-        shutil.copy2(TEST_CUSTOM_INTENTS_PATH, BACKUP_PATH)
-    
+def pytest_configure(config: pytest.Config) -> None:
+    """Create an isolated custom-intents overlay for the test session."""
     with open(TEST_CUSTOM_INTENTS_PATH, "w", encoding="utf-8") as f:
         json.dump(MOCK_CUSTOM_INTENTS, f, ensure_ascii=False, indent=2)
+    # Chroma is constructed during module import, before autouse fixtures run.
+    # Isolate import-time clients as well as the per-test storage paths below.
+    import config as app_config
+    paths = {
+        "CHROMA_DB_DIR": "chroma", "STATE_DB": "state.db",
+        "PROFILE_DB": "profile.db", "EMBEDDINGS_CACHE_DB": "embeddings.db",
+        "CONVERSATION_DB_FILE": "conversation.db", "ROUTINES_DB": "routines.db",
+        "MEMORY_AUDIT_DIR": "memory_audit",
+    }
+    for key, name in paths.items():
+        _PREVIOUS_MEMORY_PATHS[key] = getattr(app_config, key)
+        setattr(app_config, key, os.path.join(_TEST_MEMORY_IMPORT_DIR, name))
 
-def pytest_unconfigure(config):
-    if os.path.exists(BACKUP_PATH):
-        shutil.move(BACKUP_PATH, TEST_CUSTOM_INTENTS_PATH)
-    elif os.path.exists(TEST_CUSTOM_INTENTS_PATH):
-        os.remove(TEST_CUSTOM_INTENTS_PATH)
+def pytest_unconfigure(config: pytest.Config) -> None:
+    """Remove only the isolated test overlay and restore the prior environment."""
+    memory_module = sys.modules.get("memory.vector_store")
+    if memory_module and memory_module.CHROMA_DB_DIR == os.path.join(_TEST_MEMORY_IMPORT_DIR, "chroma"):
+        memory_module.close_vector_store()
+    import config as app_config
+    for key, value in _PREVIOUS_MEMORY_PATHS.items():
+        setattr(app_config, key, value)
+    shutil.rmtree(_TEST_MEMORY_IMPORT_DIR, ignore_errors=True)
+    if _PREVIOUS_CUSTOM_INTENTS_PATH is None:
+        os.environ.pop("ASTAKOS_CUSTOM_INTENTS_PATH", None)
+    else:
+        os.environ["ASTAKOS_CUSTOM_INTENTS_PATH"] = _PREVIOUS_CUSTOM_INTENTS_PATH
+    shutil.rmtree(_TEST_CUSTOM_INTENTS_DIR, ignore_errors=True)
 
 @pytest.fixture(autouse=True)
 def mock_dbs(monkeypatch, tmp_path):
@@ -76,6 +100,34 @@ def mock_dbs(monkeypatch, tmp_path):
     import sys
     if 'memory.vector_store' in sys.modules:
         monkeypatch.setattr(sys.modules['memory.vector_store'], 'MEMORY_AUDIT_DIR', str(tmp_path / 'memory_audit'), raising=False)
+        monkeypatch.setattr(sys.modules['memory.vector_store'], 'CHROMA_DB_DIR', str(tmp_path / 'chroma_db'), raising=False)
+        # Semantic duplicate tests explicitly replace this model boundary.
+        # Other offline tests must not call a cloud provider through the new path.
+        monkeypatch.setattr(sys.modules['memory.vector_store'], '_fact_duplicate_model_response',
+                            lambda prompt: '{"duplicate_id": null}', raising=False)
         
     import memory.event_log as event_log
     monkeypatch.setattr(event_log, 'LOGS_DIR', str(tmp_path / 'events'), raising=False)
+    import memory.execution_trace as execution_trace
+    monkeypatch.setattr(execution_trace, '_TRACES_DIR', str(tmp_path / 'traces'))
+
+
+@pytest.fixture
+def offline_fact_storage(monkeypatch):
+    """Keep fact-storage unit tests independent of embeddings and routine providers."""
+    from memory import vector_store as vs
+
+    monkeypatch.setattr(vs.embeddings, "embed_query", lambda text: [0.1, 0.2, 0.3])
+    monkeypatch.setattr(vs.embeddings, "embed_documents", lambda texts: [[0.1, 0.2, 0.3] for _ in texts])
+    monkeypatch.setattr(vs.AstakosMemoryManager, "_trigger_routine_reconciler", lambda *a, **k: None)
+
+
+@pytest.fixture
+def offline_behavioral_io(monkeypatch):
+    """Fail loudly if an offline behavioral test reaches any network transport."""
+    import socket
+    def deny(*args, **kwargs):
+        raise AssertionError("Outbound network is forbidden in behavioral tests")
+    monkeypatch.setattr(socket.socket, "connect", deny)
+    monkeypatch.setattr(socket.socket, "connect_ex", deny)
+    monkeypatch.setattr(socket, "create_connection", deny)
