@@ -1,10 +1,12 @@
 from core.i18n import t
+import json
 import sqlite3
 import os
 import hashlib
 import threading
 from difflib import SequenceMatcher
-from datetime import datetime
+from datetime import date, datetime
+from typing import Callable
 
 from core.exceptions import RoutineConflictError, DBWriteError
 from core.routine_state import RoutineState, validate_transition, is_notifiable, state_from_str
@@ -13,6 +15,12 @@ import config
 
 DB_PATH      = config.ROUTINES_DB
 db_write_lock = threading.Lock()  # Serializes writes — lock-free reads (WAL mode)
+ROUTINE_DB_BUSY_TIMEOUT_MS = 5000
+_wal_setup_lock = threading.Lock()
+_wal_enabled = False
+_wal_enabled_path: str | None = None
+# Inactive until the dated feedback rollout; called inside the offer transaction.
+_dated_draft_feedback_recorder: Callable[..., bool] | None = None
 
 # ────────────────────────────────────────────────────────────────
 # CANONICALIZATION LAYER
@@ -91,19 +99,42 @@ def _embedding_similarity(text_a: str, text_b: str) -> float:
 
 def get_connection(write: bool = False):
     """
-    Returns an SQLite connection in WAL mode (graceful fallback if not supported).
-    check_same_thread=False for multi-thread safety.
+    Returns a routine DB connection with a bounded SQLite lock wait.
+    WAL setup is serialized and retried only until it succeeds.
     """
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=3000")
-    except sqlite3.Error:
-        pass  # Fallback: default journal mode (e.g., network drive, read-only fs)of
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=ROUTINE_DB_BUSY_TIMEOUT_MS / 1000,
+        check_same_thread=False,
+    )
+    conn.execute("PRAGMA busy_timeout=5000")
+    _enable_wal(conn)
     return conn
 
-def setup_db():
+
+def _enable_wal(conn: sqlite3.Connection) -> bool:
+    """Enable WAL once per database path, retrying after a transient startup lock."""
+    global _wal_enabled, _wal_enabled_path
+
+    with _wal_setup_lock:
+        if _wal_enabled and _wal_enabled_path == DB_PATH:
+            return True
+        try:
+            row = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        except sqlite3.Error:
+            return False
+
+        _wal_enabled = bool(row and str(row[0]).lower() == "wal")
+        _wal_enabled_path = DB_PATH if _wal_enabled else None
+        return _wal_enabled
+
+
+def setup_db() -> None:
+    """Create and migrate the routines database under a serialized startup lock."""
     conn   = get_connection()
+    # API and Telegram start in separate processes. Serialize schema inspection
+    # and ALTER statements so a legacy upgrade cannot race between them.
+    conn.execute("BEGIN IMMEDIATE")
     cursor = conn.cursor()
 
     cursor.execute('''
@@ -122,6 +153,15 @@ def setup_db():
             ignore_count INTEGER DEFAULT 0,
             notify_cooldown_hours REAL DEFAULT 20.0,
             last_notified_ts TEXT,
+            explicit_skip_streak INTEGER DEFAULT 0,
+            unanswered_reminder_streak INTEGER DEFAULT 0,
+            paused_indefinitely BOOLEAN DEFAULT 0,
+            active_from TEXT DEFAULT NULL,
+            active_until TEXT DEFAULT NULL,
+            paused_until TEXT DEFAULT NULL,
+            resume_rule TEXT DEFAULT NULL,
+            pause_reason TEXT DEFAULT NULL,
+            external_content_sources_json TEXT NOT NULL DEFAULT '[]',
             state TEXT DEFAULT 'learned'
         )
     ''')
@@ -147,6 +187,38 @@ def setup_db():
     if "last_notified_ts" not in existing_cols:
         cursor.execute("ALTER TABLE routines ADD COLUMN last_notified_ts TEXT")
         print("[routine_db]: Migration → 'last_notified_ts'")
+
+    if "explicit_skip_streak" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN explicit_skip_streak INTEGER DEFAULT 0")
+        print("[routine_db]: Migration → 'explicit_skip_streak'")
+
+    if "unanswered_reminder_streak" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN unanswered_reminder_streak INTEGER DEFAULT 0")
+        print("[routine_db]: Migration → 'unanswered_reminder_streak'")
+
+    if "paused_indefinitely" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN paused_indefinitely BOOLEAN DEFAULT 0")
+        print("[routine_db]: Migration → 'paused_indefinitely'")
+
+    if "active_from" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN active_from TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'active_from'")
+
+    if "active_until" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN active_until TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'active_until'")
+
+    if "paused_until" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN paused_until TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'paused_until'")
+
+    if "resume_rule" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN resume_rule TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'resume_rule'")
+
+    if "pause_reason" not in existing_cols:
+        cursor.execute("ALTER TABLE routines ADD COLUMN pause_reason TEXT DEFAULT NULL")
+        print("[routine_db]: Migration → 'pause_reason'")
 
     if "state" not in existing_cols:
         cursor.execute("ALTER TABLE routines ADD COLUMN state TEXT DEFAULT 'learned'")
@@ -215,6 +287,13 @@ def setup_db():
         cursor.execute("ALTER TABLE routines ADD COLUMN source_memory_ref TEXT")
         print("[routine_db]: Migration → 'source_memory_ref'")
 
+    if "external_content_sources_json" not in existing_cols:
+        cursor.execute(
+            "ALTER TABLE routines "
+            "ADD COLUMN external_content_sources_json TEXT NOT NULL DEFAULT '[]'"
+        )
+        print("[routine_db]: Migration -> 'external_content_sources_json'")
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS context_state (
             key TEXT PRIMARY KEY,
@@ -230,8 +309,18 @@ def setup_db():
         fp = make_fingerprint(day or "", time or "", event or "")
         cursor.execute("UPDATE routines SET fingerprint=? WHERE id=?", (fp, r_id))
 
-    conn.commit()
-    conn.close()
+    # The same startup transaction provisions dated feedback on every platform.
+    # This adds schema only; the separate owner reset must never run at startup.
+    from memory.routine_feedback import RoutineFeedbackStore
+
+    try:
+        RoutineFeedbackStore.initialize_schema(conn)
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 # ────────────────────────────────────────────────────────────────
 # STATE MACHINE LAYER
@@ -282,7 +371,33 @@ def transition_routine(routine_id: int, to_state: RoutineState) -> None:
 # CORE OPERATIONS
 # ────────────────────────────────────────────────────────────────
 
-def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
+def _merge_external_content_sources(
+    existing_sources_json: str | None,
+    new_sources: list[str] | None,
+) -> str:
+    """Merge routine provenance without downgrading existing source data."""
+    try:
+        existing_sources = json.loads(existing_sources_json or "[]")
+    except (TypeError, ValueError):
+        existing_sources = []
+    if not isinstance(existing_sources, list):
+        existing_sources = []
+    merged_sources = {
+        source
+        for source in [*existing_sources, *(new_sources or [])]
+        if isinstance(source, str) and source
+    }
+    return json.dumps(sorted(merged_sources))
+
+
+def upsert_routine(
+    day: str,
+    time: str,
+    event: str,
+    ev_type: str = "general",
+    confidence_boost: float = 0.1,
+    external_content_sources: list[str] | None = None,
+) -> str:
     """
     3-stage dedup before saving:
       Stage 1 — exact fingerprint match
@@ -304,10 +419,14 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
     cursor = conn.cursor()
 
     # ── Stage 1: exact fingerprint ───────────────────────────────
-    cursor.execute("SELECT id, confidence, mention_count, state FROM routines WHERE fingerprint=?", (fp,))
+    cursor.execute(
+        "SELECT id, confidence, mention_count, state, external_content_sources_json "
+        "FROM routines WHERE fingerprint=?",
+        (fp,),
+    )
     row = cursor.fetchone()
     if row:
-        r_id, conf, mentions, cur_state_str = row
+        r_id, conf, mentions, cur_state_str, existing_sources_json = row
         new_conf = min(1.0, conf + confidence_boost)
         new_m    = (mentions or 1) + 1
         new_state = RoutineState.ACTIVE if new_m >= 2 else RoutineState.LEARNED
@@ -319,8 +438,19 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
         try:
             with db_write_lock:
                 cursor.execute(
-                    "UPDATE routines SET confidence=?, decay_counter=0, is_active=?, mention_count=?, state=? WHERE id=?",
-                    (new_conf, active_flag, new_m, new_state.value, r_id)
+                    "UPDATE routines SET confidence=?, decay_counter=0, is_active=?, "
+                    "mention_count=?, state=?, external_content_sources_json=? WHERE id=?",
+                    (
+                        new_conf,
+                        active_flag,
+                        new_m,
+                        new_state.value,
+                        _merge_external_content_sources(
+                            existing_sources_json,
+                            external_content_sources,
+                        ),
+                        r_id,
+                    )
                 )
                 conn.commit()
         except sqlite3.Error as e:
@@ -333,13 +463,14 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
 
     # We fetch candidates of the same day/time for Stage 2 & 3
     cursor.execute(
-        "SELECT id, event_name, confidence, mention_count, state FROM routines WHERE day_of_week=? AND time_str=?",
+        "SELECT id, event_name, confidence, mention_count, state, external_content_sources_json "
+        "FROM routines WHERE day_of_week=? AND time_str=?",
         (c_day, c_time)
     )
     candidates = cursor.fetchall()
 
     # ── Stage 2: difflib fuzzy ───────────────────────────────────
-    for r_id, ex_ev, conf, mentions, cur_state_str in candidates:
+    for r_id, ex_ev, conf, mentions, cur_state_str, existing_sources_json in candidates:
         if event_similarity(c_event, ex_ev) >= 0.72:
             new_conf = min(1.0, conf + confidence_boost)
             new_m    = (mentions or 1) + 1
@@ -354,9 +485,22 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
                     cursor.execute(
                         """UPDATE routines
                            SET event_name=?, confidence=?, decay_counter=0,
-                               is_active=?, mention_count=?, fingerprint=?, state=?
+                               is_active=?, mention_count=?, fingerprint=?, state=?,
+                               external_content_sources_json=?
                            WHERE id=?""",
-                        (c_event, new_conf, active_flag, new_m, new_fp, new_state.value, r_id)
+                        (
+                            c_event,
+                            new_conf,
+                            active_flag,
+                            new_m,
+                            new_fp,
+                            new_state.value,
+                            _merge_external_content_sources(
+                                existing_sources_json,
+                                external_content_sources,
+                            ),
+                            r_id,
+                        )
                     )
                     conn.commit()
             except sqlite3.Error as e:
@@ -367,7 +511,7 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
             return "merged"
 
     # ── Stage 3: embedding cosine similarity ─────────────────────
-    for r_id, ex_ev, conf, mentions, cur_state_str in candidates:
+    for r_id, ex_ev, conf, mentions, cur_state_str, existing_sources_json in candidates:
         # Sanity check: if the texts are too different in length, skip
         len_ratio = min(len(c_event), len(ex_ev)) / max(len(c_event), len(ex_ev)) if max(len(c_event), len(ex_ev)) > 0 else 0
         if len_ratio < 0.4:
@@ -387,9 +531,22 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
                     cursor.execute(
                         """UPDATE routines
                            SET event_name=?, confidence=?, decay_counter=0,
-                               is_active=?, mention_count=?, fingerprint=?, state=?
+                               is_active=?, mention_count=?, fingerprint=?, state=?,
+                               external_content_sources_json=?
                            WHERE id=?""",
-                        (c_event, new_conf, active_flag, new_m, new_fp, new_state.value, r_id)
+                        (
+                            c_event,
+                            new_conf,
+                            active_flag,
+                            new_m,
+                            new_fp,
+                            new_state.value,
+                            _merge_external_content_sources(
+                                existing_sources_json,
+                                external_content_sources,
+                            ),
+                            r_id,
+                        )
                     )
                     conn.commit()
             except sqlite3.Error as e:
@@ -405,9 +562,18 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
             cursor.execute('''
                 INSERT INTO routines
                     (day_of_week, time_str, event_name, event_type, confidence,
-                     decay_counter, is_active, fingerprint, mention_count, state)
-                VALUES (?, ?, ?, ?, ?, 0, 0, ?, 1, 'learned')
-            ''', (c_day, c_time, c_event, ev_type, 0.3, fp))
+                     decay_counter, is_active, fingerprint, mention_count, state,
+                     external_content_sources_json)
+                VALUES (?, ?, ?, ?, ?, 0, 0, ?, 1, 'learned', ?)
+            ''', (
+                c_day,
+                c_time,
+                c_event,
+                ev_type,
+                0.3,
+                fp,
+                _merge_external_content_sources(None, external_content_sources),
+            ))
             conn.commit()
     except sqlite3.IntegrityError as e:
         raise RoutineConflictError(
@@ -419,6 +585,54 @@ def upsert_routine(day, time, event, ev_type="general", confidence_boost=0.1):
     finally:
         conn.close()
     return "created"
+
+
+def import_declared_routines(routines: list[dict[str, str]]) -> int | None:
+    """Insert validated setup routines once, returning ``None`` when data already exists.
+
+    Declared routines are an explicit user choice rather than an inferred habit, so
+    they start ACTIVE without inheriting any trigger, cooldown, or confirmation
+    history. The empty-database check and inserts share one write transaction to
+    prevent a re-import from changing an established routine database.
+    """
+    conn = get_connection(write=True)
+    cursor = conn.cursor()
+    try:
+        with db_write_lock:
+            cursor.execute("BEGIN IMMEDIATE")
+            existing_count = cursor.execute("SELECT COUNT(*) FROM routines").fetchone()[0]
+            if existing_count:
+                conn.rollback()
+                return None
+
+            rows = [
+                (
+                    routine["day"],
+                    routine["time"],
+                    routine["event"],
+                    routine["type"],
+                    make_fingerprint(routine["day"], routine["time"], routine["event"]),
+                )
+                for routine in routines
+            ]
+            cursor.executemany(
+                """INSERT INTO routines
+                   (day_of_week, time_str, event_name, event_type, confidence,
+                    decay_counter, is_active, fingerprint, mention_count, state)
+                   VALUES (?, ?, ?, ?, 1.0, 0, 1, ?, 1, 'active')""",
+                rows,
+            )
+            conn.commit()
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        raise RoutineConflictError("Declared routine fingerprint conflict", context={"error": str(e)}) from e
+    except sqlite3.Error as e:
+        conn.rollback()
+        raise DBWriteError("import_declared_routines", e) from e
+    finally:
+        conn.close()
+
+    return len(routines)
 
 
 def delete_routine_db(routine_id: int) -> bool:
@@ -488,7 +702,7 @@ def confirm_routine(routine_id: int):
             with db_write_lock:
                 # CONFIRMED → ACTIVE immediately (single write, valid shortcut)
                 cursor.execute(
-                    "UPDATE routines SET confidence=?, decay_counter=0, is_active=1, mention_count=?, state='active' WHERE id=?",
+                    "UPDATE routines SET confidence=?, decay_counter=0, explicit_skip_streak=0, unanswered_reminder_streak=0, is_active=1, mention_count=?, state='active' WHERE id=?",
                     (new_conf, new_m, routine_id)
                 )
                 conn.commit()
@@ -570,7 +784,8 @@ def get_routines_for_day(day: str) -> list:
     cursor = conn.cursor()
     c_day  = normalize_day(day)
     cursor.execute("""
-        SELECT id, time_str, event_name, event_type, confidence, mention_count, state
+        SELECT id, time_str, event_name, event_type, confidence, mention_count, state,
+               external_content_sources_json
         FROM routines
         WHERE (
             day_of_week=?
@@ -583,14 +798,89 @@ def get_routines_for_day(day: str) -> list:
     """, (c_day, c_day, c_day))
     rows = cursor.fetchall()
     conn.close()
-    return [
-        {
+    routines = []
+    for r in rows:
+        routine = {
             "id": r[0], "time": r[1], "event": r[2],
             "type": r[3], "confidence": round(r[4], 2),
             "mentions": r[5], "state": r[6],
         }
-        for r in rows
+        if r[7] and r[7] != "[]":
+            routine["external_content_sources_json"] = r[7]
+        routines.append(routine)
+    return routines
+
+
+def get_closed_routine_occurrence_ids(now: datetime) -> set[int]:
+    """Read the canonical dated feedback without migrating or projecting state."""
+    from memory.routine_feedback import RoutineFeedbackStore
+    return RoutineFeedbackStore(get_connection).closed_occurrence_ids(now.date())
+
+
+def get_eligible_preemptive_routines_for_day(
+    day: str, *, now: datetime | None = None, occurrence_date: date | None = None,
+) -> list:
+    """Return schedulable day routines that are incomplete and not indefinitely paused."""
+    current = now or datetime.now()
+    occurrence = occurrence_date or current.date()
+    if type(occurrence) is not date:
+        raise ValueError("Invalid occurrence date")
+    today_str = occurrence.isoformat()
+    from memory.routine_feedback import RoutineFeedbackStore
+    closed_ids = RoutineFeedbackStore(get_connection).closed_occurrence_ids(occurrence)
+    conn = get_connection()
+    cursor = conn.cursor()
+    c_day = normalize_day(day)
+    cursor.execute(
+        """
+        SELECT id, time_str, event_name, event_type, confidence, mention_count, state
+        FROM routines
+        WHERE (
+            day_of_week=?
+            OR day_of_week='Everyday'
+            OR (day_of_week IN ('Weekdays','weekdays') AND ? IN ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Weekdays','weekdays'))
+            OR (day_of_week IN ('Weekends','Weekend','weekend') AND ? IN ('Saturday', 'Sunday', 'Weekends','Weekend','weekend'))
+        )
+        AND state='active'
+        AND COALESCE(paused_indefinitely, 0)=0
+        AND (last_triggered IS NULL OR last_triggered != ?)
+        ORDER BY time_str ASC
+        """,
+        (c_day, c_day, c_day, today_str),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": row[0], "time": row[1], "event": row[2],
+            "type": row[3], "confidence": round(row[4], 2),
+            "mentions": row[5], "state": row[6],
+        }
+        for row in rows if row[0] not in closed_ids
     ]
+
+
+def get_active_routine_catalog() -> list[dict]:
+    """Return active, non-paused routines for an explicit permanent-pause check.
+
+    This is a catalogue rather than a scheduler query. Callers must still use
+    the semantic selector and accept only the ``pause`` action.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, event_name
+            FROM routines
+            WHERE state='active' AND COALESCE(paused_indefinitely, 0)=0
+            ORDER BY event_name COLLATE NOCASE ASC, id ASC
+            """
+        )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
+    return [{"id": row[0], "event": row[1]} for row in rows]
 
 
 setup_db()
@@ -602,16 +892,20 @@ setup_db()
 COOLDOWN_DEFAULT_HOURS = 20.0
 COOLDOWN_MIN_HOURS     = 4.0
 COOLDOWN_MAX_HOURS     = 72.0
+UNANSWERED_REMINDER_THRESHOLD = 3
+UNANSWERED_REMINDER_CONFIDENCE_STEP = 0.2
 
 def clamp_cooldown_hours(value) -> float:
     """
-    Normalizes any cooldown value within the canonical limits of the system.
+    Preserve explicit zero backoff; bound nonzero legacy cooldown values.
     """
     try:
         cd = float(value)
     except (TypeError, ValueError):
         cd = COOLDOWN_DEFAULT_HOURS
 
+    if cd == 0.0:
+        return 0.0
     return max(COOLDOWN_MIN_HOURS, min(COOLDOWN_MAX_HOURS, cd))
 
 
@@ -630,17 +924,210 @@ def mark_routine_notified(routine_id: int):
 
 
 def mark_routine_triggered_today(routine_id: int):
-    """Marks the routine as triggered today, satisfying it for the current day."""
+    """Record a confirmed completion and reset routine refusal and unanswered streaks."""
     today_str = datetime.now().strftime("%Y-%m-%d")
     conn = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET last_triggered=?, state='active', is_active=1 WHERE id=?",
+            "UPDATE routines SET last_triggered=?, explicit_skip_streak=0, unanswered_reminder_streak=0, state='active', is_active=1 WHERE id=?",
             (today_str, routine_id)
         )
         conn.commit()
     conn.close()
+
+
+def mark_routine_acknowledged(routine_id: int) -> None:
+    """Record a near-future commitment without treating the routine as complete.
+
+    Clearing ``last_triggered`` keeps the routine eligible for a later, explicit
+    completion message on the same day. The notification cooldown still
+    prevents a second proactive prompt.
+    """
+    current = get_routine_state(routine_id)
+    if current == RoutineState.TRIGGER_PENDING:
+        validate_transition(current, RoutineState.ACTIVE)
+    elif current != RoutineState.ACTIVE:
+        raise RoutineConflictError(
+            f"Routine #{routine_id} cannot be acknowledged from state {current.value}",
+            context={"routine_id": routine_id, "state": current.value},
+        )
+
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            conn.execute(
+                "UPDATE routines SET last_notified_ts=?, last_triggered=NULL, unanswered_reminder_streak=0, state='active', is_active=1 WHERE id=?",
+                (datetime.now().isoformat(timespec="seconds"), routine_id),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise DBWriteError("mark_routine_acknowledged", e) from e
+    finally:
+        conn.close()
+
+
+def expire_routine_confirmation(routine_id: int) -> None:
+    """Close an unanswered response window without changing routine confidence or cooldown."""
+    current = get_routine_state(routine_id)
+    if current == RoutineState.ACTIVE:
+        return
+    validate_transition(current, RoutineState.ACTIVE)
+
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            conn.execute(
+                "UPDATE routines SET state='active', is_active=1 WHERE id=?",
+                (routine_id,),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise DBWriteError("expire_routine_confirmation", e) from e
+    finally:
+        conn.close()
+
+
+def record_unanswered_routine_expiry(
+    routine_id: int,
+    threshold: int = UNANSWERED_REMINDER_THRESHOLD,
+) -> dict[str, int | float | bool | str]:
+    """Close an unanswered delivered reminder and decay confidence at the configured threshold."""
+    if threshold < 1:
+        raise ValueError("Unanswered reminder threshold must be positive")
+
+    current = get_routine_state(routine_id)
+    if current == RoutineState.ACTIVE:
+        return {
+            "unanswered_streak": 0,
+            "confidence_reduced": False,
+            "confidence": 0.0,
+            "state": RoutineState.ACTIVE.value,
+        }
+    if current != RoutineState.TRIGGER_PENDING:
+        raise RoutineConflictError(
+            f"Routine #{routine_id} cannot expire from state {current.value}",
+            context={"routine_id": routine_id, "state": current.value},
+        )
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT confidence, decay_counter, unanswered_reminder_streak FROM routines WHERE id=?",
+            (routine_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise RoutineConflictError(
+                f"Routine #{routine_id} does not exist",
+                context={"routine_id": routine_id},
+            )
+
+        current_confidence = float(row[0] or 0.0)
+        current_decay = int(row[1] or 0)
+        unanswered_streak = int(row[2] or 0) + 1
+        confidence_reduced = unanswered_streak >= threshold
+        new_confidence = (
+            round(max(0.0, current_confidence - UNANSWERED_REMINDER_CONFIDENCE_STEP), 4)
+            if confidence_reduced
+            else current_confidence
+        )
+        next_streak = 0 if confidence_reduced else unanswered_streak
+        new_state = RoutineState.DECAYED if new_confidence < 0.1 else RoutineState.ACTIVE
+        validate_transition(current, new_state)
+
+        with db_write_lock:
+            cursor.execute(
+                """
+                UPDATE routines
+                SET confidence=?, decay_counter=?, unanswered_reminder_streak=?,
+                    state=?, is_active=?
+                WHERE id=?
+                """,
+                (
+                    new_confidence,
+                    current_decay + int(confidence_reduced),
+                    next_streak,
+                    new_state.value,
+                    int(new_state == RoutineState.ACTIVE),
+                    routine_id,
+                ),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise DBWriteError("record_unanswered_routine_expiry", e) from e
+    finally:
+        conn.close()
+
+    return {
+        "unanswered_streak": unanswered_streak,
+        "confidence_reduced": confidence_reduced,
+        "confidence": new_confidence,
+        "state": new_state.value,
+    }
+
+
+def record_routine_skip_today(routine_id: int, threshold: int = 3) -> dict[str, int | float | bool | None]:
+    """Skip one routine today and apply cooldown only on the configured refusal streak."""
+    current = get_routine_state(routine_id)
+    if current == RoutineState.TRIGGER_PENDING:
+        validate_transition(current, RoutineState.ACTIVE)
+    elif current != RoutineState.ACTIVE:
+        raise RoutineConflictError(
+            f"Routine #{routine_id} cannot be skipped from state {current.value}",
+            context={"routine_id": routine_id, "state": current.value},
+        )
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT explicit_skip_streak, notify_cooldown_hours FROM routines WHERE id=?",
+            (routine_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise RoutineConflictError(
+                f"Routine #{routine_id} does not exist",
+                context={"routine_id": routine_id},
+            )
+
+        skip_streak = int(row[0] or 0) + 1
+        current_cooldown = clamp_cooldown_hours(row[1] or COOLDOWN_DEFAULT_HOURS)
+        cooldown_applied = skip_streak >= threshold
+        cooldown_hours = clamp_cooldown_hours(current_cooldown * 2) if cooldown_applied else None
+        next_streak = 0 if cooldown_applied else skip_streak
+        cooldown_started_at = datetime.now().isoformat(timespec="seconds") if cooldown_applied else None
+
+        with db_write_lock:
+            cursor.execute(
+                """
+                UPDATE routines
+                SET last_triggered=?, explicit_skip_streak=?, unanswered_reminder_streak=0, notify_cooldown_hours=?,
+                    last_notified_ts=COALESCE(?, last_notified_ts), state='active', is_active=1
+                WHERE id=?
+                """,
+                (
+                    today_str,
+                    next_streak,
+                    cooldown_hours if cooldown_hours is not None else current_cooldown,
+                    cooldown_started_at,
+                    routine_id,
+                ),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise DBWriteError("record_routine_skip_today", e) from e
+    finally:
+        conn.close()
+
+    return {
+        "skip_streak": skip_streak,
+        "cooldown_applied": cooldown_applied,
+        "cooldown_hours": cooldown_hours,
+    }
 
 def mark_routine_ignored(routine_id: int):
     """Timeout (not rejection): TRIGGER_PENDING → IGNORED → ACTIVE + doubling of cooldown."""
@@ -683,6 +1170,7 @@ def mark_routine_responded(routine_id: int):
             """
             UPDATE routines
             SET ignore_count=0,
+                unanswered_reminder_streak=0,
                 notify_cooldown_hours=?,
                 state='active',
                 is_active=1
@@ -714,6 +1202,7 @@ def reset_routine_cooldown(routine_id: int, clear_last_notified: bool = True) ->
                 """
                 UPDATE routines
                 SET ignore_count=0,
+                    unanswered_reminder_streak=0,
                     notify_cooldown_hours=?,
                     last_notified_ts=NULL,
                     state='active',
@@ -727,6 +1216,7 @@ def reset_routine_cooldown(routine_id: int, clear_last_notified: bool = True) ->
                 """
                 UPDATE routines
                 SET ignore_count=0,
+                    unanswered_reminder_streak=0,
                     notify_cooldown_hours=?,
                     state='active',
                     is_active=1
@@ -946,7 +1436,8 @@ def find_routines_by_name(event_name: str, min_similarity: float = 0.75) -> list
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state
+        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state,
+                  external_content_sources_json
            FROM routines WHERE state IN ('active', 'learned')"""
     )
     rows = cursor.fetchall()
@@ -956,10 +1447,13 @@ def find_routines_by_name(event_name: str, min_similarity: float = 0.75) -> list
         return []
 
     def _row_to_dict(r) -> dict:
-        return {
+        routine = {
             "id": r[0], "day": r[1], "time": r[2], "event": r[3],
             "type": r[4], "confidence": round(r[5], 2), "state": r[6],
         }
+        if r[7] and r[7] != "[]":
+            routine["external_content_sources_json"] = r[7]
+        return routine
 
     target = normalize_event(event_name)
 
@@ -1006,18 +1500,27 @@ def find_routines_for_schedule_control(
     *, 
     min_similarity: float = 0.82,
     day_of_week: str | None = None,
-    time_str: str | None = None
+    time_str: str | None = None,
+    include_paused: bool = False,
 ) -> list[dict]:
     """
     Very strict matching for the schedule control tool.
     Does not use embeddings. Requires either exact match or high string similarity
     WITH lexical overlap to prevent tool hallucination on irrelevant routines.
+
+    ``include_paused`` is reserved for explicit schedule discovery, editing,
+    and resume actions. Other routine controls keep their active/learned-only
+    behavior so a paused routine cannot be changed incidentally.
     """
     conn   = get_connection()
     cursor = conn.cursor()
+    states = ("active", "learned", "paused") if include_paused else ("active", "learned")
+    placeholders = ", ".join("?" for _ in states)
     cursor.execute(
-        """SELECT id, day_of_week, time_str, event_name, event_type, confidence, state
-           FROM routines WHERE state IN ('active', 'learned')"""
+        f"""SELECT id, day_of_week, time_str, event_name, event_type, confidence, state,
+                    external_content_sources_json
+             FROM routines WHERE state IN ({placeholders})""",
+        states,
     )
     rows = cursor.fetchall()
     conn.close()
@@ -1035,10 +1538,13 @@ def find_routines_for_schedule_control(
     rows = filtered_rows
 
     def _row_to_dict(r) -> dict:
-        return {
+        routine = {
             "id": r[0], "day": r[1], "time": r[2], "event": r[3],
             "type": r[4], "confidence": round(r[5], 2), "state": r[6],
         }
+        if r[7] and r[7] != "[]":
+            routine["external_content_sources_json"] = r[7]
+        return routine
 
     target = normalize_event(event_name)
 
@@ -1209,14 +1715,14 @@ def ensure_routine_schedule_columns() -> None:
 
 def get_routine_schedule_meta(routine_id: int) -> dict:
     """
-    Returns active_from / active_until / paused_until / resume_rule / pause_reason
+    Returns active_from / active_until / pause metadata / resume_rule.
     for a routine. Unknown id → dict with all None (same defensive pattern as
     get_sentimental_info).
     """
     conn   = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        """SELECT active_from, active_until, paused_until, resume_rule, pause_reason
+        """SELECT active_from, active_until, paused_until, paused_indefinitely, resume_rule, pause_reason
            FROM routines WHERE id=?""",
         (routine_id,)
     )
@@ -1225,30 +1731,39 @@ def get_routine_schedule_meta(routine_id: int) -> dict:
     if not row:
         return {
             "active_from": None, "active_until": None, "paused_until": None,
-            "resume_rule": None, "pause_reason": None,
+            "paused_indefinitely": False, "resume_rule": None, "pause_reason": None,
         }
     return {
-        "active_from":  row[0],
+        "active_from": row[0],
         "active_until": row[1],
         "paused_until": row[2],
-        "resume_rule":  row[3],
-        "pause_reason": row[4],
+        "paused_indefinitely": bool(row[3]),
+        "resume_rule": row[4],
+        "pause_reason": row[5],
     }
 
 
 def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | None = None) -> None:
     """
     Temporarily pauses the routine until paused_until (YYYY-MM-DD) — e.g., summer
-    break, camp. Does NOT touch confidence/state; the routine remains
-    as is, it simply does not "count" in the scheduler until the date has passed
-    (see is_routine_temporarily_inactive_meta).
+    break, camp. Current routines retain their lifecycle state; legacy
+    ``state='paused'`` records are restored to ACTIVE while the time-bound pause
+    keeps them out of the scheduler until the date has passed.
     """
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET paused_until=?, pause_reason=? WHERE id=?",
-            (paused_until, reason, routine_id)
+            """
+            UPDATE routines
+            SET paused_until=?,
+                paused_indefinitely=0,
+                pause_reason=?,
+                state=CASE WHEN state='paused' THEN 'active' ELSE state END,
+                is_active=CASE WHEN state='paused' THEN 1 ELSE is_active END
+            WHERE id=?
+            """,
+            (paused_until, reason, routine_id),
         )
         conn.commit()
     conn.close()
@@ -1257,13 +1772,50 @@ def set_routine_paused_until(routine_id: int, paused_until: str, reason: str | N
     log_event("routines", "paused", routine_id=routine_id, paused_until=paused_until, reason=reason)
 
 
+def normalize_legacy_paused_routine_state(routine_id: int) -> bool:
+    """Restore a legacy lifecycle-paused routine without changing its pause metadata.
+
+    Older seasonal records used ``state='paused'`` as their temporary pause
+    marker.  Current scheduling relies on the pause metadata instead, so this
+    narrowly restores those legacy rows to an active lifecycle state while
+    preserving their existing ``paused_until`` date and reason.
+    """
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            cursor = conn.execute(
+                """
+                UPDATE routines
+                SET state='active', is_active=1
+                WHERE id=? AND state='paused'
+                """,
+                (routine_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def clear_routine_paused_until(routine_id: int) -> None:
-    """Removes the temporary pause (manual resume) — also clears the pause_reason."""
+    """Resume a temporarily or indefinitely paused routine.
+
+    Legacy records persisted with ``state='paused'`` are restored to ACTIVE;
+    current seasonal pauses already retain their original lifecycle state.
+    """
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "UPDATE routines SET paused_until=NULL, pause_reason=NULL WHERE id=?",
+            """
+            UPDATE routines
+            SET paused_until=NULL,
+                paused_indefinitely=0,
+                pause_reason=NULL,
+                state=CASE WHEN state='paused' THEN 'active' ELSE state END,
+                is_active=CASE WHEN state='paused' THEN 1 ELSE is_active END
+            WHERE id=?
+            """,
             (routine_id,)
         )
         conn.commit()
@@ -1271,6 +1823,25 @@ def clear_routine_paused_until(routine_id: int) -> None:
     print(f"[routine_db]: #{routine_id} resumed (paused_until cleared)")
     from memory.event_log import log_event
     log_event("routines", "resumed", routine_id=routine_id)
+
+
+def pause_routine_indefinitely(routine_id: int, reason: str = "user_requested") -> None:
+    """Pause a routine reversibly and restore any pending lifecycle state to active."""
+    from memory.routine_pause import apply_indefinite_pause
+
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            apply_indefinite_pause(conn, routine_id, reason=reason)
+            conn.commit()
+    except sqlite3.Error as e:
+        raise DBWriteError("pause_routine_indefinitely", e) from e
+    finally:
+        conn.close()
+
+    from memory.event_log import log_event
+
+    log_event("routines", "paused", routine_id=routine_id, reason=reason, indefinite=True)
 
 
 def set_routine_active_window(routine_id: int, active_from: str | None = None,
@@ -1338,6 +1909,9 @@ def is_routine_temporarily_inactive_meta(routine: dict, now: datetime | None = N
     """
     today = (now or datetime.now()).strftime("%Y-%m-%d")
 
+    if routine.get("paused_indefinitely"):
+        return True, "paused_indefinitely"
+
     paused_until = routine.get("paused_until")
     if paused_until and today <= paused_until:
         return True, "paused_until"
@@ -1357,27 +1931,49 @@ def is_routine_temporarily_inactive_meta(routine: dict, now: datetime | None = N
 # PENDING CONFIRMATIONS PERSISTENCE (Recovery After Restart)
 # ────────────────────────────────────────────────────────────────
 
-def _setup_pending_table():
-    conn   = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS pending_confirmations (
-            routine_id INTEGER PRIMARY KEY,
-            event_name TEXT,
-            sent_at    TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+def _setup_pending_table() -> None:
+    """Create and migrate pending confirmations under a cross-process SQLite lock."""
+    conn = get_connection()
+    try:
+        # Web and Telegram boot in separate processes, so a Python thread lock
+        # cannot protect this schema upgrade. SQLite serializes both processes
+        # before either inspects or mutates the pending-confirmations table.
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pending_confirmations (
+                routine_id INTEGER PRIMARY KEY,
+                event_name TEXT,
+                sent_at    TEXT,
+                draft_offer INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        existing_cols = [row[1] for row in cursor.execute("PRAGMA table_info(pending_confirmations)")]
+        if "draft_offer" not in existing_cols:
+            cursor.execute(
+                "ALTER TABLE pending_confirmations ADD COLUMN draft_offer INTEGER NOT NULL DEFAULT 0"
+            )
+            print("[routine_db]: Migration → 'pending_confirmations.draft_offer'")
+        conn.commit()
+    finally:
+        conn.close()
 
 
-def save_pending_confirmation(routine_id: int, event_name: str, sent_at: datetime):
+def save_pending_confirmation(
+    routine_id: int,
+    event_name: str,
+    sent_at: datetime,
+    *,
+    draft_offer: bool = False,
+) -> None:
+    """Persist one pending routine response window and its explicit draft-offer state."""
     conn   = get_connection()
     cursor = conn.cursor()
     with db_write_lock:
         cursor.execute(
-            "INSERT OR REPLACE INTO pending_confirmations (routine_id, event_name, sent_at) VALUES (?, ?, ?)",
-            (routine_id, event_name, sent_at.isoformat())
+            """INSERT OR REPLACE INTO pending_confirmations
+               (routine_id, event_name, sent_at, draft_offer) VALUES (?, ?, ?, ?)""",
+            (routine_id, event_name, sent_at.isoformat(), int(draft_offer))
         )
         conn.commit()
     conn.close()
@@ -1389,6 +1985,66 @@ def remove_pending_confirmation(routine_id: int):
         conn.execute("DELETE FROM pending_confirmations WHERE routine_id=?", (routine_id,))
         conn.commit()
     conn.close()
+
+
+def acknowledge_pending_draft_offer(routine_id: int, sent_at: datetime) -> bool:
+    """Atomically acknowledge one exact pending Messenger draft offer once.
+
+    The pending row and routine state are changed in one SQLite transaction so
+    Web and Telegram cannot both consume the same offer from separate processes.
+    When explicitly injected, dated engagement joins this same transaction;
+    rejection or a write failure leaves the offer and feedback untouched.
+    """
+    if not isinstance(sent_at, datetime):
+        return False
+
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.cursor()
+            matched = cursor.execute(
+                """
+                SELECT 1
+                FROM pending_confirmations AS pc
+                JOIN routines AS r ON r.id = pc.routine_id
+                WHERE pc.routine_id=?
+                  AND pc.sent_at=?
+                  AND pc.draft_offer=1
+                  AND r.state='trigger_pending'
+                """,
+                (routine_id, sent_at.isoformat()),
+            ).fetchone()
+            if matched is None:
+                conn.rollback()
+                return False
+
+            accepted_at = datetime.now()
+            if (_dated_draft_feedback_recorder is not None
+                    and not _dated_draft_feedback_recorder(
+                        conn, routine_id, offered_at=sent_at, at=accepted_at)):
+                conn.rollback()
+                return False
+
+            cursor.execute(
+                """
+                UPDATE routines
+                SET last_notified_ts=?, unanswered_reminder_streak=0,
+                    state='active', is_active=1
+                WHERE id=?
+                """,
+                (accepted_at.isoformat(timespec="seconds"), routine_id),
+            )
+            cursor.execute(
+                "DELETE FROM pending_confirmations WHERE routine_id=? AND sent_at=? AND draft_offer=1",
+                (routine_id, sent_at.isoformat()),
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        raise DBWriteError("acknowledge_pending_draft_offer", e) from e
+    finally:
+        conn.close()
 
 
 def clear_pending_confirmations():
@@ -1404,7 +2060,7 @@ def load_pending_confirmations() -> dict:
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT pc.routine_id, pc.event_name, pc.sent_at
+        SELECT pc.routine_id, pc.event_name, pc.sent_at, pc.draft_offer
         FROM pending_confirmations pc
         JOIN routines r ON r.id = pc.routine_id
         WHERE r.state = 'trigger_pending'
@@ -1426,12 +2082,16 @@ def load_pending_confirmations() -> dict:
         remove_pending_confirmation(rid)
 
     result = {}
-    for r_id, event_name, sent_at_str in rows:
+    for r_id, event_name, sent_at_str, draft_offer in rows:
         try:
             sent_at = datetime.fromisoformat(sent_at_str)
         except Exception:
             sent_at = datetime.now()
-        result[r_id] = {"event": event_name, "sent_at": sent_at}
+        result[r_id] = {
+            "event": event_name,
+            "sent_at": sent_at,
+            "draft_offer": bool(draft_offer),
+        }
 
     return result
 
@@ -1502,14 +2162,14 @@ def get_routine_conditions(routine_id: int) -> list[dict]:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT conditions_json, condition_type, condition_payload, condition_mode FROM routines WHERE id = ?",
+            "SELECT conditions_json, condition_type, condition_payload, condition_mode, source_memory_ref FROM routines WHERE id = ?",
             (routine_id,)
         )
         row = cursor.fetchone()
         if not row:
             return []
             
-        c_json, c_type, c_payload, c_mode = row
+        c_json, c_type, c_payload, c_mode, c_source = row
         
         # 1. New multi-condition JSON
         if c_json:
@@ -1522,13 +2182,102 @@ def get_routine_conditions(routine_id: int) -> list[dict]:
                 
         # 2. Fallback to legacy single condition
         if c_type:
-            return [{
+            condition = {
                 "condition_type": c_type,
                 "condition_payload": json.loads(c_payload) if c_payload else None,
-                "condition_mode": c_mode
-            }]
+                "condition_mode": c_mode,
+            }
+            if c_source:
+                condition["source_memory_ref"] = c_source
+            return [condition]
             
         return []
+
+
+def _condition_conflicts_with_existing(new_condition: dict, existing_conditions: list[dict]) -> bool:
+    """Detect incompatible additive checks on the same single-valued context flag."""
+    if new_condition.get("condition_type") not in ("shift_mode", "context_flag"):
+        return False
+    new_payload = new_condition.get("condition_payload")
+    if not isinstance(new_payload, dict) or not new_payload.get("flag") or "equals" not in new_payload:
+        return False
+
+    for existing in existing_conditions:
+        if existing.get("condition_type") not in ("shift_mode", "context_flag"):
+            continue
+        payload = existing.get("condition_payload")
+        if not isinstance(payload, dict) or payload.get("flag") != new_payload["flag"] or "equals" not in payload:
+            continue
+        existing_mode = existing.get("condition_mode") or "allow_when_true"
+        new_mode = new_condition.get("condition_mode") or "allow_when_true"
+        if existing_mode == new_mode == "allow_when_true" and payload["equals"] != new_payload["equals"]:
+            return True
+        if (existing_mode == new_mode == "suppress_when_true"
+                and isinstance(payload["equals"], bool)
+                and isinstance(new_payload["equals"], bool)
+                and payload["equals"] != new_payload["equals"]):
+            return True
+        if existing_mode != new_mode and payload["equals"] == new_payload["equals"]:
+            return True
+    return False
+
+
+def replace_routine_conditions(
+    routine_id: int,
+    expected_conditions: list[dict],
+    replacement_conditions: list[dict],
+) -> bool:
+    """Atomically replace an inspected condition list, refusing concurrent changes."""
+    if not isinstance(expected_conditions, list) or not isinstance(replacement_conditions, list):
+        raise ValueError("Routine conditions must be lists")
+    for index, condition in enumerate(replacement_conditions):
+        if not isinstance(condition, dict) or _condition_conflicts_with_existing(condition, replacement_conditions[:index]):
+            raise ValueError("Replacement routine conditions conflict")
+
+    with db_write_lock:
+        conn = get_connection(write=True)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT conditions_json, condition_type, condition_payload, condition_mode FROM routines WHERE id = ?",
+                (routine_id,),
+            ).fetchone()
+            if not row:
+                conn.rollback()
+                return False
+            c_json, c_type, c_payload, c_mode = row
+            if c_json:
+                try:
+                    current = json.loads(c_json)
+                except json.JSONDecodeError:
+                    conn.rollback()
+                    return False
+            elif c_type:
+                try:
+                    current = [{
+                        "condition_type": c_type,
+                        "condition_payload": json.loads(c_payload) if c_payload else None,
+                        "condition_mode": c_mode,
+                    }]
+                except json.JSONDecodeError:
+                    conn.rollback()
+                    return False
+            else:
+                current = []
+            if current != expected_conditions:
+                conn.rollback()
+                return False
+            conn.execute(
+                """UPDATE routines
+                   SET conditions_json = ?, condition_type = NULL,
+                       condition_payload = NULL, condition_mode = NULL
+                   WHERE id = ?""",
+                (json.dumps(replacement_conditions, ensure_ascii=False), routine_id),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
 
 def append_routine_condition(
     routine_id: int,
@@ -1593,6 +2342,9 @@ def append_routine_condition(
                     and cond.get("condition_mode") == condition_mode
                 ):
                     return False
+
+            if _condition_conflicts_with_existing(new_cond, existing_conditions):
+                return False
 
             existing_conditions.append(new_cond)
             cursor.execute(
@@ -1666,6 +2418,51 @@ def get_context_states(keys: list[str]) -> dict[str, dict]:
                 continue
             out[key] = item
     return out
+
+def set_context_states_if_unchanged(
+    updates: dict[str, tuple[str, str | None]],
+    expected: dict[str, dict | None],
+    *, recorded_at: datetime | None = None,
+) -> bool:
+    """Atomically write a semantic batch only if its pre-inference state survives.
+
+    BEGIN IMMEDIATE serializes the comparison and writes against all canonical
+    context writers, including other processes, without a schema migration.
+    """
+    if not set(updates) <= set(expected):
+        raise ValueError("Context batch requires an expected version for every write")
+    if recorded_at is not None and (recorded_at.tzinfo is None or recorded_at.utcoffset() is None):
+        raise ValueError("Evidence time must be timezone-aware")
+    conn = get_connection()
+    try:
+        with db_write_lock:
+            conn.execute("BEGIN IMMEDIATE")
+            for key, previous in expected.items():
+                row = conn.execute(
+                    "SELECT value, expires_at, updated_at FROM context_state WHERE key=?", (key,),
+                ).fetchone()
+                current = None if row is None else {
+                    "value": row[0], "expires_at": row[1], "updated_at": row[2],
+                }
+                if current != previous:
+                    conn.rollback()
+                    return False
+            now_str = (recorded_at or datetime.now()).isoformat()
+            for key, (value, expires_at) in updates.items():
+                conn.execute(
+                    "INSERT INTO context_state (key, value, expires_at, updated_at) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+                    "expires_at=excluded.expires_at, updated_at=excluded.updated_at",
+                    (key, value, expires_at, now_str),
+                )
+            conn.commit()
+            return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
 
 def set_context_state(key: str, value: str, expires_at: str | None = None) -> None:
     conn = get_connection()

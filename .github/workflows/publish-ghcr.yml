@@ -17,6 +17,24 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Verify release version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          expected_version="${GITHUB_REF_NAME#v}"
+          if [ ! -f VERSION ]; then
+            echo "::error file=VERSION::Missing VERSION file for release tag v$expected_version."
+            exit 1
+          fi
+
+          # VERSION normally stores bare SemVer; accept an accidental leading v.
+          actual_version="$(tr -d '\r\n' < VERSION)"
+          actual_version="${actual_version#v}"
+          if [ "$actual_version" != "$expected_version" ]; then
+            echo "::error::Tag v$expected_version requires VERSION=$expected_version, found $actual_version."
+            exit 1
+          fi
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 

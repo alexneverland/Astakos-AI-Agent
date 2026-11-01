@@ -16,8 +16,8 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Iterator
 
 from config import CONVERSATION_DB_FILE
 
@@ -30,8 +30,22 @@ _dedup_recent: dict[tuple, float] = {}  # key → last_write_epoch
 DEDUP_TTL_SECONDS = 5.0
 
 
-def _dedup_key(channel: str, role: str, content: str, db_path: str = CONVERSATION_DB_FILE) -> tuple:
-    return (os.path.abspath(db_path), channel, role, content[:200])
+def _dedup_key(
+    channel: str,
+    role: str,
+    content: str,
+    metadata: dict[str, Any] | None = None,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> tuple:
+    """Build a rapid-write deduplication key without discarding message provenance."""
+    metadata_key = json.dumps(
+        metadata or {},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return (os.path.abspath(db_path), channel, role, content[:200], metadata_key)
 
 
 def _is_recent_duplicate(key: tuple) -> bool:
@@ -131,6 +145,29 @@ def init_db(db_path: str = CONVERSATION_DB_FILE) -> None:
             ON session_exchanges(channel, timestamp)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS web_mirror_outbox (
+                message_id TEXT PRIMARY KEY,
+                target_channel TEXT NOT NULL CHECK(target_channel IN ('matrix', 'telegram')),
+                content TEXT,
+                external_id TEXT,
+                created_at TEXT NOT NULL,
+                delivered_at TEXT
+            )
+            """
+        )
+        mirror_columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(web_mirror_outbox)")
+        }
+        if "content" not in mirror_columns:
+            conn.execute("ALTER TABLE web_mirror_outbox ADD COLUMN content TEXT")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_web_mirror_pending
+            ON web_mirror_outbox(target_channel, delivered_at, created_at)
+            """
+        )
 
 
 def default_session_id(ts: datetime | None = None) -> str:
@@ -190,12 +227,22 @@ def append_message(
     session_id: str | None = None,
     agent: str | None = None,
     metadata: dict[str, Any] | None = None,
+    mirror_target: str | None = None,
+    mirror_content: str | None = None,
     timestamp: datetime | None = None,
+    message_id: str | None = None,
     db_path: str = CONVERSATION_DB_FILE,
 ) -> dict[str, Any]:
+    if message_id is not None and (not isinstance(message_id, str) or not message_id.strip() or len(message_id) > 100):
+        raise ValueError("Invalid stable conversation message identity")
+    if mirror_target is not None and (
+        channel != "web" or role not in {"user", "assistant"}
+        or mirror_target not in {"matrix", "telegram"}
+    ):
+        raise ValueError("Web mirror requires a Web user/assistant row and supported target")
     ts = timestamp or datetime.now()
     message = {
-        "id": str(uuid.uuid4()),
+        "id": message_id or str(uuid.uuid4()),
         "session_id": session_id or default_session_id(ts),
         "channel": channel,
         "role": role,
@@ -208,8 +255,8 @@ def append_message(
     }
 
     # [DEDUP GUARD]: Prevents rapid double-writes
-    _key = _dedup_key(channel, role, content, db_path)
-    if _is_recent_duplicate(_key):
+    _key = _dedup_key(channel, role, content, message["metadata"], db_path)
+    if message_id is None and channel != "web" and _is_recent_duplicate(_key):
         print(f"\033[93m[ConvHistory]: Dedup skip — {channel}/{role} '{content[:40]}'[0m")
         return message
 
@@ -238,7 +285,69 @@ def append_message(
         )
         if cursor.rowcount == 1:
             message["rowid"] = cursor.lastrowid
+            if mirror_target is not None:
+                conn.execute(
+                    """
+                    INSERT INTO web_mirror_outbox
+                        (message_id, target_channel, content, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        message["id"], mirror_target,
+                        content if mirror_content is None else mirror_content,
+                        message["timestamp"],
+                    ),
+                )
     return message
+
+
+def load_pending_web_mirrors(
+    channel: str,
+    *,
+    limit: int = 20,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> list[dict[str, Any]]:
+    """Read undelivered Web display copies for one external channel in row order."""
+    if channel not in {"matrix", "telegram"}:
+        raise ValueError("Unsupported Web mirror target")
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT o.message_id, o.target_channel, o.created_at, m.role,
+                   COALESCE(o.content, m.content) AS content, m.rowid
+            FROM web_mirror_outbox AS o
+            JOIN conversation_messages AS m ON m.id = o.message_id
+            WHERE o.target_channel = ? AND o.delivered_at IS NULL
+            ORDER BY m.rowid ASC
+            LIMIT ?
+            """,
+            (channel, max(1, min(limit, 100))),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_web_mirror_delivered(
+    message_id: str,
+    channel: str,
+    external_id: str,
+    *,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> bool:
+    """Acknowledge only a confirmed send to its original selected channel."""
+    if channel not in {"matrix", "telegram"} or not str(external_id).strip():
+        raise ValueError("Web mirror acknowledgement requires channel and external ID")
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE web_mirror_outbox
+            SET external_id = ?, delivered_at = ?
+            WHERE message_id = ? AND target_channel = ? AND delivered_at IS NULL
+            """,
+            (str(external_id), datetime.now().isoformat(timespec="seconds"), message_id, channel),
+        )
+    return cursor.rowcount == 1
 
 
 def import_legacy_message(
@@ -435,6 +544,7 @@ def load_messages(
     *,
     limit: int = 50,
     channel: str | None = None,
+    exclude_channels: tuple[str, ...] = (),
     session_id: str | None = None,
     db_path: str = CONVERSATION_DB_FILE,
 ) -> list[dict[str, Any]]:
@@ -444,6 +554,13 @@ def load_messages(
     if channel:
         clauses.append("channel = ?")
         params.append(channel)
+    normalized_exclusions = tuple(
+        str(item or "").strip() for item in exclude_channels if str(item or "").strip()
+    )
+    if normalized_exclusions:
+        placeholders = ",".join("?" for _ in normalized_exclusions)
+        clauses.append(f"channel NOT IN ({placeholders})")
+        params.extend(normalized_exclusions)
     if session_id:
         clauses.append("session_id = ?")
         params.append(session_id)
@@ -453,7 +570,7 @@ def load_messages(
         SELECT rowid, *
         FROM conversation_messages
         {where}
-        ORDER BY timestamp DESC, id DESC
+        ORDER BY timestamp DESC, rowid DESC
         LIMIT ?
     """
     params.append(limit)
@@ -466,6 +583,144 @@ def load_messages(
         msg["rowid"] = row["rowid"] if hasattr(row, "keys") else row[0]
     messages.reverse()
     return messages
+
+
+def load_recent_trusted_user_messages(
+    *,
+    channel: str,
+    limit: int = 4,
+    session_id: str | None = None,
+    db_path: str = CONVERSATION_DB_FILE,
+) -> list[dict[str, Any]]:
+    """Return trusted user messages from the current channel session in time order.
+
+    Provenance-marked rows are skipped before counting toward ``limit``. This
+    preserves a small trusted context window even when recent uploads or other
+    externally derived user rows are present in the conversation history. By
+    default the current daily session is used, so older conversations cannot
+    masquerade as adjacent pronoun context.
+    """
+    if limit <= 0 or not channel:
+        return []
+
+    from core.untrusted_content import external_content_source_names
+
+    active_session_id = session_id or default_session_id()
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        cursor = conn.execute(
+            """
+            SELECT rowid, *
+            FROM conversation_messages
+            WHERE channel = ? AND role = 'user' AND session_id = ?
+            ORDER BY timestamp DESC, rowid DESC
+            """,
+            (channel, active_session_id),
+        )
+        messages: list[dict[str, Any]] = []
+        for row in cursor:
+            message = _row_to_message(row)
+            message["rowid"] = row["rowid"] if hasattr(row, "keys") else row[0]
+            if external_content_source_names(message.get("metadata")):
+                continue
+            messages.append(message)
+            if len(messages) == limit:
+                break
+
+    messages.reverse()
+    return messages
+
+
+def load_recent_state_messages(
+    *, now: datetime, db_path: str = CONVERSATION_DB_FILE,
+    through_rowid: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return bounded, timed owner context across channels, never external state.
+
+    Context-question rows are references only; their ledger identity must still
+    be validated by the consumer. Older history cannot confirm current presence.
+    """
+    from zoneinfo import ZoneInfo
+    from core.untrusted_content import external_content_source_names
+
+    athens = ZoneInfo("Europe/Athens")
+    if now.tzinfo is None:
+        raise ValueError("State context requires an aware clock")
+    current = now.astimezone(athens)
+    # Stored dates belong to each source offset, not necessarily Athens. Scan
+    # adjacent dates and apply the hour/cap only after eligibility validation.
+    start_date = (current-timedelta(hours=1, days=1)).date().isoformat()
+    end_date = (current+timedelta(days=1)).date().isoformat()
+    result = []
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        cursor = conn.execute(
+            """SELECT rowid, * FROM conversation_messages
+               WHERE date BETWEEN ? AND ?
+                 AND (role='user' OR (role='assistant' AND agent='Routine_Context'))
+                 AND (? IS NULL OR rowid < ?)""",
+            (start_date, end_date, through_rowid, through_rowid),
+        )
+        for raw in cursor:
+            row = {**_row_to_message(raw), "rowid": raw["rowid"]}
+            if external_content_source_names(row.get("metadata")):
+                continue
+            if row["role"] != "user" and not row["metadata"].get("routine_context_question_id"):
+                continue
+            try:
+                stamp = datetime.fromisoformat(row["timestamp"])
+                stamp = stamp.replace(tzinfo=athens) if stamp.tzinfo is None else stamp.astimezone(athens)
+            except (ValueError, TypeError, KeyError):
+                continue
+            if timedelta(0) <= current.astimezone(timezone.utc)-stamp.astimezone(timezone.utc) <= timedelta(hours=1):
+                result.append({**row, "timestamp": stamp.isoformat()})
+                result.sort(key=lambda item: (datetime.fromisoformat(item["timestamp"]).timestamp(), item["rowid"]))
+                result = result[-12:]
+    return result
+
+
+def load_daily_state_messages(
+    *, now: datetime, db_path: str = CONVERSATION_DB_FILE,
+) -> list[dict[str, Any]]:
+    """Return complete bounded owner-day references, not inferred live facts.
+
+    Oversized days fail closed instead of silently dropping a contradictory
+    source. Callers must interpret plans semantically and keep event freshness.
+    """
+    from zoneinfo import ZoneInfo
+    from core.untrusted_content import external_content_source_names
+    from services.routine_context_evidence import _recorded_time
+
+    if now.tzinfo is None:
+        raise ValueError("Daily context requires an aware clock")
+    current = now.astimezone(ZoneInfo("Europe/Athens"))
+    result = []
+    total_chars = 0
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        cursor = conn.execute(
+            """SELECT rowid, * FROM conversation_messages
+               WHERE role='user' AND date BETWEEN ? AND ?""",
+            ((current-timedelta(days=1)).date().isoformat(),
+             (current+timedelta(days=1)).date().isoformat()),
+        )
+        for raw in cursor:
+            row = {**_row_to_message(raw), "rowid": raw["rowid"]}
+            if external_content_source_names(row.get("metadata")):
+                continue
+            stamp = _recorded_time(row["timestamp"], current)
+            if stamp is None:
+                raise ValueError("Daily context has an ambiguous or invalid source time")
+            if stamp.date() != current.date() or stamp.timestamp() > current.timestamp():
+                continue
+            content_length = len(str(row.get("content") or ""))
+            if content_length > 4000:
+                raise ValueError("Daily context source is too large to interpret safely")
+            result.append({**row, "timestamp": stamp.isoformat()})
+            total_chars += content_length
+            if len(result) > 128 or total_chars > 32000:
+                raise ValueError("Daily context exceeds its safe bound")
+    return sorted(result, key=lambda row: (datetime.fromisoformat(row["timestamp"]).timestamp(), row["rowid"]))
 
 
 def load_messages_since(
@@ -509,10 +764,10 @@ def load_messages_since(
                     SELECT rowid, *
                     FROM conversation_messages
                     WHERE {where_clause}
-                    ORDER BY timestamp DESC, id DESC
+                    ORDER BY timestamp DESC, rowid DESC
                     LIMIT ?
                 )
-                ORDER BY timestamp ASC, id ASC
+                ORDER BY timestamp ASC, rowid ASC
                 """,
                 params + [limit],
             ).fetchall()
@@ -522,7 +777,7 @@ def load_messages_since(
                 SELECT rowid, *
                 FROM conversation_messages
                 WHERE {where_clause}
-                ORDER BY timestamp ASC, id ASC
+                ORDER BY timestamp ASC, rowid ASC
                 """,
                 params,
             ).fetchall()
@@ -569,6 +824,49 @@ def load_messages_after_rowid(
     return msgs
 
 
+@contextmanager
+def guard_owner_history_version(version: int, *, db_path: str) -> Iterator[bool]:
+    """Serialize a bounded file mutation with all SQLite history writers.
+
+    BEGIN IMMEDIATE gives the check and caller's mutation one linearization
+    point with append_message, including appenders in other processes.
+    This abstraction reads the existing schema and never provisions it.
+    """
+    from core.untrusted_content import external_content_source_names
+    with _conn(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        latest = 0
+        for row in conn.execute("SELECT rowid, * FROM conversation_messages "
+                                "WHERE role IN ('user', 'human', 'Human') ORDER BY rowid DESC"):
+            if not external_content_source_names(_row_to_message(row).get("metadata")):
+                latest = int(row["rowid"])
+                break
+        yield latest == version
+
+
+def get_latest_trusted_user_rowid(*, db_path: str = CONVERSATION_DB_FILE) -> int:
+    """Return the latest persisted trusted user identity across all channels.
+
+    Insertion order, not a client timestamp or daily session, defines freshness.
+    Scan user rows until trusted provenance is found: limiting an intermediate
+    page could hide the owner behind uploads or background notifications.
+    Callers must authenticate the inbound owner before using this identity;
+    stored role/provenance is not itself an authentication mechanism.
+    """
+    from core.untrusted_content import external_content_source_names
+
+    init_db(db_path)
+    with _conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT rowid, * FROM conversation_messages "
+            "WHERE role IN ('user', 'human', 'Human') ORDER BY rowid DESC"
+        )
+        for row in rows:
+            if not external_content_source_names(_row_to_message(row).get("metadata")):
+                return int(row["rowid"])
+    return 0
+
+
 def get_max_rowid(
     *,
     db_path: str = CONVERSATION_DB_FILE,
@@ -600,7 +898,7 @@ def load_last_user_activity(
             FROM conversation_messages
             WHERE role IN ('user', 'human', 'Human')
             {channel_clause}
-            ORDER BY timestamp DESC, id DESC
+            ORDER BY timestamp DESC, rowid DESC
             LIMIT 1
             """,
             params,
@@ -684,14 +982,21 @@ def load_recent_context(
     global_limit: int = 12,
     channel_limit: int = 10,
     total_limit: int = 20,
+    same_channel_only: bool = False,
     db_path: str = CONVERSATION_DB_FILE,
 ) -> list[dict[str, Any]]:
     """
-    Returns a small mixed context window.
+    Return a small mixed or explicitly same-channel context window.
 
-    It includes recent messages from all channels plus extra recent messages from
-    the current channel, then de-duplicates and returns them chronologically.
+    The default includes recent messages from all channels plus extra messages
+    from the current channel. Callers can explicitly request same-channel mode.
     """
+    if same_channel_only:
+        messages = load_messages(limit=channel_limit, channel=channel, db_path=db_path)
+        if total_limit and len(messages) > total_limit:
+            messages = messages[-total_limit:]
+        return messages
+
     mixed = load_messages(limit=global_limit, db_path=db_path)
     current_channel = load_messages(limit=channel_limit, channel=channel, db_path=db_path)
 
@@ -700,7 +1005,9 @@ def load_recent_context(
 
     messages = sorted(
         by_id.values(),
-        key=lambda message: (message["timestamp"], message["id"]),
+        # SQLite rowid preserves insertion order for same-second messages;
+        # non-SQLite entries retain their stable legacy id ordering.
+        key=lambda message: (message["timestamp"], message.get("rowid", message["id"])),
     )
     if total_limit and len(messages) > total_limit:
         messages = messages[-total_limit:]
@@ -848,12 +1155,18 @@ def _row_to_exchange(row: sqlite3.Row) -> dict[str, Any]:
         "summarized_at": row["summarized_at"],
     }
 
-def build_asset_context_text(channel: str, limit: int = 8) -> str:
+def build_asset_context_text(
+    channel: str,
+    limit: int = 8,
+    *,
+    same_channel_only: bool = False,
+) -> str:
     entries = load_recent_context(
         channel=channel,
         global_limit=limit,
         channel_limit=limit,
         total_limit=limit,
+        same_channel_only=same_channel_only,
     )
 
     lines = []
@@ -864,8 +1177,15 @@ def build_asset_context_text(channel: str, limit: int = 8) -> str:
         if content.startswith(("[USER_UPLOADED_FILE]", "[USER_UPLOADED_PHOTO]")):
             continue
 
+        content = content[:700]
+        if entry.get("role") not in {"user", "human", "Human"}:
+            from core.untrusted_content import format_untrusted_persisted_content
+            content = format_untrusted_persisted_content(
+                content,
+                entry.get("metadata"),
+            )
         speaker = t("prompts.ext_str_437") if entry.get("role") == "user" else t("prompts.ext_str_350")
-        lines.append(f"{speaker}: {content[:700]}")
+        lines.append(f"{speaker}: {content}")
 
     return "\n".join(lines[-limit:])
 

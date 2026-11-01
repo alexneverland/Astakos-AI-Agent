@@ -1,65 +1,93 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Skill: Story Maker for children
-# Generates a fairy tale + 3 scene images via Pollinations.ai
+# Generates a fairy tale + 3 scene images via active AI provider
 # ================================================================
 
 import os
 import re
 import time
 import json
-import requests
 from core.i18n import t
 
-# ── Pollinations image generator ────────────────────────────────
+# ── AI provider image generator ─────────────────────────────────
 def _generate_image(prompt: str, output_dir: str, index: int) -> str | None:
-    """Creates an image. Returns the path, or None if it fails."""
+    """Creates a story scene image using the active AI provider adapter. Returns the path, or None if it fails."""
     try:
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            AIProviderError,
+        )
+        from core.brain import get_active_provider_adapter
+
         # Children's style: drawing, vibrant colors, happy
         styled = (
             f"{prompt}, children's book illustration, watercolor, "
             f"colorful, cute, magical, soft lighting, 6 year old friendly, "
             f"no text, no letters"
         )
-        url = (
-            f"https://image.pollinations.ai/prompt/{requests.utils.quote(styled)}"
-            f"?nologo=true&model=flux&width=1024&height=1024&seed={index * 999}"
-        )
-        res = requests.get(url, timeout=45)
-        if res.status_code == 200 and "image" in res.headers.get("Content-Type", ""):
+        adapter = get_active_provider_adapter()
+        img_bytes = adapter.generate_image(styled, aspect_ratio="1:1")
+        if img_bytes:
             fname = os.path.join(output_dir, f"story_img_{index}_{int(time.time())}.jpg")
-            with open(fname, "wb") as f:
-                f.write(res.content)
-            return fname
+            import io
+            from PIL import Image
+
+            try:
+                with Image.open(io.BytesIO(img_bytes)) as img:
+                    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                        rgba = img.convert("RGBA")
+                        background = Image.new("RGB", rgba.size, (255, 255, 255))
+                        background.paste(rgba, mask=rgba.split()[3])
+                        rgb_img = background
+                    elif img.mode != "RGB":
+                        rgb_img = img.convert("RGB")
+                    else:
+                        rgb_img = img
+
+                    rgb_img.save(fname, format="JPEG", quality=95)
+                return fname
+            except Exception as img_err:
+                print(f"⚠️ [StoryMaker] Image {index} invalid image data: {img_err}")
+                return None
+    except CapabilityNotSupportedError as exc:
+        print(f"⚠️ [StoryMaker] Image generation not supported by provider '{exc.provider}': {exc}")
+    except (ProviderAuthError, RateLimitError, AIProviderError) as exc:
+        print(f"⚠️ [StoryMaker] Image {index} provider error ({getattr(exc, 'provider', 'unknown')}): {exc}")
     except Exception as e:
         print(f"⚠️ [StoryMaker] Image {index} failed: {e}")
     return None
 
 
+
 # ── LLM story + scene prompts ────────────────────────────────────
 def _generate_story_and_prompts(theme: str, characters: str = "") -> dict:
-    """Calls Gemini for a fairy tale + 3 image prompts."""
+    """Calls the active AI provider for a fairy tale + 3 image prompts."""
     try:
-        import config
-        import vertexai
-        from vertexai.generative_models import GenerativeModel
-        from core.brain import FAST_MODEL as MAIN_MODEL
-
-        vertexai.init(
-            project=os.getenv("PROJECT_ID", config.PROJECT_ID),
-            location=os.getenv("LOCATION", "global")
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            AIProviderError,
         )
-        model = GenerativeModel(MAIN_MODEL)
+        from core.brain import get_active_provider_adapter
 
         char_hint = t("skills.story_maker.msg_char_hint", chars=characters) if characters else ""
         from core.utils import load_agent_prompt
         base_prompt = load_agent_prompt("story_maker")
         system_prompt = base_prompt.format(char_hint=char_hint)
 
-        response = model.generate_content(
-            f"Story theme: {theme}\n\n{system_prompt}"
+        adapter = get_active_provider_adapter()
+        raw = adapter.generate_text(
+            f"Story theme: {theme}\n\n{system_prompt}",
+            model_type="fast",
         )
-        raw = response.text.strip()
+        if not raw:
+            return {"story": None, "scenes": []}
+
+        raw = raw.strip()
 
         # Split fairytale into scenes
         scenes = []
@@ -82,6 +110,9 @@ def _generate_story_and_prompts(theme: str, characters: str = "") -> dict:
 
         return {"story": story_text, "scenes": scenes[:3]}
 
+    except (CapabilityNotSupportedError, ProviderAuthError, RateLimitError, AIProviderError) as e:
+        print(f"❌ [StoryMaker] Provider error ({getattr(e, 'provider', 'unknown')}): {e}")
+        return {"story": None, "scenes": []}
     except Exception as e:
         print(f"❌ [StoryMaker] LLM error: {e}")
         return {"story": None, "scenes": []}

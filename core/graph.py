@@ -1,8 +1,10 @@
 from core.i18n import t
+from services.turn_timing import trace_stage
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 from langgraph.graph import StateGraph, START, END
@@ -13,7 +15,7 @@ from core.agents import (
     supervisor_node, chat_agent_node, home_agent_node, web_agent_node,
     tech_agent_node, git_agent_node, mail_agent_node, dev_agent_node, tool_router
 )
-from core.approval import approval_check_node
+from core.approval import approval_check_node, consume_successful_routine_draft_authorization
 from core.planner import (
     planner_node, task_executor_node, capture_result_node,
     pre_check_node, cancel_plan_node, validate_step_node,
@@ -28,6 +30,14 @@ AGENT_MAP = [
 ]
 
 
+def guarded_pre_check_node(state: AgentState) -> dict:
+    """Capture draft/history identity before any routing or model latency."""
+    from core.messenger_draft import capture_draft_write_guard
+    guard = capture_draft_write_guard(state["messages"])
+    return {**pre_check_node(state), "messenger_draft_write_guard": guard,
+            "messenger_draft_preparation_authorized": False}
+
+
 
 # ────────────────────────────────────────────────────────────────
 # GRAPH BUILD
@@ -37,25 +47,29 @@ def build_graph():
     workflow = StateGraph(AgentState)
 
     # Nodes
-    workflow.add_node("pre_check",    pre_check_node)
-    workflow.add_node("cancel_plan",  cancel_plan_node)
-    workflow.add_node("supervisor",   supervisor_node)
-    workflow.add_node("Chat_Agent",   chat_agent_node)
-    workflow.add_node("Home_Agent",   home_agent_node)
-    workflow.add_node("Web_Agent",    web_agent_node)
-    workflow.add_node("Tech_Agent",   tech_agent_node)
-    workflow.add_node("Git_Agent",    git_agent_node)
-    workflow.add_node("Mail_Agent",   mail_agent_node)
-    workflow.add_node("Dev_Agent",    dev_agent_node)
+    workflow.add_node("pre_check",    trace_stage("graph.pre_check")(guarded_pre_check_node))
+    workflow.add_node("cancel_plan",  trace_stage("graph.cancel_plan")(cancel_plan_node))
+    workflow.add_node("supervisor",   trace_stage("graph.supervisor")(supervisor_node))
+    workflow.add_node("Chat_Agent",   trace_stage("graph.Chat_Agent")(chat_agent_node))
+    workflow.add_node("Home_Agent",   trace_stage("graph.Home_Agent")(home_agent_node))
+    workflow.add_node("Web_Agent",    trace_stage("graph.Web_Agent")(web_agent_node))
+    workflow.add_node("Tech_Agent",   trace_stage("graph.Tech_Agent")(tech_agent_node))
+    workflow.add_node("Git_Agent",    trace_stage("graph.Git_Agent")(git_agent_node))
+    workflow.add_node("Mail_Agent",   trace_stage("graph.Mail_Agent")(mail_agent_node))
+    workflow.add_node("Dev_Agent",    trace_stage("graph.Dev_Agent")(dev_agent_node))
     workflow.add_node("tools",          ToolNode(all_tools, handle_tool_errors=True))
-    workflow.add_node("approval_check", approval_check_node)
-    workflow.add_node("tool_loop_block", tool_loop_block_node)
-    workflow.add_node("planner",        planner_node)
-    workflow.add_node("task_executor",  task_executor_node)
-    workflow.add_node("validate_step",  validate_step_node)
-    workflow.add_node("replan_node",    replan_node)
-    workflow.add_node("end_check",      end_check_node)
-    workflow.add_node("capture_result", capture_result_node)
+    workflow.add_node("approval_check", trace_stage("graph.approval_check")(approval_check_node))
+    workflow.add_node(
+        "consume_routine_draft_authorization",
+        consume_successful_routine_draft_authorization,
+    )
+    workflow.add_node("tool_loop_block", trace_stage("graph.tool_loop_block")(tool_loop_block_node))
+    workflow.add_node("planner",        trace_stage("graph.planner")(planner_node))
+    workflow.add_node("task_executor",  trace_stage("graph.task_executor")(task_executor_node))
+    workflow.add_node("validate_step",  trace_stage("graph.validate_step")(validate_step_node))
+    workflow.add_node("replan_node",    trace_stage("graph.replan_node")(replan_node))
+    workflow.add_node("end_check",      trace_stage("graph.end_check")(end_check_node))
+    workflow.add_node("capture_result", trace_stage("graph.capture_result")(capture_result_node))
 
     # Entry → pre_check (checks pending plan before the supervisor)
     workflow.set_entry_point("pre_check")
@@ -103,9 +117,11 @@ def build_graph():
 
     workflow.add_edge("tool_loop_block", END)
 
-    # After tools → return to the correct agent
+    # After tools, consume a one-shot routine-draft authorization only on a
+    # confirmed successful write, then return to the originating agent.
+    workflow.add_edge("tools", "consume_routine_draft_authorization")
     workflow.add_conditional_edges(
-        "tools",
+        "consume_routine_draft_authorization",
         tool_router,
         {name: name for name in AGENT_MAP}
     )
@@ -175,6 +191,7 @@ def tool_loop_block_node(state: AgentState):
     return {"messages": [AIMessage(content=text)]}
 
 
+@trace_stage("graph.route_supervisor")
 def _route_supervisor(state: AgentState) -> str:
     """
     Routing by supervisor.
@@ -184,6 +201,9 @@ def _route_supervisor(state: AgentState) -> str:
     """
     import re as _re
     from core.utils import clean_message
+
+    if state.get("bug_followup_routed") is True:
+        return state.get("next_agent", "Chat_Agent")
 
     last_msg = clean_message(state["messages"][-1].content)
 

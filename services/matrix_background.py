@@ -1,0 +1,468 @@
+"""Matrix adapters for Astakos's existing background behavior pipelines."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from typing import Any
+
+from config import CONVERSATION_DB_FILE
+from core.capability_draft import (
+    is_bug_proposal_text,
+    is_bug_diagnosis_text,
+    is_capability_proposal_text,
+    render_capability_followup,
+)
+
+from memory.conversation_history import append_message, load_messages_after_rowid
+from memory.pending_followups import process_followup_exchange
+from memory.session_memory import (
+    log_exchange,
+    run_memory_sifter_fast,
+    run_memory_sifter_slow,
+)
+from memory.working_memory import (
+    record_missing_capability,
+    update_capabilities_from_exchange,
+    update_working_memory,
+)
+from services.behavioral_event_scheduler import schedule_persisted_user_intake
+from services.context_extractor import extract_and_update_context_flags, reconcile_context_message
+from services.external_delivery import external_delivery_router
+
+TaskEnqueuer = Callable[..., None]
+SessionFinalizer = Callable[..., None]
+
+
+@dataclass(frozen=True)
+class MatrixChannelServices:
+    """Fully composed inbound text and media application handlers."""
+
+    text_handler: Any
+    media_handler: Any
+    location_handler: Any | None = None
+    routine_reply_target: Callable[[str], bool] | None = None
+
+
+def run_slow_memory_pipeline(
+    user_text: str,
+    ai_text: str,
+    agent_name: str,
+    channel: str,
+    enqueue_slow_task: TaskEnqueuer,
+) -> None:
+    """Run the fast sift, then queue the existing slow memory pass."""
+    seed_facts = run_memory_sifter_fast(user_text, ai_text, agent_name, channel)
+    enqueue_slow_task(
+        run_memory_sifter_slow,
+        user_text,
+        ai_text,
+        agent_name,
+        channel,
+        seed_facts,
+        True,
+    )
+
+
+def run_followup_pipeline(
+    user_text: str,
+    ai_text: str,
+    agent_name: str,
+    channel: str,
+) -> None:
+    """Feed one completed Matrix exchange to the shared follow-up engine."""
+    process_followup_exchange(
+        user_text=user_text,
+        ai_text=ai_text,
+        agent_name=agent_name,
+        channel=channel,
+    )
+
+
+def run_matrix_capability_followup(
+    user_text: str,
+    ai_text: str,
+    agent_name: str,
+    correlation_rowid: int,
+    conversation_db_path: str,
+) -> None:
+    """Deliver one classified proposal only while its Matrix turn is current."""
+    from core.i18n import t
+
+    # Exact system acknowledgements are operational outcomes, not user phrases
+    # or evidence of a missing capability. Genuine deferred failures still enter
+    # the classifier, as do ordinary user-reported bugs in all other turns.
+    if agent_name == "Routine_Context" and ai_text in {
+        t("routine_context." + outcome)
+        for outcome in ("resolved", "already_resolved", "partial", "declined")
+    }:
+        return
+    if is_capability_proposal_text(ai_text) or is_bug_proposal_text(ai_text) or is_bug_diagnosis_text(ai_text):
+        return
+    newer = load_messages_after_rowid(
+        after_rowid=correlation_rowid,
+        channel="matrix",
+        db_path=conversation_db_path,
+    )
+    if any(message.get("role") == "user" for message in newer):
+        return
+
+    observation = update_capabilities_from_exchange(
+        user_text, ai_text, agent_name, defer_missing_persistence=True
+    )
+    if observation is None:
+        return
+    proposal = render_capability_followup(observation.kind, observation.description)
+    newer = load_messages_after_rowid(
+        after_rowid=correlation_rowid,
+        channel="matrix",
+        db_path=conversation_db_path,
+    )
+    if any(message.get("role") == "user" for message in newer):
+        return
+    if not proposal or any(
+        message.get("agent") == "Dev_Agent" and message.get("content") == proposal
+        for message in newer
+    ):
+        return
+
+    receipt = external_delivery_router.send_text_to("matrix", proposal)
+    if observation.kind == "missing_capability":
+        record_missing_capability(observation.description)
+    append_message(
+        role="assistant",
+        content=proposal,
+        channel="matrix",
+        agent="Dev_Agent",
+        metadata={"transport": "matrix", "matrix_event_id": receipt.external_id},
+        db_path=conversation_db_path,
+    )
+
+
+class MatrixBackgroundHooks:
+    """Connect trusted Matrix turns to existing asynchronous background work."""
+
+    def __init__(
+        self,
+        *,
+        enqueue_fast_task: TaskEnqueuer,
+        enqueue_slow_task: TaskEnqueuer,
+        conversation_db_path: str = CONVERSATION_DB_FILE,
+    ) -> None:
+        self._enqueue_fast_task = enqueue_fast_task
+        self._enqueue_slow_task = enqueue_slow_task
+        self._conversation_db_path = conversation_db_path
+
+    def on_user_persisted(self, saved_message: dict[str, Any]) -> None:
+        """Schedule behavioral-pattern intake for a newly persisted Matrix user."""
+        if saved_message.get("channel") != "matrix":
+            raise ValueError("Matrix background hooks require channel='matrix'")
+        schedule_persisted_user_intake(
+            rowid=saved_message.get("rowid"),
+            metadata=saved_message.get("metadata"),
+            enqueue_slow_task=self._enqueue_slow_task,
+        )
+
+    def on_exchange_completed(
+        self,
+        user_text: str,
+        ai_text: str,
+        agent_name: str,
+        channel: str,
+        external_content_sources: Iterable[str] | None = None,
+        correlation_rowid: int | None = None,
+        context_flags_processed: bool = False,
+        context_reconciliation_pending: bool = False,
+    ) -> None:
+        """Queue the same memory, follow-up, and context pipelines as other channels."""
+        if channel != "matrix":
+            raise ValueError("Matrix background hooks require channel='matrix'")
+
+        if context_reconciliation_pending:
+            self._enqueue_slow_task(reconcile_context_message, user_text, correlation_rowid,
+                                    self._conversation_db_path)
+
+        self._enqueue_fast_task(
+            log_exchange,
+            user_text,
+            ai_text,
+            agent_name,
+            channel,
+        )
+        if external_content_sources is not None:
+            self._enqueue_fast_task(
+                update_working_memory,
+                user_text,
+                ai_text,
+                external_content_sources,
+            )
+        else:
+            self._enqueue_fast_task(update_working_memory, user_text, ai_text)
+
+        if not external_content_sources:
+            self._enqueue_fast_task(
+                run_slow_memory_pipeline,
+                user_text,
+                ai_text,
+                agent_name,
+                channel,
+                self._enqueue_slow_task,
+            )
+            self._enqueue_slow_task(
+                run_followup_pipeline,
+                user_text,
+                ai_text,
+                agent_name,
+                channel,
+            )
+            if not context_flags_processed:
+                self._enqueue_slow_task(
+                    extract_and_update_context_flags,
+                    user_text,
+                    ai_text,
+                    "matrix",
+                )
+            if correlation_rowid is not None:
+                self._enqueue_slow_task(
+                    run_matrix_capability_followup,
+                    user_text,
+                    ai_text,
+                    agent_name,
+                    correlation_rowid,
+                    self._conversation_db_path,
+                )
+        else:
+            self._enqueue_slow_task(
+                run_followup_pipeline,
+                user_text,
+                "",
+                agent_name,
+                channel,
+            )
+            if not context_flags_processed:
+                self._enqueue_slow_task(
+                    extract_and_update_context_flags,
+                    user_text,
+                    "",
+                    "matrix",
+                )
+
+
+def build_matrix_turn_service(
+    *,
+    enqueue_fast_task: TaskEnqueuer,
+    enqueue_slow_task: TaskEnqueuer,
+    graph: Any | None = None,
+    conversation_db_path: str = CONVERSATION_DB_FILE,
+    command_handler: Callable[[str], str | None] | None = None,
+    routine_feedback_handler: Any | None = None,
+):
+    """Build a Matrix turn service with all required background hooks attached."""
+    from services.matrix_turn import MatrixTurnService
+    from services.matrix_routine_completion import process_pending_routine_confirmation
+
+    hooks = MatrixBackgroundHooks(
+        enqueue_fast_task=enqueue_fast_task,
+        enqueue_slow_task=enqueue_slow_task,
+        conversation_db_path=conversation_db_path,
+    )
+    return MatrixTurnService(
+        graph=graph,
+        conversation_db_path=conversation_db_path,
+        on_user_persisted=hooks.on_user_persisted,
+        on_exchange_completed=hooks.on_exchange_completed,
+        command_handler=command_handler,
+        routine_confirmation_handler=(process_pending_routine_confirmation
+                                      if routine_feedback_handler is None else None),
+        persisted_routine_confirmation_handler=routine_feedback_handler,
+    )
+
+
+def build_matrix_channel_services(
+    *,
+    enqueue_fast_task: TaskEnqueuer,
+    enqueue_slow_task: TaskEnqueuer,
+    graph: Any | None = None,
+    conversation_db_path: str = CONVERSATION_DB_FILE,
+    command_handler: Callable[[str], str | None] | None = None,
+    session_finalizer: SessionFinalizer | None = None,
+    story_maker: Callable[[str, str], dict[str, Any]] | None = None,
+    record_location: Callable[..., str | None] | None = None,
+    analyze_image: Callable[..., str] | None = None,
+    transcribe_audio: Callable[..., str] | None = None,
+    analyze_document: Callable[..., str] | None = None,
+    memory_store: Any | None = None,
+    routine_feedback_handler: Any | None = None,
+) -> MatrixChannelServices:
+    """Compose Matrix text, media, pending-photo, and archive-confirmation flows."""
+    from core.i18n import t
+    from services.image_input import analyze_image_bytes
+    from services.matrix_document_turn import (
+        MatrixDocumentTurnService,
+        analyze_matrix_document,
+    )
+    from services.matrix_media_turn import (
+        MatrixInboundTurnRouter,
+        MatrixMediaTurnService,
+    )
+    from services.matrix_turn import MatrixTurnService
+    from services.matrix_routine_completion import process_pending_routine_confirmation
+    from services.matrix_georgian_turn import MatrixGeorgianTurnRouter
+    from services.location_update import process_location_update
+    from services.matrix_voice_mode import MatrixVoiceModeRouter
+    from services.pending_asset_confirmation import (
+        PendingAssetConfirmationService,
+        build_photo_share_request,
+    )
+    from services.photo_commands import analyze_nutrition_photo, scan_receipt_photo
+    from services.session_end import finalize_session
+    from services.story_generation import generate_story
+    from tools.georgian import phrases_message, translate
+    from services.voice_input import transcribe_voice_audio
+
+    if memory_store is None:
+        from memory.vector_store import memory as default_memory
+
+        memory_store = default_memory
+
+    hooks = MatrixBackgroundHooks(
+        enqueue_fast_task=enqueue_fast_task,
+        enqueue_slow_task=enqueue_slow_task,
+        conversation_db_path=conversation_db_path,
+    )
+    finalize = session_finalizer or finalize_session
+    make_story = story_maker or generate_story
+    if record_location is None:
+        from services.external_assistant_delivery import deliver_external_assistant_text
+
+        def save_location(latitude: float, longitude: float, *, live_update: bool):
+            """Use the shared location path and the selected external delivery."""
+            return process_location_update(
+                latitude,
+                longitude,
+                live_update=live_update,
+                source_channel="matrix",
+                send_reminder=lambda message: deliver_external_assistant_text(
+                    message, agent="Reminder_Agent"
+                ),
+            )
+    else:
+        save_location = record_location
+
+    async def matrix_location_handler(
+        latitude: float,
+        longitude: float,
+        live_update: bool,
+    ) -> str | None:
+        """Persist a trusted Matrix location without blocking the sync loop."""
+        import asyncio
+
+        return await asyncio.to_thread(
+            save_location,
+            latitude,
+            longitude,
+            live_update=live_update,
+        )
+
+    def matrix_command_handler(user_text: str):
+        """Handle Matrix-owned commands before delegating shared admin commands."""
+        normalized = str(user_text or "").strip()
+        command = normalized.lower()
+        if command == "/help":
+            from clients.telegram_bot import render_external_help
+
+            return render_external_help(
+                voice_enabled=voice_turn.enabled,
+                include_legacy_confirm=False,
+            )
+        if command == "/story" or command.startswith("/story "):
+            rest = normalized[len("/story") :].strip()
+            if "|" in rest:
+                theme, characters = (part.strip() for part in rest.split("|", 1))
+            else:
+                theme, characters = rest, ""
+            theme = theme or t("clients.telegram_bot.bot_msg_9e64ca")
+            result = make_story(theme, characters)
+            if result.get("error") or not result.get("story"):
+                error = result.get("error") or t("clients.telegram_bot.bot_msg_cf83ee")
+                return f"❌ {error}"
+            from clients.matrix_client import MatrixReply
+
+            images = tuple(str(path) for path in result.get("images", []) if path)[:5]
+            return MatrixReply(
+                f"📖 Story: {theme}\n\n{result['story']}",
+                "text",
+                images,
+            )
+        if command != "/end":
+            return command_handler(user_text) if command_handler is not None else None
+        try:
+            finalize(channel="matrix")
+        except Exception as exc:
+            print(f"[Matrix End Session Error]: {exc}")
+            return t("services.session_end.error")
+        print("[Matrix]: Session closed and archived successfully.")
+        return t("clients.telegram_bot.bot_msg_bfe08b")
+
+    text_turn = MatrixTurnService(
+        graph=graph,
+        conversation_db_path=conversation_db_path,
+        on_user_persisted=hooks.on_user_persisted,
+        on_exchange_completed=hooks.on_exchange_completed,
+        command_handler=matrix_command_handler,
+        routine_confirmation_handler=(process_pending_routine_confirmation
+                                      if routine_feedback_handler is None else None),
+        persisted_routine_confirmation_handler=routine_feedback_handler,
+    )
+    georgian_turn = MatrixGeorgianTurnRouter(
+        text_turn=text_turn,
+        translate=translate,
+        phrases_message=phrases_message,
+        prompt_greek_to_georgian=t("clients.telegram_bot.bot_msg_42fbb6"),
+        prompt_georgian_to_greek=t("clients.telegram_bot.bot_msg_bdc64e"),
+    )
+    voice_turn = MatrixVoiceModeRouter(
+        text_turn=georgian_turn,
+        enabled_reply=t("clients.telegram_bot.bot_msg_c19e9a"),
+        disabled_reply=t("clients.telegram_bot.bot_msg_adde11"),
+    )
+    document_turn = MatrixDocumentTurnService(
+        analyze_document=analyze_document or analyze_matrix_document,
+        conversation_db_path=conversation_db_path,
+        on_user_persisted=hooks.on_user_persisted,
+        on_exchange_completed=hooks.on_exchange_completed,
+    )
+    media_turn = MatrixMediaTurnService(
+        matrix_turn=voice_turn,
+        silence_reply=t("clients.telegram_bot.bot_msg_dacaa2"),
+        transcribe_audio=transcribe_audio or transcribe_voice_audio,
+        analyze_image=analyze_image or analyze_image_bytes,
+        vision_prompt=t("clients.telegram_bot.bot_msg_dec305"),
+        default_photo_question=build_photo_share_request(),
+        asset_question_turn=text_turn.run_asset_question,
+        document_turn=document_turn,
+        analyze_nutrition=analyze_nutrition_photo,
+        scan_receipt=scan_receipt_photo,
+        missing_nutrition_photo_reply=t("clients.telegram_bot.bot_msg_28166e"),
+        missing_receipt_photo_reply=t("clients.telegram_bot.bot_msg_f4f189"),
+    )
+    confirmation = PendingAssetConfirmationService(
+        channel="matrix",
+        memory_store=memory_store,
+        conversation_db_path=conversation_db_path,
+        confirm_reply=t("clients.telegram_bot.bot_msg_7e53ac"),
+        cancel_reply=t("clients.telegram_bot.bot_msg_b026c8"),
+        on_user_persisted=hooks.on_user_persisted,
+        on_exchange_completed=hooks.on_exchange_completed,
+    )
+    return MatrixChannelServices(
+        text_handler=MatrixInboundTurnRouter(
+            text_turn=voice_turn,
+            media_turn=media_turn,
+            pending_asset_confirmation=confirmation,
+        ),
+        media_handler=media_turn,
+        location_handler=matrix_location_handler,
+        routine_reply_target=(routine_feedback_handler.owns_reply_target
+                              if routine_feedback_handler is not None else None),
+    )

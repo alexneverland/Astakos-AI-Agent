@@ -64,7 +64,12 @@ def _write_library(data: dict[str, Any]) -> None:
             os.unlink(temp_path)
 
 
-def save_generated_recipe(name: str, content: str) -> dict[str, Any]:
+def save_generated_recipe(
+    name: str,
+    content: str,
+    *,
+    external_content_sources: list[str] | None = None,
+) -> dict[str, Any]:
     """Persist one explicitly named generated recipe as an immutable version."""
     name = name.strip()
     content = content.strip()
@@ -81,6 +86,12 @@ def save_generated_recipe(name: str, content: str) -> dict[str, Any]:
             "is_favorite": False,
             "last_cooked_at": None,
         }
+        if external_content_sources:
+            recipe["external_content_sources"] = sorted({
+                source
+                for source in external_content_sources
+                if isinstance(source, str) and source
+            })
         library["recipes"].append(recipe)
         _write_library(library)
         return recipe
@@ -134,7 +145,18 @@ def get_saved_recipe(recipe_id: str) -> str:
 
     for recipe in recipes:
         if recipe.get("id") == recipe_id:
-            return json.dumps(recipe, ensure_ascii=False)
+            result = json.dumps(recipe, ensure_ascii=False)
+            sources = recipe.get("external_content_sources", [])
+            if not isinstance(sources, list):
+                sources = []
+            if sources:
+                from core.untrusted_content import format_untrusted_tool_result
+
+                result = format_untrusted_tool_result(
+                    "persisted recipe sources: " + ", ".join(sources),
+                    result,
+                )
+            return result
     return json.dumps({"found": False}, ensure_ascii=False)
 
 

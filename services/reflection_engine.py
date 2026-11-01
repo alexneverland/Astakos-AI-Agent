@@ -27,6 +27,8 @@ from memory.routine_db import (
     COOLDOWN_MAX_HOURS,
     clamp_cooldown_hours,
 )
+from services.external_assistant_delivery import deliver_external_assistant_text
+from services.external_delivery import ExternalDeliveryError
 
 _BASE    = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR  = os.path.join(_BASE, "..", "logs", "events")
@@ -276,27 +278,25 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
     {observation, action, confidence, lesson, source, routine_id?}
     """
     try:
-        import vertexai
-        from vertexai.generative_models import GenerativeModel
-        from core.brain import HEAVY_MODEL as MAIN_MODEL
-
-        vertexai.init(
-            project=config.PROJECT_ID,
-            location=os.getenv("LOCATION", "global")
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            AIProviderError,
         )
-        model = GenerativeModel(MAIN_MODEL)
+        from core.brain import get_active_provider_adapter
 
         # Summary of traces (conversations)
         trace_summary = []
-        for t in traces:  # max 30 traces removed to include all history
-            channel  = t.get("channel", "?")
-            agent    = t.get("agent", "?")
-            user_msg = t.get("user_message") or ""
-            bot_resp = (t.get("response") or "").replace("\n", " ")
-            tools    = [tc.get("tool", "") for tc in t.get("tool_calls", [])]
-            dur      = t.get("duration_ms", 0)
-            err      = t.get("error") or any(tc.get("error") for tc in t.get("tool_calls", []))
-            loop     = t.get("loop_guard", False)
+        for tr in traces:  # max 30 traces removed to include all history
+            channel  = tr.get("channel", "?")
+            agent    = tr.get("agent", "?")
+            user_msg = tr.get("user_message") or ""
+            bot_resp = (tr.get("response") or "").replace("\n", " ")
+            tools    = [tc.get("tool", "") for tc in tr.get("tool_calls", [])]
+            dur      = tr.get("duration_ms", 0)
+            err      = tr.get("error") or any(tc.get("error") for tc in tr.get("tool_calls", []))
+            loop     = tr.get("loop_guard", False)
             line     = f"[{channel}/{agent}] '{user_msg}' -> '{bot_resp}' tools={tools} dur={dur}ms"
             if err:   line += " ❌error"
             if loop:  line += " 🔁loop"
@@ -321,13 +321,18 @@ def _analyze_with_llm(events: list, routine_stats: list, traces: list) -> list[d
             routine_summary_text=routine_summary_text
         )
 
-        response = model.generate_content(prompt)
-        text = response.text.strip()
+        adapter = get_active_provider_adapter()
+        text = adapter.generate_text(prompt, model_type="heavy")
+        if not text:
+            return []
 
         from core.utils import extract_json_from_text
-        data = extract_json_from_text(text)
+        data = extract_json_from_text(text.strip())
         return data if isinstance(data, list) else []
 
+    except (CapabilityNotSupportedError, ProviderAuthError, RateLimitError, AIProviderError) as e:
+        print(f"⚠️ [ReflectionEngine] Provider error ({getattr(e, 'provider', 'unknown')}): {e}")
+        return []
     except Exception as e:
         print(f"⚠️ [ReflectionEngine] LLM error: {e}")
         return []
@@ -369,6 +374,14 @@ def _apply_action(reflection: dict) -> bool:
             return False
 
     try:
+        if action in {"increase_cooldown", "reduce_frequency"}:
+            from memory.routine_db import get_connection
+            from memory.routine_feedback import load_initialized_feedback_store
+            if load_initialized_feedback_store(
+                    config.ROUTINES_DB, connection_factory=get_connection) is not None:
+                # Dated delivery/feedback is the sole automatic backoff authority.
+                # Other reflection actions and unmigrated installations stay intact.
+                return False
         conn = sqlite3.connect(config.ROUTINES_DB)
 
         if action == "increase_cooldown" and value:
@@ -424,13 +437,22 @@ def _apply_action(reflection: dict) -> bool:
 
 # ── Main Entry Point ──────────────────────────────────────────────
 
+def _send_reflection_digest(message: str) -> None:
+    """Send the nightly digest through only the selected external channel."""
+    try:
+        deliver_external_assistant_text(
+            message,
+            agent="Reflection_Agent",
+            silent=True,
+        )
+    except ExternalDeliveryError as exc:
+        print(f"[Reflection]: digest delivery failed: {exc}")
+
 def run_reflection() -> dict:
     """
     Main function. Runs after the analytics engine.
     Returns stats: {analyzed, applied, pending, skipped}
     """
-    from tools.telegram import send_telegram_msg
-
     print("[Reflection]: Starting self-evaluation...")
     _ensure_table()
 
@@ -529,7 +551,7 @@ def run_reflection() -> dict:
         msg    = header + "\n\n---\n\n".join(telegram_lines)
         if len(msg) > 4000:
             msg = msg[:3990] + "..."
-        send_telegram_msg(msg, disable_notification=True)
+        _send_reflection_digest(msg)
 
     stats = {
         "analyzed": len(reflections), "applied": applied, "pending": pending,

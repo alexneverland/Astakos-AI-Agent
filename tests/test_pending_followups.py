@@ -1,12 +1,30 @@
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 import clients.telegram_bot as bot
 import memory.pending_followups as pf
+
+
+def _make_update_candidate(subject):
+    """Create the actual record acted on by the semantic update tests."""
+    return pf.create_pending_followup(source_channel="matrix", source_agent="Chat_Agent",
+        topic="outing", subject=subject, source_user_text=subject, source_ai_text="Okay",
+        followup_after_ts="2030-01-01T19:00:00+02:00", confidence=0.9, metadata={})
+
+
+def _stub_followup_updates(monkeypatch, updates):
+    """Replace only the model boundary, keeping batch validation and writes real."""
+    from types import SimpleNamespace
+    calls = []
+    def model(prompt, *args, **kwargs):
+        calls.append(prompt)
+        return SimpleNamespace(text=json.dumps({"updates": updates}))
+    monkeypatch.setattr("services.gemini.safe_gemini_call", model)
+    return calls
 
 
 @pytest.fixture()
@@ -158,6 +176,55 @@ def test_mark_followup_sent_marks_row_sent(temp_state_db):
     assert rows[0][3] == "sent"
 
 
+def test_recent_sent_followups_use_latest_sent_at_not_highest_id(
+    temp_state_db,
+    monkeypatch,
+):
+    now = pf._local_now()
+    followup_after_ts = now.isoformat(timespec="seconds")
+
+    recent_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="park visit",
+        source_user_text="I am going to the park.",
+        source_ai_text="OK.",
+        followup_after_ts=followup_after_ts,
+        confidence=0.8,
+        metadata={},
+    )
+    monkeypatch.setattr(pf, "_local_now", lambda: now)
+    pf.mark_followup_sent(recent_id)
+
+    older_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="park visit",
+        source_user_text="I am going to the park.",
+        source_ai_text="OK.",
+        followup_after_ts=followup_after_ts,
+        confidence=0.8,
+        metadata={},
+    )
+    monkeypatch.setattr(
+        pf,
+        "_local_now",
+        lambda: now - timedelta(minutes=31),
+    )
+    pf.mark_followup_sent(older_id)
+
+    monkeypatch.setattr(pf, "_local_now", lambda: now)
+    arc_key = pf.build_followup_arc_key("outing", "park visit")
+
+    assert pf.has_recent_sent_followup(within_minutes=30) is True
+    assert pf.has_recent_sent_followup_for_arc(
+        arc_key,
+        within_minutes=30,
+    ) is True
+
+
 def test_expire_old_followups_marks_expired(temp_state_db):
     pf.create_pending_followup(
         source_channel="telegram",
@@ -307,121 +374,38 @@ def test_maybe_create_followup_from_exchange_skips_low_confidence(temp_state_db,
 
 
 def test_maybe_resolve_followups_from_user_message_uses_llm_resolution(temp_state_db, monkeypatch):
-    followup_id = pf.create_pending_followup(
-        source_channel="telegram",
-        source_agent="Chat_Agent",
-        topic="outing",
-        subject="συνάντηση με Partner",
-        source_user_text="Σε λίγο φεύγω να βρω τη Partner",
-        source_ai_text="ΟΚ.",
-        followup_after_ts="2030-01-01T19:00:00",
-        confidence=0.80,
-        metadata={},
-    )
+    identity = _make_update_candidate("συνάντηση με Partner")
+    _stub_followup_updates(monkeypatch, [{"id": identity, "action": "resolve",
+        "resolution_type": "completed", "confidence": 0.91, "reason": "user found them"}])
+    assert pf.maybe_resolve_followups_from_user_message("Βρήκα την Partner τελικά στο πάρκο") == 1
+    row = pf.find_pending_followups(active_only=False)[0]
+    assert row["status"] == "resolved" and row["outcome_score"] == 1.0
+    assert _fetch_all(temp_state_db)[0][6] == "resolved_by_user:completed"
 
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_resolution_with_llm",
-        lambda **kwargs: {
-            "resolves": True,
-            "resolution_type": "completed",
-            "confidence": 0.91,
-            "reason": "user said they found them",
-        },
-    )
 
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_deferral_with_llm",
-        lambda **kwargs: {"should_defer": False},
-    )
-
-    pf.maybe_resolve_followups_from_user_message("Τους βρήκα τελικά στο πάρκο")
-
-    rows = _fetch_all(temp_state_db)
-    assert len(rows) == 1
-    assert rows[0][3] == "resolved"
-    assert rows[0][6] == "resolved_by_user:completed"
-
-    followup = next(
-        item
-        for item in pf.find_pending_followups(limit=10, active_only=False)
-        if item["id"] == followup_id
-    )
-    assert followup["outcome_score"] == 1.0
+def test_maybe_resolve_followups_from_user_message_ignores_unrelated_for_outing(temp_state_db, monkeypatch):
+    _make_update_candidate("βόλτα στο πάρκο")
+    calls = _stub_followup_updates(monkeypatch, [])
+    pf.maybe_resolve_followups_from_user_message("Η Σοφία πήγε σπίτι να κλείσει τον φούρνο")
+    assert len(calls) == 1
+    assert pf.find_pending_followups()[0]["status"] == "pending"
 
 
 def test_maybe_resolve_followups_from_user_message_skips_low_confidence_llm(temp_state_db, monkeypatch):
-    pf.create_pending_followup(
-        source_channel="telegram",
-        source_agent="Chat_Agent",
-        topic="food_purchase",
-        subject="μπριζόλες λαιμού",
-        source_user_text="Θύμισέ μου να πάρω τις μπριζόλες",
-        source_ai_text="Έγινε.",
-        followup_after_ts="2030-01-01T19:00:00",
-        confidence=0.80,
-        metadata={},
-    )
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_resolution_with_llm",
-        lambda **kwargs: {
-            "resolves": True,
-            "resolution_type": "completed",
-            "confidence": 0.30,
-            "reason": "too weak",
-        },
-    )
-
+    identity = _make_update_candidate("μπριζόλες λαιμού")
+    _stub_followup_updates(monkeypatch, [{"id": identity, "action": "resolve",
+        "resolution_type": "completed", "confidence": 0.30, "reason": "too weak"}])
     pf.maybe_resolve_followups_from_user_message("Ναι οκ")
-
-    rows = _fetch_all(temp_state_db)
-    assert len(rows) == 1
-    assert rows[0][3] == "pending"
+    assert pf.find_pending_followups()[0]["status"] == "pending"
 
 
 def test_maybe_resolve_followups_from_user_message_resolves_sent_followup(temp_state_db, monkeypatch):
-    followup_id = pf.create_pending_followup(
-        source_channel="telegram",
-        source_agent="Chat_Agent",
-        topic="food_purchase",
-        subject="\u03bc\u03c0\u03c1\u03b9\u03b6\u03cc\u03bb\u03b5\u03c2 \u03bb\u03b1\u03b9\u03bc\u03bf\u03cd",
-        source_user_text="\u0398\u03cd\u03bc\u03b9\u03c3\u03ad \u03bc\u03bf\u03c5 \u03bd\u03b1 \u03c0\u03ac\u03c1\u03c9 \u03c4\u03b9\u03c2 \u03bc\u03c0\u03c1\u03b9\u03b6\u03cc\u03bb\u03b5\u03c2",
-        source_ai_text="\u0388\u03b3\u03b9\u03bd\u03b5.",
-        followup_after_ts="2030-01-01T19:00:00",
-        confidence=0.80,
-        metadata={},
-    )
-    pf.mark_followup_sent(followup_id)
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_resolution_with_llm",
-        lambda **kwargs: {
-            "resolves": True,
-            "resolution_type": "completed",
-            "confidence": 0.92,
-            "reason": "user said they bought them",
-        },
-    )
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_deferral_with_llm",
-        lambda **kwargs: {"should_defer": False},
-    )
-
-    resolved = pf.maybe_resolve_followups_from_user_message(
-        "\u03a4\u03b9\u03c2 \u03c0\u03ae\u03c1\u03b1 \u03c4\u03ce\u03c1\u03b1 \u03ba\u03b1\u03b9 \u03c6\u03b5\u03cd\u03b3\u03c9 \u03b1\u03c0\u03cc \u03c4\u03b7 \u03b4\u03bf\u03c5\u03bb\u03b5\u03b9\u03ac"
-    )
-
-    rows = _fetch_all(temp_state_db)
-    assert resolved == 1
-    assert len(rows) == 1
-    assert rows[0][3] == "resolved"
-    assert rows[0][6] == "resolved_by_user:completed"
+    identity = _make_update_candidate("μπριζόλες λαιμού")
+    pf.mark_followup_sent(identity)
+    _stub_followup_updates(monkeypatch, [{"id": identity, "action": "resolve",
+        "resolution_type": "completed", "confidence": 0.92, "reason": "user bought them"}])
+    assert pf.maybe_resolve_followups_from_user_message("Τις πήρα τώρα και φεύγω από τη δουλειά") == 1
+    assert pf.find_pending_followups(active_only=False)[0]["status"] == "resolved"
 
 
 def test_build_followup_arc_key_collapses_similar_subjects():
@@ -594,7 +578,12 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
         ],
     )
     monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
-    monkeypatch.setattr(bot, "has_recent_sent_followup", lambda within_minutes=90: True)
+    global_cooldowns = []
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or True,
+    )
     monkeypatch.setattr(
         bot,
         "has_recent_sent_followup_for_arc",
@@ -603,26 +592,156 @@ def test_job_check_pending_followups_skips_when_recent_global_followup(monkeypat
     monkeypatch.setattr(bot, "_build_followup_decision_with_llm", lambda item, recent_context, state_snapshot: {}, raising=False)
     monkeypatch.setattr(bot, "send_telegram_msg", lambda msg: sent.append(msg))
     monkeypatch.setattr(bot, "mark_followup_sent", lambda followup_id: marked.append(followup_id))
-    monkeypatch.setattr(
-        bot,
-        "record_followup_outcome",
-        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
-    )
-
     bot.job_check_pending_followups()
 
     assert sent == []
     assert marked == []
     assert outcomes == []
+    assert global_cooldowns == [30]
 
 
-def test_enqueue_followup_pipeline_skips_create_after_resolution_update(monkeypatch):
-    created = []
+def test_job_check_pending_followups_uses_short_global_cooldown_for_live_location_departure(monkeypatch):
+    global_cooldowns = []
+    llm_calls = []
 
-    monkeypatch.setattr(bot, "maybe_resolve_followups_from_user_message", lambda text: 1)
-    monkeypatch.setattr(bot, "looks_like_followup_resolution_update", lambda text: True)
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
     monkeypatch.setattr(
         bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 8,
+                "topic": "departure",
+                "subject": "stable_location_departure",
+                "source_agent": "Location_Event",
+                "source_user_text": "Live location detected departure.",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or True,
+    )
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda *args: llm_calls.append(args),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert global_cooldowns == [5]
+    assert llm_calls == []
+
+
+def test_live_location_departure_continues_after_short_global_cooldown(monkeypatch):
+    global_cooldowns = []
+    arc_cooldowns = []
+    llm_calls = []
+    skip_calls = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 10,
+                "topic": "departure",
+                "subject": "stable_location_departure",
+                "source_agent": "Location_Event",
+                "source_user_text": "Live location detected departure.",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or False,
+    )
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup_for_arc",
+        lambda arc_key, within_minutes: arc_cooldowns.append(within_minutes) or False,
+    )
+    monkeypatch.setattr(bot, "_build_followup_state_snapshot", lambda: {})
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda item, recent_context, state_snapshot: llm_calls.append(
+            (item, recent_context, state_snapshot)
+        ) or {
+            "decision": "skip",
+            "skip_action": "resolve",
+            "stage": "skip",
+            "message": "",
+            "reason": "test",
+        },
+    )
+    monkeypatch.setattr(
+        bot,
+        "_apply_followup_skip_outcome",
+        lambda item, decision: skip_calls.append((item["id"], decision["skip_action"]))
+        or "resolved",
+    )
+
+    bot.job_check_pending_followups()
+
+    assert global_cooldowns == [5]
+    assert arc_cooldowns == [240]
+    assert len(llm_calls) == 1
+    assert skip_calls == [(10, "resolve")]
+
+
+def test_job_check_pending_followups_uses_default_cooldown_for_other_departure(monkeypatch):
+    global_cooldowns = []
+    llm_calls = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: [
+            {
+                "id": 9,
+                "topic": "departure",
+                "subject": "manual_departure",
+                "source_agent": "Chat_Agent",
+                "source_user_text": "I am leaving now.",
+            }
+        ],
+    )
+    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(
+        bot,
+        "has_recent_sent_followup",
+        lambda within_minutes: global_cooldowns.append(within_minutes) or True,
+    )
+    monkeypatch.setattr(
+        bot,
+        "_build_followup_decision_with_llm",
+        lambda *args: llm_calls.append(args),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert global_cooldowns == [30]
+    assert llm_calls == []
+
+
+def test_process_followup_exchange_skips_redundant_arc_after_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rejects recreation of the arc that the current user message resolved."""
+    created = []
+
+    monkeypatch.setattr(pf, "maybe_resolve_followups_from_user_message", lambda text: 1)
+    monkeypatch.setattr(pf, "looks_like_followup_resolution_update", lambda text: True)
+    monkeypatch.setattr(
+        pf,
         "extract_followup_candidate_with_llm",
         lambda user_text, ai_text, agent_name, active_followups_text="": {
             "should_follow_up": True,
@@ -634,7 +753,7 @@ def test_enqueue_followup_pipeline_skips_create_after_resolution_update(monkeypa
         },
     )
     monkeypatch.setattr(
-        bot,
+        pf,
         "get_recently_resolved_followups",
         lambda limit=5, within_seconds=180: [
             {
@@ -644,30 +763,33 @@ def test_enqueue_followup_pipeline_skips_create_after_resolution_update(monkeypa
             }
         ],
     )
-    monkeypatch.setattr(bot, "candidate_is_distinct_from_recently_resolved", lambda candidate, recent: False)
+    monkeypatch.setattr(pf, "candidate_is_distinct_from_recently_resolved", lambda candidate, recent: False)
     monkeypatch.setattr(
-        bot,
+        pf,
         "create_pending_followup_from_candidate",
         lambda **kwargs: created.append(kwargs),
     )
 
-    bot._enqueue_followup_pipeline(
-        "τις πήρα τώρα και φεύγω",
-        "ωραία μάστορα",
-        "Chat_Agent",
-        "telegram",
+    pf.process_followup_exchange(
+        user_text="τις πήρα τώρα και φεύγω",
+        ai_text="ωραία μάστορα",
+        agent_name="Chat_Agent",
+        channel="telegram",
     )
 
     assert created == []
 
 
-def test_enqueue_followup_pipeline_allows_distinct_new_arc_after_resolution(monkeypatch):
+def test_process_followup_exchange_allows_distinct_new_arc_after_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allows a distinct new follow-up after the prior arc is resolved."""
     created = []
 
-    monkeypatch.setattr(bot, "maybe_resolve_followups_from_user_message", lambda text: 1)
-    monkeypatch.setattr(bot, "looks_like_followup_resolution_update", lambda text: True)
+    monkeypatch.setattr(pf, "maybe_resolve_followups_from_user_message", lambda text: 1)
+    monkeypatch.setattr(pf, "looks_like_followup_resolution_update", lambda text: True)
     monkeypatch.setattr(
-        bot,
+        pf,
         "extract_followup_candidate_with_llm",
         lambda user_text, ai_text, agent_name, active_followups_text="": {
             "should_follow_up": True,
@@ -679,7 +801,7 @@ def test_enqueue_followup_pipeline_allows_distinct_new_arc_after_resolution(monk
         },
     )
     monkeypatch.setattr(
-        bot,
+        pf,
         "get_recently_resolved_followups",
         lambda limit=5, within_seconds=180: [
             {
@@ -689,22 +811,113 @@ def test_enqueue_followup_pipeline_allows_distinct_new_arc_after_resolution(monk
             }
         ],
     )
-    monkeypatch.setattr(bot, "candidate_is_distinct_from_recently_resolved", lambda candidate, recent: True)
+    monkeypatch.setattr(pf, "candidate_is_distinct_from_recently_resolved", lambda candidate, recent: True)
     monkeypatch.setattr(
-        bot,
+        pf,
         "create_pending_followup_from_candidate",
         lambda **kwargs: created.append(kwargs) or 77,
     )
 
-    bot._enqueue_followup_pipeline(
-        "τις πήρα τώρα και πάω να τους βρω στο πάρκο",
-        "ωραία μάστορα",
-        "Chat_Agent",
-        "telegram",
+    pf.process_followup_exchange(
+        user_text="τις πήρα τώρα και πάω να τους βρω στο πάρκο",
+        ai_text="ωραία μάστορα",
+        agent_name="Chat_Agent",
+        channel="telegram",
     )
 
     assert len(created) == 1
     assert created[0]["candidate"]["topic"] == "outing"
+
+
+def test_process_followup_exchange_updates_other_active_arc_after_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserves an update request for another active arc after resolution."""
+    deferred = []
+    active_followup = {
+        "id": 91,
+        "topic": "task_progress",
+        "subject": "vacuum remaining rooms",
+        "status": "pending",
+    }
+
+    monkeypatch.setattr(pf, "maybe_resolve_followups_from_user_message", lambda text: 1)
+    monkeypatch.setattr(pf, "looks_like_followup_resolution_update", lambda text: True)
+    monkeypatch.setattr(
+        pf,
+        "get_recently_resolved_followups",
+        lambda limit=5, within_seconds=180: [
+            {
+                "topic": "food_purchase",
+                "subject": "groceries",
+                "arc_key": pf.build_followup_arc_key("food_purchase", "groceries"),
+            }
+        ],
+    )
+    monkeypatch.setattr(pf, "find_pending_followups", lambda limit=10, active_only=True: [active_followup])
+    monkeypatch.setattr(
+        pf,
+        "extract_followup_candidate_with_llm",
+        lambda user_text, ai_text, agent_name, active_followups_text="": {
+            "should_follow_up": False,
+            "update_existing_id": 91,
+            "delay_minutes": 90,
+            "reason": "user postponed the other task",
+        },
+    )
+    monkeypatch.setattr(
+        pf,
+        "defer_followup",
+        lambda **kwargs: deferred.append(kwargs),
+    )
+
+    pf.process_followup_exchange(
+        user_text="I bought the groceries; I will vacuum the rest later.",
+        ai_text="Got it.",
+        agent_name="Chat_Agent",
+        channel="web",
+    )
+
+    assert deferred == [
+        {
+            "followup_id": 91,
+            "delay_minutes": 90,
+            "reason": "user postponed the other task",
+            "target_window": "",
+            "topic": "task_progress",
+            "automatic": True,
+        }
+    ]
+
+
+def test_web_followup_pipeline_uses_shared_lifecycle_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeps Web follow-up processing on the shared resolution-safe path."""
+    import api.server as server
+
+    calls = []
+    monkeypatch.setattr(
+        server,
+        "process_followup_exchange",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    server._enqueue_followup_pipeline(
+        "I completed the shopping.",
+        "Great.",
+        "Chat_Agent",
+        "web",
+    )
+
+    assert calls == [
+        {
+            "user_text": "I completed the shopping.",
+            "ai_text": "Great.",
+            "agent_name": "Chat_Agent",
+            "channel": "web",
+        }
+    ]
 
 
 def test_candidate_is_distinct_from_recently_resolved_allows_same_topic_new_arc():
@@ -769,17 +982,61 @@ def test_job_check_pending_followups_persists_sent_message(monkeypatch):
         "mark_followup_sent",
         lambda followup_id, reason=None: marked.append((followup_id, reason)),
     )
-    monkeypatch.setattr(
-        bot,
-        "record_followup_outcome",
-        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
-    )
-
     bot.job_check_pending_followups()
 
     assert sent == [("κανε τις μπριζολες οπως τις σκεφτεσαι;", "FollowUp_Agent")]
     assert marked == [(9, "followup_sent:decision_pending")]
-    assert outcomes == [(9, 0.2, "followup_sent:decision_pending")]
+    assert outcomes == []
+
+
+def test_mark_followup_sent_records_single_outcome(temp_state_db: Path) -> None:
+    """Records the send outcome exactly once when a follow-up is sent."""
+    followup_id = pf.create_pending_followup(
+        source_channel="telegram",
+        source_agent="Chat_Agent",
+        topic="outing",
+        subject="park visit",
+        source_user_text="We are going to the park.",
+        source_ai_text="Have fun.",
+        followup_after_ts="2030-01-01T19:00:00",
+        confidence=0.8,
+        metadata={},
+    )
+
+    pf.mark_followup_sent(followup_id)
+
+    item = next(
+        item
+        for item in pf.find_pending_followups(limit=10, active_only=True)
+        if item["id"] == followup_id
+    )
+    assert item["outcome_score"] == 0.2
+
+
+@pytest.mark.parametrize(
+    ("muted", "quiet"),
+    [(True, False), (False, True)],
+)
+def test_job_check_pending_followups_skips_delivery_when_proactive_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    muted: bool,
+    quiet: bool,
+) -> None:
+    """Keeps expiry cleanup active while quiet hours or mute blocks delivery."""
+    expired = []
+
+    monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: expired.append(now_iso))
+    monkeypatch.setattr(bot, "is_proactive_muted", lambda: muted)
+    monkeypatch.setattr(bot, "is_quiet_hours", lambda: quiet)
+    monkeypatch.setattr(
+        bot,
+        "get_due_pending_followups",
+        lambda now_iso: pytest.fail("due follow-ups must not be loaded while disabled"),
+    )
+
+    bot.job_check_pending_followups()
+
+    assert len(expired) == 1
 
 
 def test_job_check_pending_followups_does_not_mark_sent_when_telegram_send_fails(monkeypatch):
@@ -827,22 +1084,15 @@ def test_job_check_pending_followups_does_not_mark_sent_when_telegram_send_fails
         "mark_followup_sent",
         lambda followup_id, reason=None: marked.append((followup_id, reason)),
     )
-    monkeypatch.setattr(
-        bot,
-        "record_followup_outcome",
-        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
-    )
-
     bot.job_check_pending_followups()
 
     assert marked == []
     assert outcomes == []
 
 
-def test_job_check_pending_followups_forces_light_outing_send_when_due(monkeypatch):
+def test_job_check_pending_followups_respects_outing_skip_decision(monkeypatch):
     sent = []
-    marked = []
-    outcomes = []
+    skip_calls = []
 
     monkeypatch.setattr(bot, "expire_old_followups", lambda now_iso: None)
     monkeypatch.setattr(
@@ -861,7 +1111,11 @@ def test_job_check_pending_followups_forces_light_outing_send_when_due(monkeypat
             }
         ],
     )
-    monkeypatch.setattr(bot, "_load_recent_proactive_context", lambda limit=10: "")
+    monkeypatch.setattr(
+        bot,
+        "_load_recent_proactive_context",
+        lambda limit=10: "Lazaros: I am already at the park with Alexandros.",
+    )
     monkeypatch.setattr(bot, "has_recent_sent_followup", lambda within_minutes=90: False)
     monkeypatch.setattr(
         bot,
@@ -874,33 +1128,30 @@ def test_job_check_pending_followups_forces_light_outing_send_when_due(monkeypat
         "_build_followup_decision_with_llm",
         lambda item, recent_context, state_snapshot: {
             "decision": "skip",
+            "skip_action": "resolve",
             "stage": "skip",
             "message": "",
-            "reason": "too early",
+            "reason": "already_active",
         },
     )
-    monkeypatch.setattr(bot, "_should_force_light_outing_followup", lambda item: True)
+    monkeypatch.setattr(
+        bot,
+        "_apply_followup_skip_outcome",
+        lambda item, decision: skip_calls.append(
+            (item["id"], decision["skip_action"], decision["reason"])
+        ) or "resolved",
+    )
     monkeypatch.setattr(
         bot,
         "_send_and_record_assistant",
         lambda msg, chat_id=None, agent=None: sent.append((msg, agent)) or 456,
     )
-    monkeypatch.setattr(
-        bot,
-        "mark_followup_sent",
-        lambda followup_id, reason=None: marked.append((followup_id, reason)),
-    )
-    monkeypatch.setattr(
-        bot,
-        "record_followup_outcome",
-        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
-    )
 
     bot.job_check_pending_followups()
 
-    assert sent == [("Τους βρήκες τελικά για το βόλτα στο πάρκο;", "FollowUp_Agent")]
-    assert marked == [(11, "followup_sent:light_outing_checkin")]
-    assert outcomes == [(11, 0.1, "followup_sent:light_outing_checkin")]
+    assert sent == []
+    assert skip_calls == [(11, "resolve", "already_active")]
+
 
 
 def test_job_check_pending_followups_does_not_skip_just_because_subject_is_in_recent_context(monkeypatch):
@@ -953,17 +1204,11 @@ def test_job_check_pending_followups_does_not_skip_just_because_subject_is_in_re
         "mark_followup_sent",
         lambda followup_id, reason=None: marked.append((followup_id, reason)),
     )
-    monkeypatch.setattr(
-        bot,
-        "record_followup_outcome",
-        lambda followup_id, score, reason: outcomes.append((followup_id, score, reason)),
-    )
-
     bot.job_check_pending_followups()
 
     assert sent == [("Tous vrikes telika gia volta sto parko?", "FollowUp_Agent")]
     assert marked == [(12, "followup_sent:decision_pending")]
-    assert outcomes == [(12, 0.2, "followup_sent:decision_pending")]
+    assert outcomes == []
 
 
 def test_followup_safe_fallback_is_non_assumptive():
@@ -1252,46 +1497,13 @@ def test_defer_followup_moves_due_time_and_keeps_pending(temp_state_db):
 
 
 def test_maybe_resolve_followups_from_user_message_defers_when_user_postpones(temp_state_db, monkeypatch):
-    pf.create_pending_followup(
-        source_channel="telegram",
-        source_agent="Chat_Agent",
-        topic="food_purchase",
-        subject="μπριζόλες λαιμού",
-        source_user_text="θυμισέ μου για τις μπριζόλες",
-        source_ai_text="έγινε",
-        followup_after_ts="2030-01-01T19:00:00+02:00",
-        confidence=0.8,
-        metadata={},
-    )
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_resolution_with_llm",
-        lambda **kwargs: {
-            "resolves": False,
-            "resolution_type": "",
-            "confidence": 0.2,
-            "reason": "not resolved",
-        },
-    )
-
-    monkeypatch.setattr(
-        pf,
-        "classify_followup_deferral_with_llm",
-        lambda **kwargs: {
-            "should_defer": True,
-            "delay_minutes": 720,
-            "target_window": "next_day_late_morning",
-            "reason": "user postponed to tomorrow",
-            "confidence": 0.88,
-        },
-    )
-
+    identity = _make_update_candidate("μπριζόλες λαιμού")
+    _stub_followup_updates(monkeypatch, [{"id": identity, "action": "defer",
+        "delay_minutes": 720, "target_window": "next_day_late_morning",
+        "confidence": 0.88, "reason": "user postponed to tomorrow"}])
     pf.maybe_resolve_followups_from_user_message("όχι σήμερα, αύριο οι μπριζόλες")
-
-    row = pf.find_pending_followups(limit=10)[0]
-    assert row["status"] == "pending"
-    assert row["last_decision"] == "deferred"
+    row = pf.find_pending_followups()[0]
+    assert row["status"] == "pending" and row["last_decision"] == "deferred"
     assert "postponed" in row["decision_reason"]
 
 
@@ -1639,6 +1851,96 @@ def test_followup_decision_returns_structural_skip_action(monkeypatch):
     assert result["skip_action"] == "resolve"
 
 
+def test_departure_decision_requires_verified_recent_context(monkeypatch):
+    import clients.telegram_bot as bot
+    import services.gemini as gemini
+
+    class DummyResponse:
+        text = (
+            '{"decision":"send","skip_action":"none",'
+            '"stage":"decision_pending","message":"How did it go?",'
+            '"reason":"departure detected","context_evidence":""}'
+        )
+
+    monkeypatch.setattr(gemini, "safe_gemini_call", lambda prompt: DummyResponse())
+
+    result = bot._build_followup_decision_with_llm(
+        {
+            "topic": "departure",
+            "subject": "stable_location_departure",
+            "source_user_text": "Live location detected departure.",
+        },
+        "User: general unrelated chat",
+        {},
+    )
+
+    assert result["decision"] == "skip"
+    assert result["skip_action"] == "resolve"
+
+
+def test_departure_decision_accepts_verbatim_recent_context_evidence(monkeypatch):
+    import clients.telegram_bot as bot
+    import services.gemini as gemini
+
+    class DummyResponse:
+        text = (
+            '{"decision":"send","skip_action":"none",'
+            '"stage":"decision_pending","message":"Finished at the gym?",'
+            '"reason":"recent activity is still relevant",'
+            '"context_evidence":"went to the gym"}'
+        )
+
+    monkeypatch.setattr(gemini, "safe_gemini_call", lambda prompt: DummyResponse())
+
+    result = bot._build_followup_decision_with_llm(
+        {
+            "topic": "departure",
+            "subject": "stable_location_departure",
+            "source_user_text": "Live location detected departure.",
+        },
+        "User: I went to the gym and will leave soon.",
+        {},
+    )
+
+    assert result["decision"] == "send"
+    assert result["message"] == "Finished at the gym?"
+
+
+def test_departure_skip_resolves_instead_of_deferring(monkeypatch):
+    import clients.telegram_bot as bot
+    import memory.pending_followups as pf
+
+    resolved = []
+    decisions = []
+
+    monkeypatch.setattr(
+        pf,
+        "resolve_followup",
+        lambda followup_id, reason: resolved.append((followup_id, reason)),
+    )
+    monkeypatch.setattr(
+        pf,
+        "_set_followup_decision",
+        lambda followup_id, decision, reason: decisions.append(
+            (followup_id, decision, reason)
+        ),
+    )
+
+    outcome = bot._apply_followup_skip_outcome(
+        {"id": 42, "topic": "departure", "metadata": {}},
+        {
+            "decision": "skip",
+            "skip_action": "defer",
+            "reason": "no verified recent context",
+        },
+    )
+
+    assert outcome == "resolved"
+    assert resolved == [(42, "resolved_by_skip:no verified recent context")]
+    assert decisions == [(42, "resolved", "no verified recent context")]
+
+
+
 def test_next_day_window_never_targets_today_morning():
     from datetime import datetime
     from memory.pending_followups import FOLLOWUP_LOCAL_TZ, normalize_followup_delay
@@ -1654,3 +1956,164 @@ def test_next_day_window_never_targets_today_morning():
     )
 
     assert delay > 20 * 60
+
+def test_next_day_window_without_tomorrow_becomes_after_likely_completion():
+    from datetime import datetime
+    now = datetime(2026, 7, 21, 15, 56, tzinfo=pf.FOLLOWUP_LOCAL_TZ)
+
+    delay = pf.normalize_followup_delay(
+        topic="food_purchase",
+        suggested_minutes=900,
+        source_user_text="που έχει προσφορά το νωπό κοτόπουλο;",
+        target_window="next_day_late_morning",
+        now=now,
+    )
+
+    assert delay == 300
+
+
+def test_fresh_location_departure_evidence_success(monkeypatch, temp_state_db):
+    now = pf._local_now()
+    item = {
+        "id": "fu_test_dep_1",
+        "topic": "departure",
+        "subject": "stable_location_departure",
+        "source_agent": "Location_Event",
+        "followup_after_ts": now.isoformat(),
+    }
+    state_snapshot = {"user_at_work": {"value": "true"}}
+
+    class MockResponse:
+        text = '{"decision": "send", "message": "hello", "context_evidence": ""}'
+
+    monkeypatch.setattr(
+        "services.gemini.safe_gemini_call",
+        lambda prompt: MockResponse(),
+    )
+
+    result = bot._build_followup_decision_with_llm(item, "some context", state_snapshot)
+    assert result["decision"] == "send"
+
+
+def test_fresh_location_departure_evidence_failure_not_at_work(monkeypatch, temp_state_db):
+    now = pf._local_now()
+    item = {
+        "id": "fu_test_dep_2",
+        "topic": "departure",
+        "subject": "stable_location_departure",
+        "source_agent": "Location_Event",
+        "followup_after_ts": now.isoformat(),
+    }
+    state_snapshot = {"user_at_work": {"value": "false"}}
+
+    class MockResponse:
+        text = '{"decision": "send", "message": "hello", "context_evidence": ""}'
+
+    monkeypatch.setattr(
+        "services.gemini.safe_gemini_call",
+        lambda prompt: MockResponse(),
+    )
+
+    result = bot._build_followup_decision_with_llm(item, "some context", state_snapshot)
+    assert result["decision"] == "skip"
+    assert result["skip_action"] == "resolve"
+
+
+def test_fresh_location_departure_evidence_outing_success(monkeypatch, temp_state_db):
+    now = pf._local_now()
+    item = {
+        "id": "fu_test_dep_outing",
+        "topic": "departure",
+        "subject": "stable_location_departure",
+        "source_agent": "Location_Event",
+        "followup_after_ts": now.isoformat(),
+    }
+    state_snapshot = {"user_at_work": {"value": "false"}}
+
+    monkeypatch.setattr(
+        bot,
+        "find_pending_followups",
+        lambda limit=10, active_only=True: [{"topic": "outing"}],
+    )
+
+    class MockResponse:
+        text = '{"decision": "send", "message": "hello", "context_evidence": ""}'
+
+    monkeypatch.setattr(
+        "services.gemini.safe_gemini_call",
+        lambda prompt: MockResponse(),
+    )
+
+    result = bot._build_followup_decision_with_llm(item, "some context", state_snapshot)
+    assert result["decision"] == "send"
+
+
+def test_fresh_location_departure_evidence_rejects_stale_event(
+    monkeypatch,
+    temp_state_db,
+):
+    from datetime import timedelta
+    now = pf._local_now()
+    item = {
+        "id": "fu_test_dep_3",
+        "topic": "departure",
+        "subject": "stable_location_departure",
+        "source_agent": "Location_Event",
+        "followup_after_ts": (
+            now - timedelta(minutes=11)
+        ).isoformat(),
+    }
+    state_snapshot = {"user_at_work": {"value": "true"}}
+
+    class MockResponse:
+        text = '{"decision": "send", "message": "hello", "context_evidence": ""}'
+
+    monkeypatch.setattr(
+        "services.gemini.safe_gemini_call",
+        lambda prompt: MockResponse(),
+    )
+
+    result = bot._build_followup_decision_with_llm(
+        item,
+        "some context",
+        state_snapshot,
+    )
+
+    assert result["decision"] == "skip"
+    assert result["skip_action"] == "resolve"
+
+
+def test_create_pending_followup_from_candidate_food_purchase_window(monkeypatch):
+    now = pf._local_now()
+    now_fixed = now.replace(hour=15, minute=56, second=0, microsecond=0)
+
+    monkeypatch.setattr(pf, "_local_now", lambda: now_fixed)
+
+    created_kwargs = {}
+
+    def mock_create(*args, **kwargs):
+        nonlocal created_kwargs
+        created_kwargs = kwargs
+        return "fu_mocked"
+
+    monkeypatch.setattr(pf, "create_pending_followup", mock_create)
+
+    candidate = {
+        "topic": "food_purchase",
+        "subject": "buy chicken",
+        "delay_minutes": 900,
+        "target_window": "next_day_late_morning",
+        "confidence": 0.8,
+    }
+
+    pf.create_pending_followup_from_candidate(
+        candidate=candidate,
+        source_channel="telegram",
+        source_agent="chat",
+        source_user_text="που έχει προσφορά το νωπό κοτόπουλο;",
+        source_ai_text="Here are the prices.",
+    )
+
+    metadata = created_kwargs.get("metadata", {})
+    assert metadata.get("target_window") == "after_likely_completion"
+    assert metadata.get("delay_minutes_final") == 300

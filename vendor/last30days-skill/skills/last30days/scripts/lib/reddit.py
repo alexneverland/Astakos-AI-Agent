@@ -7,12 +7,15 @@ Requires SCRAPECREATORS_API_KEY in config (same key as TikTok + Instagram).
 API docs: https://scrapecreators.com/docs
 """
 
+import copy
 import math
 import re
 import sys
+import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait as futures_wait
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 
 def _first_of(*values, default=None):
@@ -22,7 +25,7 @@ def _first_of(*values, default=None):
             return v
     return default
 
-from . import dates, http, log
+from . import dates, health, http, log
 
 SCRAPECREATORS_BASE = "https://api.scrapecreators.com/v1/reddit"
 
@@ -76,6 +79,16 @@ NOISE_WORDS = frozenset({
 
 def _log(msg: str):
     log.source_log("Reddit", msg, tty_only=False)
+
+
+def classify_run_failure(detail: str) -> str:
+    """Map Reddit auth and anti-bot responses that do not carry HTTP status."""
+    text = detail.lower()
+    if any(marker in text for marker in ("interstitial", "blocked by reddit", "too many requests")):
+        return health.RATE_LIMITED
+    if any(marker in text for marker in ("login required", "invalid token", "expired token")):
+        return health.AUTH_FAILED
+    return http.classify_failure(message=detail)
 
 
 def _extract_core_subject(topic: str) -> str:
@@ -253,7 +266,7 @@ def _relevance_rank_key(item: Dict[str, Any]) -> float:
     ~0) above an on-topic one (relevance >= RELEVANCE_FLOOR).
     """
     rel = item.get("relevance") or 0.0
-    eng_bonus = min(0.25, math.log10(_total_engagement(item) + 1) / 20.0)
+    eng_bonus = min(0.25, math.log10(max(0, _total_engagement(item)) + 1) / 20.0)
     return rel + eng_bonus
 
 
@@ -443,6 +456,54 @@ def _dedupe_posts(posts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return unique
 
 
+_TIMEFRAME_ORDER = {"hour": 0, "day": 1, "week": 2, "month": 3, "year": 4, "all": 5}
+
+
+def _days_to_reddit_bucket(days: float) -> str:
+    """Map a day count onto the smallest Reddit rolling bucket that covers it.
+
+    Adds one day of slack so calendar windows that cross a day boundary still
+    fit inside Reddit's rolling ``t=`` buckets (a yesterday→today request needs
+    ``week``, not ``day``).
+    """
+    covered = days + 1
+    if covered <= 1:
+        return "day"
+    if covered <= 7:
+        return "week"
+    if covered <= 31:
+        return "month"
+    if covered <= 366:
+        return "year"
+    return "all"
+
+
+def _window_to_time_filter(from_date: str, to_date: str) -> str:
+    """Map a requested YYYY-MM-DD window onto Reddit's coarse `t` param.
+
+    Reddit's ``t=day|week|month`` buckets are rolling windows ending *now*, not
+    calendar spans and not anchored to ``to_date``. Coverage therefore needs:
+
+    1. Span — a yesterday→today request needs more than rolling ``t=day``.
+    2. Historical reach — a one-day request ending two weeks ago still needs a
+       bucket that reaches ``from_date``; span-alone would pick ``week`` and
+       the API would omit the entire requested range.
+
+    Take the wider of the two; the caller then mins with the depth default.
+    Phase 5 still trims to ``from_date``/``to_date``. Falls back to ``month``
+    if the dates don't parse.
+    """
+    try:
+        start = date.fromisoformat(from_date)
+        end = date.fromisoformat(to_date)
+    except (ValueError, TypeError):
+        return "month"
+    span_days = max(0, (end - start).days)
+    # Age of from_date relative to "today" — Reddit always anchors to now.
+    age_days = max(0, (datetime.now(timezone.utc).date() - start).days)
+    return _days_to_reddit_bucket(max(span_days, age_days))
+
+
 def search_reddit(
     topic: str,
     from_date: str,
@@ -470,7 +531,13 @@ def search_reddit(
         return {"items": [], "error": "No SCRAPECREATORS_API_KEY configured"}
 
     config = DEPTH_CONFIG.get(depth, DEPTH_CONFIG["default"])
-    timeframe = config["timeframe"]
+    # Fetch window must track the requested date range, not just the depth
+    # default. Otherwise a --days 1 request fetches a month of relevance-
+    # sorted posts and Phase 5 discards everything outside 24h (0 on quiet
+    # days). Use the tighter of {window-derived, depth default}.
+    _depth_tf = config["timeframe"]
+    _window_tf = _window_to_time_filter(from_date, to_date)
+    timeframe = _window_tf if _TIMEFRAME_ORDER.get(_window_tf, 3) <= _TIMEFRAME_ORDER.get(_depth_tf, 3) else _depth_tf
     intent = infer_query_intent(topic)
 
     # === Phase 1: Query Expansion ===
@@ -487,7 +554,9 @@ def search_reddit(
         with ThreadPoolExecutor(max_workers=min(5, len(subreddits))) as executor:
             futures = {}
             for sub in subreddits:
-                futures[executor.submit(_subreddit_search, sub, core, token, "relevance", timeframe)] = sub
+                futures[http.submit_with_context(
+                    executor, _subreddit_search, sub, core, token, "relevance", timeframe,
+                )] = sub
             for future in as_completed(futures):
                 sub = futures[future]
                 sub_posts = future.result()
@@ -506,7 +575,9 @@ def search_reddit(
             # from relevant communities instead of keyword-matched noise.
             sort = "top" if intent in ("product", "comparison") else ("relevance" if i == 0 else "top")
             _log(f"Global search {i+1}/{max_global}: '{query}' (sort={sort})")
-            futures[executor.submit(_global_search, query, token, sort, timeframe)] = query
+            futures[http.submit_with_context(
+                executor, _global_search, query, token, sort, timeframe,
+            )] = query
         for future in as_completed(futures):
             query = futures[future]
             posts = future.result()
@@ -529,7 +600,9 @@ def search_reddit(
             futures = {}
             for sub in discovered_subs[:subreddit_limit]:
                 _log(f"Subreddit search: r/{sub} for '{core}'")
-                futures[executor.submit(_subreddit_search, sub, core, token, "relevance", timeframe)] = sub
+                futures[http.submit_with_context(
+                    executor, _subreddit_search, sub, core, token, "relevance", timeframe,
+                )] = sub
             for future in as_completed(futures):
                 sub = futures[future]
                 sub_posts = future.result()
@@ -622,7 +695,9 @@ def enrich_with_comments(
 
     with ThreadPoolExecutor(max_workers=min(4, len(top_items))) as executor:
         futures = {
-            executor.submit(fetch_post_comments, item.get("url", ""), token): item
+            http.submit_with_context(
+                executor, fetch_post_comments, item.get("url", ""), token,
+            ): item
             for item in top_items
             if item.get("url")
         }
@@ -721,6 +796,87 @@ def search_and_enrich(
         result["items"] = items
 
     return result
+
+
+# Run-scoped memo for the paid ScrapeCreators Reddit call (R9). All subquery
+# streams share the raw topic, and the thin-source retry repeats it, so without
+# this one run could pay for the same query five times. Concurrent callers for
+# one key wait on the first call; results AND failures are kept until the
+# per-command reset, so a failed backfill is never retried within the run.
+_SC_MEMO: Dict[tuple, tuple] = {}
+_SC_INFLIGHT: Dict[tuple, threading.Event] = {}
+_SC_MEMO_LOCK = threading.Lock()
+
+
+def reset_scrapecreators_memo() -> None:
+    """Forget memoized ScrapeCreators Reddit calls. Called once per command, and by tests."""
+    with _SC_MEMO_LOCK:
+        _SC_MEMO.clear()
+        _SC_INFLIGHT.clear()
+
+
+def _sc_memo_outcome(entry: tuple, replay_failures: bool = True) -> Dict[str, Any]:
+    ok, value, failures = entry
+    if replay_failures:
+        # search_and_enrich swallows ScrapeCreators HTTP errors into the
+        # caller's failure sink; a later caller must see them too, or an
+        # empty cached result reads as a clean no-results.
+        for failure in failures:
+            http._record_failure(failure)
+    if not ok:
+        raise value
+    # Each caller gets its own copy so one stream cannot mutate another's items.
+    return copy.deepcopy(value)
+
+
+def search_and_enrich_memo(
+    topic: str,
+    from_date: str,
+    to_date: str,
+    depth: str = "default",
+    token: str = None,
+    subreddits: List[str] | None = None,
+) -> Dict[str, Any]:
+    """:func:`search_and_enrich`, at most once per key per command.
+
+    Keyed by query, date window, depth, and sorted subreddits.
+    """
+    key = (topic, from_date, to_date, depth, tuple(sorted(subreddits or ())))
+    while True:
+        with _SC_MEMO_LOCK:
+            entry = _SC_MEMO.get(key)
+            if entry is None:
+                gate = _SC_INFLIGHT.get(key)
+                owner = gate is None
+                if owner:
+                    gate = threading.Event()
+                    _SC_INFLIGHT[key] = gate
+        if entry is not None:
+            return _sc_memo_outcome(entry)
+        if owner:
+            break
+        gate.wait()
+        # Loop: read the owner's cached outcome, or re-elect if it was
+        # interrupted before caching one (e.g. KeyboardInterrupt).
+    try:
+        with http.tee_failures() as recorded:
+            try:
+                result = search_and_enrich(
+                    topic, from_date, to_date, depth=depth, token=token,
+                    subreddits=subreddits,
+                )
+                outcome = (True, result)
+            except Exception as exc:
+                outcome = (False, exc)
+        entry = (*outcome, list(recorded))
+        with _SC_MEMO_LOCK:
+            _SC_MEMO[key] = entry
+    finally:
+        with _SC_MEMO_LOCK:
+            _SC_INFLIGHT.pop(key, None)
+        gate.set()
+    # The owner's failures already reached its own sink through tee_failures.
+    return _sc_memo_outcome(entry, replay_failures=False)
 
 
 def parse_reddit_response(response: Dict[str, Any]) -> List[Dict[str, Any]]:

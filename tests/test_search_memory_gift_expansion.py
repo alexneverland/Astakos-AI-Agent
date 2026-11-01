@@ -14,6 +14,10 @@ class _VectorStore:
         self.calls.append({"query": query, "k": k, "filter": filter})
         return self.results
 
+    def similarity_search_by_vector(self, embedding, k=6, filter=None):
+        self.calls.append({"query": embedding, "k": k, "filter": filter})
+        return self.results
+
     def query(self, **kwargs):
         return {"ids": [[]]}
 
@@ -58,7 +62,7 @@ def test_search_memory_expands_gift_queries_without_hardcoded_product(monkeypatc
 
     monkeypatch.setattr(context_builder, "temporal_history_for_query", fake_history)
     monkeypatch.setattr(system, "vector_lock", _Lock())
-    monkeypatch.setattr(system, "vector_store", store)
+    monkeypatch.setattr(system.vector_memory, "vector_store", store)
 
     result = system.search_memory.func("Θυμάσαι δώρο για τα γενέθλια της Partnerς;")
 

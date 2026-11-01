@@ -40,6 +40,15 @@ def test_embed_query_dimensions(embeddings):
     assert len(vec) == 768
 
 
+def test_vertex_provider_uses_the_independent_embeddings_resolver(embeddings):
+    """Default Vertex deployments keep Vertex as their semantic-memory backend."""
+    from core.ai_provider import VertexAIAdapter
+    from services.embeddings import ProviderEmbeddings
+
+    assert isinstance(embeddings.base, ProviderEmbeddings)
+    assert isinstance(embeddings.base._get_adapter(), VertexAIAdapter)
+
+
 def test_similar_phrases_high_similarity(embeddings):
     """Similar phrases → similarity > 0.8."""
     v1 = embeddings.embed_query("ο Αλεξανδρος παει σχολειο")
