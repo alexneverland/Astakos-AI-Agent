@@ -1,4 +1,4 @@
-name: Verify upgraded Actions without publication
+name: Verify upgraded Actions natively on ARM64 without publication
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ permissions:
 jobs:
   compatibility:
     if: github.ref == 'refs/heads/codex/actions-compatibility-smoke'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     steps:
       - name: Check out repository
@@ -63,7 +63,7 @@ jobs:
           file: ./Dockerfile.release
           load: true
           push: false
-          platforms: linux/amd64
+          platforms: linux/arm64
           tags: astakos-release-smoke:latest
 
       - name: Smoke test API import inside release image
@@ -77,13 +77,3 @@ jobs:
             astakos-release-smoke:latest \
             -lc "printf '{}' > /tmp/fake-vertex.json && cd /opt/astakos && python -c 'import api.server; print(\"release-smoke-ok\")'"
 
-      - name: Build both release platforms without publishing
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile.release
-          push: false
-          outputs: type=cacheonly
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
