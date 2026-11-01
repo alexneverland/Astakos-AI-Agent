@@ -29,6 +29,32 @@ def test_append_message_stores_channel_timestamp_and_session(tmp_path):
     assert messages[0]["metadata"] == {"source": "test"}
 
 
+def test_deduplication_keeps_external_provenance_distinct(tmp_path) -> None:
+    """Ensure a provenance-marked reply is not discarded as an ordinary duplicate."""
+    from memory.conversation_history import append_message, load_messages
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(
+        role="assistant",
+        content="The deadline is Friday.",
+        channel="web",
+        db_path=db_path,
+    )
+    append_message(
+        role="assistant",
+        content="The deadline is Friday.",
+        channel="web",
+        metadata={"untrusted_external_tool_names": ["drive_manager"]},
+        db_path=db_path,
+    )
+
+    messages = load_messages(channel="web", db_path=db_path)
+    assert len(messages) == 2
+    assert messages[-1]["metadata"] == {
+        "untrusted_external_tool_names": ["drive_manager"]
+    }
+
+
 def test_load_messages_can_filter_by_channel_and_session(tmp_path):
     from memory.conversation_history import append_message, load_messages
 
@@ -63,6 +89,46 @@ def test_load_messages_can_filter_by_channel_and_session(tmp_path):
 
     s1_messages = load_messages(session_id="s1", db_path=db_path)
     assert [m["content"] for m in s1_messages] == ["web first", "telegram second"]
+
+
+
+def test_load_recent_trusted_user_messages_skips_external_rows_before_limit(tmp_path):
+    from memory.conversation_history import (
+        append_message,
+        load_recent_trusted_user_messages,
+    )
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(
+        role="user",
+        content="old-session antecedent",
+        channel="telegram",
+        session_id="2026-05-01",
+        timestamp=datetime(2026, 5, 1, 10, 0),
+        db_path=db_path,
+    )
+    for minute, content, metadata in (
+        (0, "trusted antecedent", {}),
+        (1, "external upload one", {"untrusted_external_tool_names": ["user_provided_asset"]}),
+        (2, "external upload two", {"untrusted_external_tool_names": ["user_provided_asset"]}),
+        (3, "current message", {}),
+    ):
+        append_message(
+            role="user",
+            content=content,
+            channel="telegram",
+            metadata=metadata,
+            timestamp=datetime(2026, 6, 4, 10, minute),
+            db_path=db_path,
+        )
+
+    messages = load_recent_trusted_user_messages(
+        channel="telegram", limit=2, session_id="2026-06-04", db_path=db_path
+    )
+    assert [message["content"] for message in messages] == [
+        "trusted antecedent",
+        "current message",
+    ]
 
 
 def test_load_messages_returns_recent_entries_in_chronological_order(tmp_path):
@@ -219,6 +285,57 @@ def test_load_recent_context_deduplicates_overlap(tmp_path):
     )
 
     assert [m["content"] for m in messages] == ["web only once"]
+
+
+def test_load_recent_context_includes_all_channels_for_web_and_telegram(tmp_path):
+    from memory.conversation_history import append_message, load_recent_context
+
+    db_path = str(tmp_path / "conversation.db")
+    for channel, content in (
+        ("web", "web question"),
+        ("matrix", "element answer"),
+        ("telegram", "telegram follow-up"),
+    ):
+        append_message(role="user", content=content, channel=channel, db_path=db_path)
+
+    for channel in ("web", "telegram"):
+        messages = load_recent_context(
+            channel=channel, global_limit=3, channel_limit=3, db_path=db_path
+        )
+        assert [(item["channel"], item["content"]) for item in messages] == [
+            ("web", "web question"),
+            ("matrix", "element answer"),
+            ("telegram", "telegram follow-up"),
+        ]
+
+
+def test_load_recent_context_can_be_strictly_channel_scoped(tmp_path):
+    from memory.conversation_history import append_message, load_recent_context
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(role="user", content="web secret", channel="web", db_path=db_path)
+    append_message(
+        role="user",
+        content="telegram secret",
+        channel="telegram",
+        db_path=db_path,
+    )
+    append_message(
+        role="user",
+        content="matrix context",
+        channel="matrix",
+        db_path=db_path,
+    )
+
+    messages = load_recent_context(
+        channel="matrix",
+        channel_limit=10,
+        total_limit=10,
+        same_channel_only=True,
+        db_path=db_path,
+    )
+
+    assert [message["content"] for message in messages] == ["matrix context"]
 
 
 def test_purge_history_by_substrings_removes_matching_messages_and_exchanges(tmp_path):
@@ -450,3 +567,93 @@ def test_backfill_legacy_history_counts_inserted_skipped_and_empty(tmp_path):
     assert first == {"total": 3, "inserted": 2, "skipped": 0, "empty": 1}
     assert second == {"total": 3, "inserted": 0, "skipped": 2, "empty": 1}
     assert [m["content"] for m in load_messages(db_path=db_path)] == ["web user", "web assistant"]
+
+
+def test_conversation_history_deterministic_ordering(tmp_path):
+    from memory.conversation_history import append_message, load_messages, load_recent_context, load_messages_since, load_last_user_activity
+    from core.capability_draft import has_capability_draft_authorization
+    from langchain_core.messages import HumanMessage, AIMessage
+    from core.i18n import t
+
+    db_path = str(tmp_path / "conversation.db")
+    fixed_ts = datetime(2026, 7, 25, 16, 3, 0)
+    proposal_prefix = t("core.approval.capability_proposal_prefix")
+    draft_marker = t("core.approval.draft_markers")[0]
+
+    # 1. Append user message
+    append_message(
+        role="user",
+        content="user turn 1",
+        channel="telegram",
+        timestamp=fixed_ts,
+        db_path=db_path,
+    )
+
+    # 2. Append assistant proposal with exactly the same datetime
+    append_message(
+        role="assistant",
+        content=f"{proposal_prefix} δημιουργία draft...",
+        channel="telegram",
+        timestamp=fixed_ts,
+        db_path=db_path,
+    )
+
+    # Assert load_messages returns user then assistant
+    msgs = load_messages(db_path=db_path)
+    assert len(msgs) >= 2
+    assert msgs[-2]["role"] == "user"
+    assert msgs[-1]["role"] == "assistant"
+
+    # Assert load_recent_context preserves the same order
+    recent = load_recent_context(channel="telegram", db_path=db_path)
+    assert len(recent) >= 2
+    assert recent[-2]["role"] == "user"
+    assert recent[-1]["role"] == "assistant"
+
+    # Assert load_messages_since returns chronological insertion order, user then assistant
+    since = load_messages_since(since_date="2026-07-25", db_path=db_path)
+    assert len(since) >= 2
+    assert since[-2]["role"] == "user"
+    assert since[-1]["role"] == "assistant"
+
+    # 3. Assert this ordering forms a valid sequence for has_capability_draft_authorization
+    # Recreate the state that supervisor_node sees
+    langchain_msgs = []
+    for r in recent:
+        if r["role"] == "user":
+            langchain_msgs.append(HumanMessage(content=f"[{r['date']} {r['time']} / {r['channel']}] {r['content']}"))
+        else:
+            langchain_msgs.append(AIMessage(content=f"[{r['date']} {r['time']} / {r['channel']}] {r['content']}"))
+
+    # And then we append the new Turn 2 user message with timestamp prefix
+    langchain_msgs.append(HumanMessage(content=f"[16:05] {draft_marker}"))
+
+    state = {"messages": langchain_msgs}
+    assert has_capability_draft_authorization(state) is True
+
+    # Assert load_last_user_activity chooses the later inserted user when two user messages share the exact same timestamp
+    append_message(
+        role="user",
+        content="user turn 2",
+        channel="telegram",
+        timestamp=fixed_ts,
+        db_path=db_path,
+    )
+    last_user = load_last_user_activity(channel="telegram", db_path=db_path)
+    assert last_user["content"] == "user turn 2"
+
+
+def test_web_and_telegram_context_includes_matrix_history(tmp_path) -> None:
+    """Both callers can continue a conversation started in Element."""
+    from memory.conversation_history import append_message, load_recent_context
+
+    db_path = str(tmp_path / "conversation.db")
+    append_message(role="user", content="web context", channel="web", db_path=db_path)
+    append_message(role="user", content="matrix context", channel="matrix", db_path=db_path)
+    append_message(role="user", content="telegram context", channel="telegram", db_path=db_path)
+
+    web = load_recent_context(channel="web", db_path=db_path)
+    telegram = load_recent_context(channel="telegram", db_path=db_path)
+
+    assert {item["content"] for item in web} == {"web context", "matrix context", "telegram context"}
+    assert {item["content"] for item in telegram} == {"web context", "matrix context", "telegram context"}

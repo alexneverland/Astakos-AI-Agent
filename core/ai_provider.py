@@ -1,0 +1,1577 @@
+# ================================================================
+# Project: Astakos AI Agent 🦞
+# Module:  Core AI Provider Adapter Contract & Implementations
+# Description: Central provider capability abstraction layer
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
+# ================================================================
+
+from __future__ import annotations
+
+from services.turn_timing import trace_provider_operation
+
+import base64
+import hashlib
+import logging
+import os
+from abc import ABC, abstractmethod
+from typing import Any, Protocol, Sequence
+
+import config
+
+logger = logging.getLogger(__name__)
+
+
+# ────────────────────────────────────────────────────────────────
+# 1. SHARED MODEL & SAFETY RESOLUTION (Single Source of Truth)
+# ────────────────────────────────────────────────────────────────
+
+DEFAULT_GEMINI_FAST_MODEL = "gemini-3.5-flash"
+DEFAULT_GEMINI_HEAVY_MODEL = "gemini-3.1-pro-preview"
+DEFAULT_GEMINI_TRANSCRIPTION_MODEL = "gemini-3.5-transcribe"
+DEFAULT_VERTEX_TRANSCRIPTION_MODEL = "gemini-3.5-transcribe-preview"
+DEFAULT_VERTEX_EMBEDDING_MODEL = "text-embedding-004"
+DEFAULT_GEMINI_EMBEDDING_MODEL = "models/text-embedding-004"
+DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_LOCAL_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
+DEFAULT_OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+DEFAULT_GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview"
+DEFAULT_GOOGLE_IMAGE_MODEL = "gemini-3.1-flash-image"
+VERTEX_OAUTH_SCOPES: tuple[str, ...] = ("https://www.googleapis.com/auth/cloud-platform",)
+TRANSCRIPTION_LANGUAGE_CODES_BY_LOCALE: dict[str, tuple[str, ...]] = {
+    "el": ("el-GR",),
+    "en": ("en-US",),
+}
+TTS_LANGUAGE_BY_LOCALE: dict[str, tuple[str, str]] = {
+    "el": ("Greek", "el-GR"),
+    "en": ("English", "en-US"),
+}
+AUDIO_TRANSCRIPTION_PROMPT = (
+    "You are exclusively a speech-to-text tool. Transcribe only the spoken audio "
+    "accurately and verbatim, without commentary or a reply. If no intelligible "
+    "speech is audible, return exactly: [ΣΙΩΠΗ]."
+)
+
+
+def _extract_google_image_bytes(response: Any, provider: str) -> bytes:
+    """Extract the first inline image returned by a Gemini image model."""
+    parts = getattr(response, "parts", None)
+    if parts is None:
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            content = getattr(candidates[0], "content", None)
+            parts = getattr(content, "parts", None)
+
+    for part in parts or []:
+        inline_data = getattr(part, "inline_data", None)
+        data = getattr(inline_data, "data", None)
+        if isinstance(data, str):
+            return base64.b64decode(data)
+        if data:
+            return bytes(data)
+
+    raise AIProviderError(
+        "Gemini image model returned no image data.",
+        provider=provider,
+    )
+
+
+def normalize_provider_text_content(content: Any) -> str:
+    """Extract user-facing text from scalar or multimodal provider content."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, dict):
+        return str(content.get("text") or "").strip()
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                text_parts.append(item)
+            elif isinstance(item, dict) and item.get("text"):
+                text_parts.append(str(item["text"]))
+        return " ".join(text_parts).strip()
+    return str(content).strip()
+
+
+def _get_transcription_hints() -> tuple[list[str], list[str]]:
+    """Return bounded Gemini STT hints ordered by Astakos' active locale."""
+    from core.i18n import LANG
+
+    language_codes = TRANSCRIPTION_LANGUAGE_CODES_BY_LOCALE.get(
+        LANG,
+        TRANSCRIPTION_LANGUAGE_CODES_BY_LOCALE["en"],
+    )
+    wake_name = str(
+        getattr(config, "VOICE_WAKE_NAME", "")
+        or getattr(config, "BOT_NAME", "Astakos")
+    ).strip()
+    return list(language_codes), [wake_name] if wake_name else []
+
+
+def _is_model_unavailable_error(err_str: str) -> bool:
+    """Determine whether an error string represents an explicit model-absence condition.
+
+    Matches HTTP 404, NOT_FOUND, publisher model not found, unknown model,
+    or explicit model unavailable / not supported indicators.
+    """
+    return (
+        "404" in err_str
+        or "not_found" in err_str
+        or "not found" in err_str
+        or "publisher model" in err_str
+        or "unknown model" in err_str
+        or "does not exist" in err_str
+        or ("model" in err_str and ("not found" in err_str or "not available" in err_str or "unavailable" in err_str or "not supported" in err_str))
+    )
+
+
+def google_model_from_environment(variable_name: str, default_model: str, emit_warning: bool = False) -> str:
+    """Return an optional Google-model override, surfacing active overrides at startup if requested."""
+    configured_model = os.getenv(variable_name, "").strip()
+    if not configured_model:
+        return default_model
+    if emit_warning and configured_model != default_model:
+        print(
+            "\033[93m[Brain]: Google model override active "
+            f"({variable_name}={configured_model!r}; default={default_model!r}). "
+            "Verify that the configured Gemini model is available.\033[0m",
+        )
+    return configured_model
+
+
+def resolve_provider_models(
+    provider_name: str,
+    fast_override: str | None = None,
+    heavy_override: str | None = None,
+    emit_warnings: bool = False,
+) -> tuple[str, str]:
+    """Return (fast_model, heavy_model) for the given provider without hardcoded divergence."""
+    provider = (provider_name or "").strip().lower()
+    if provider == "openai":
+        return (fast_override or "gpt-4o-mini", heavy_override or "gpt-4o")
+    elif provider == "anthropic":
+        return (fast_override or "claude-3-5-haiku-latest", heavy_override or "claude-3-5-sonnet-latest")
+    elif provider in ("gemini", "vertex"):
+        fast = fast_override or google_model_from_environment(
+            "ASTAKOS_GEMINI_FAST_MODEL", DEFAULT_GEMINI_FAST_MODEL, emit_warning=emit_warnings
+        )
+        heavy = heavy_override or google_model_from_environment(
+            "ASTAKOS_GEMINI_HEAVY_MODEL", DEFAULT_GEMINI_HEAVY_MODEL, emit_warning=emit_warnings
+        )
+        return (fast, heavy)
+    return (fast_override or "fast-model", heavy_override or "heavy-model")
+
+
+def resolve_vertex_location(location: str | None = None) -> str:
+    """Return the legacy Vertex location, allowing an explicit adapter override."""
+    return os.getenv("LOCATION", "global") if location is None else location
+
+
+def find_offline_adc_credentials_path() -> str | None:
+    """
+    Discovers standard local Application Default Credentials (ADC) file path without network calls.
+    Returns path if file exists on disk, otherwise None.
+    """
+    gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if gac and os.path.exists(gac):
+        return gac
+
+    if os.name == "nt":
+        app_data = os.environ.get("APPDATA")
+        if app_data:
+            win_adc = os.path.join(app_data, "gcloud", "application_default_credentials.json")
+            if os.path.exists(win_adc):
+                return win_adc
+    else:
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config:
+            xdg_adc = os.path.join(xdg_config, "gcloud", "application_default_credentials.json")
+            if os.path.exists(xdg_adc):
+                return xdg_adc
+        unix_adc = os.path.expanduser("~/.config/gcloud/application_default_credentials.json")
+        if os.path.exists(unix_adc):
+            return unix_adc
+
+    return None
+
+
+def resolve_vertex_credentials_path(explicit_path: str | None = None) -> str:
+    """Discovers configured Vertex AI credentials file path without mutating environment."""
+    if explicit_path and os.path.exists(explicit_path):
+        return explicit_path
+    env_cred = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if env_cred and os.path.exists(env_cred):
+        return env_cred
+    config_cred = getattr(config, "CREDENTIALS_PATH", "")
+    if config_cred and os.path.exists(config_cred):
+        return config_cred
+    base_dir = getattr(config, "BASE_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    root_cred = os.path.join(base_dir, "credentials.json")
+    if os.path.exists(root_cred):
+        return root_cred
+    nested_cred = os.path.join(base_dir, "credentials", "credentials.json")
+    if os.path.exists(nested_cred):
+        return nested_cred
+    adc_path = find_offline_adc_credentials_path()
+    if adc_path and os.path.exists(adc_path):
+        return adc_path
+    return ""
+
+
+def get_vertex_credentials(credentials_path: str | None = None) -> Any:
+    """
+    Loads Google auth credentials for Vertex AI if a credentials file is configured or discovered.
+    Explicit service-account credentials are scoped with VERTEX_OAUTH_SCOPES ('https://www.googleapis.com/auth/cloud-platform').
+    Returns google.auth.credentials.Credentials or None.
+    """
+    import json
+    cred_file = resolve_vertex_credentials_path(credentials_path)
+    if cred_file and os.path.exists(cred_file):
+        try:
+            with open(cred_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                cred_type = data.get("type")
+                if cred_type == "service_account":
+                    from google.oauth2 import service_account
+                    return service_account.Credentials.from_service_account_info(
+                        data,
+                        scopes=list(VERTEX_OAUTH_SCOPES),
+                    )
+                elif cred_type == "authorized_user":
+                    from google.oauth2 import credentials as user_credentials
+                    return user_credentials.Credentials.from_authorized_user_info(data)
+        except Exception:
+            pass
+    return None
+
+
+def resolve_vertex_project_id(explicit_project: str | None = None, cred_file: str | None = None) -> str:
+    """
+    Resolves the Google Cloud project ID for Vertex AI.
+    Prefers explicit_project or configured PROJECT_ID. If configured PROJECT_ID is empty
+    or the default placeholder 'your-gcp-project-id', falls back to discovering the project ID
+    from configured/ambient credentials files.
+    """
+    import json
+    # 1. Explicit project if non-placeholder and non-empty
+    if explicit_project and explicit_project.strip().lower() != "your-gcp-project-id":
+        return explicit_project.strip()
+
+    # 2. Configured PROJECT_ID or env PROJECT_ID if non-placeholder and non-empty
+    proj = (getattr(config, "PROJECT_ID", "") or os.environ.get("PROJECT_ID", "")).strip()
+    if proj and proj.lower() != "your-gcp-project-id":
+        return proj
+
+    # 3. Fallback to credentials JSON (service account project_id or ADC quota_project_id)
+    target_cred = resolve_vertex_credentials_path(cred_file)
+    if target_cred and os.path.exists(target_cred):
+        try:
+            with open(target_cred, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                discovered = (data.get("project_id") or data.get("quota_project_id") or "").strip()
+                if discovered and discovered.lower() != "your-gcp-project-id":
+                    return discovered
+        except Exception:
+            pass
+
+    return "your-gcp-project-id"
+
+
+
+
+def normalize_embedding_texts(texts: str | Sequence[str]) -> list[str]:
+    """Normalize one text or a sequence of texts into provider-safe embedding input."""
+    normalized = [texts] if isinstance(texts, str) else list(texts)
+    if not all(isinstance(text, str) for text in normalized):
+        raise TypeError("Embedding input must contain only strings.")
+    return normalized
+
+
+def resolve_gemini_safety_threshold() -> Any:
+    """Return the configured HarmBlockThreshold, defaulting to BLOCK_NONE."""
+    from langchain_google_genai import HarmBlockThreshold
+    raw = os.getenv("ASTAKOS_GEMINI_SAFETY_THRESHOLD", "").strip().upper()
+    if not raw:
+        return HarmBlockThreshold.BLOCK_NONE
+    mapping = {
+        "BLOCK_NONE": HarmBlockThreshold.BLOCK_NONE,
+        "BLOCK_ONLY_HIGH": HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        "BLOCK_MEDIUM_AND_ABOVE": HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        "BLOCK_LOW_AND_ABOVE": HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+    }
+    if raw in mapping:
+        if raw != "BLOCK_NONE":
+            print(f"\033[93m[Brain]: Gemini safety threshold active ({raw}).\033[0m")
+        return mapping[raw]
+    print(
+        f"\033[93m[Brain]: Unknown safety threshold {raw!r}, falling back to BLOCK_NONE.\033[0m"
+    )
+    return HarmBlockThreshold.BLOCK_NONE
+
+
+def get_gemini_safety_settings() -> dict[Any, Any]:
+    """Return the dictionary of safety categories mapped to the resolved threshold."""
+    from langchain_google_genai import HarmCategory
+    threshold = resolve_gemini_safety_threshold()
+    return {
+        HarmCategory.HARM_CATEGORY_HARASSMENT:         threshold,
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH:        threshold,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT:  threshold,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT:  threshold,
+        HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY:    threshold,
+    }
+
+
+# ────────────────────────────────────────────────────────────────
+# 2. TYPED EXCEPTIONS & ERROR TAXONOMY
+# ────────────────────────────────────────────────────────────────
+
+class AIProviderError(Exception):
+    """Base exception for all AI provider operations."""
+
+    def __init__(self, message: str, provider: str | None = None, original_error: Exception | None = None):
+        self.provider = provider or "unknown"
+        self.original_error = original_error
+        super().__init__(message)
+
+
+class CapabilityNotSupportedError(AIProviderError):
+    """Raised when an operation is not supported by the active provider."""
+
+    def __init__(self, provider: str, capability: str, message: str | None = None):
+        self.capability = capability
+        self.user_message = message or f"Capability '{capability}' is not supported by provider '{provider}'."
+        super().__init__(self.user_message, provider=provider)
+
+
+class ProviderAuthError(AIProviderError):
+    """Raised when authentication with the provider fails."""
+
+    def __init__(self, provider: str, message: str | None = None, original_error: Exception | None = None):
+        user_msg = message or f"Authentication failed for provider '{provider}'. Please verify your credentials."
+        super().__init__(user_msg, provider=provider, original_error=original_error)
+
+
+class RateLimitError(AIProviderError):
+    """Raised when rate limits or quotas are exceeded."""
+
+    def __init__(self, provider: str, message: str | None = None, retry_after: float | None = None, original_error: Exception | None = None):
+        self.retry_after = retry_after
+        user_msg = message or f"Rate limit or quota exceeded for provider '{provider}'."
+        super().__init__(user_msg, provider=provider, original_error=original_error)
+
+
+class EmbeddingsProviderSetupRequired(AIProviderError):
+    """Raised when semantic memory has no explicitly usable embeddings backend."""
+
+
+class VoiceProviderSetupRequired(AIProviderError):
+    """Raised when speech needs a separately configured provider or credential."""
+
+
+class EmbeddingsAdapter(Protocol):
+    """Minimal contract required by the semantic-memory embeddings layer."""
+
+    provider_name: str
+
+    def embed_text(
+        self,
+        texts: str | Sequence[str],
+        is_query: bool = False,
+    ) -> list[list[float]]:
+        """Generate dense vector embeddings for texts."""
+
+
+# ────────────────────────────────────────────────────────────────
+# 3. ABSTRACT BASE ADAPTER CONTRACT
+# ────────────────────────────────────────────────────────────────
+
+class AIProviderAdapter(ABC):
+    """Abstract interface defining the standard provider operations."""
+
+    provider_name: str = "base"
+    supported_capabilities: set[str] = set()
+
+    def is_capability_supported(self, capability: str) -> bool:
+        """Return True if the capability is natively supported by this adapter."""
+        return capability in self.supported_capabilities
+
+    @abstractmethod
+    def generate_text(
+        self,
+        prompt: str,
+        model_type: str = "fast",
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        """Generate text response from the provider."""
+
+    @abstractmethod
+    def analyze_vision(
+        self,
+        prompt: str,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg",
+    ) -> str:
+        """Analyze an image with multimodal prompt."""
+
+    @abstractmethod
+    def transcribe_audio(
+        self,
+        audio_bytes: bytes,
+        mime_type: str = "audio/ogg",
+    ) -> str:
+        """Transcribe speech audio bytes to text."""
+
+    def synthesize_speech(self, text: str, locale: str) -> bytes:
+        """Generate MP3 speech or report that the provider lacks native TTS."""
+        raise CapabilityNotSupportedError(
+            provider=self.provider_name,
+            capability="audio_tts",
+            message=f"Speech synthesis is not supported by provider '{self.provider_name}'.",
+        )
+
+    @abstractmethod
+    def generate_image(
+        self,
+        prompt: str,
+        aspect_ratio: str = "1:1",
+    ) -> bytes:
+        """Generate an image and return raw image bytes."""
+
+    @abstractmethod
+    def embed_text(
+        self,
+        texts: str | Sequence[str],
+        is_query: bool = False,
+    ) -> list[list[float]]:
+        """Generate dense vector embeddings for texts."""
+
+
+# ────────────────────────────────────────────────────────────────
+# 4. CONCRETE PROVIDER ADAPTERS
+# ────────────────────────────────────────────────────────────────
+
+class OpenAIAdapter(AIProviderAdapter):
+    """Adapter for OpenAI (GPT-4o, Whisper, DALL-E, Embeddings)."""
+
+    provider_name = "openai"
+    supported_capabilities = {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}
+
+    def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
+        self.api_key = getattr(config, "OPENAI_API_KEY", "") if api_key is None else api_key
+        self.fast_model, self.heavy_model = resolve_provider_models("openai", fast_model, heavy_model)
+        self.embedding_model = DEFAULT_OPENAI_EMBEDDING_MODEL
+
+    def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
+        if not self.api_key:
+            raise ProviderAuthError("openai", "OPENAI_API_KEY is not configured.")
+        from langchain_openai import ChatOpenAI
+        model = self.heavy_model if model_type == "heavy" else self.fast_model
+        temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
+        return ChatOpenAI(model=model, temperature=temp, api_key=self.api_key)
+
+    def _get_openai_client(self):
+        """Return the native OpenAI client using this adapter's credential."""
+        if not self.api_key:
+            raise ProviderAuthError("openai", "OPENAI_API_KEY is not configured.")
+        from openai import OpenAI
+
+        return OpenAI(api_key=self.api_key)
+
+    @trace_provider_operation
+    def generate_text(
+        self,
+        prompt: str,
+        model_type: str = "fast",
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        try:
+            llm = self._get_llm(model_type=model_type, temperature=temperature)
+            messages = []
+            if system_prompt:
+                from langchain_core.messages import SystemMessage
+                messages.append(SystemMessage(content=system_prompt))
+            from langchain_core.messages import HumanMessage
+            messages.append(HumanMessage(content=prompt))
+            response = llm.invoke(messages)
+            return getattr(response, "content", "") or ""
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def analyze_vision(
+        self,
+        prompt: str,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg",
+    ) -> str:
+        try:
+            llm = self._get_llm(model_type="fast")
+            b64_data = base64.b64encode(image_bytes).decode("utf-8")
+            from langchain_core.messages import HumanMessage
+            message = HumanMessage(
+                content=[
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}},
+                ]
+            )
+            response = llm.invoke([message])
+            return normalize_provider_text_content(getattr(response, "content", ""))
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def transcribe_audio(
+        self,
+        audio_bytes: bytes,
+        mime_type: str = "audio/ogg",
+    ) -> str:
+        if not self.api_key:
+            raise ProviderAuthError("openai", "OPENAI_API_KEY is not configured.")
+
+        extension_by_mime = {
+            "audio/aac": "aac",
+            "audio/flac": "flac",
+            "audio/m4a": "m4a",
+            "audio/mp3": "mp3",
+            "audio/mp4": "mp4",
+            "audio/mpeg": "mp3",
+            "audio/mpga": "mpga",
+            "audio/ogg": "ogg",
+            "audio/wav": "wav",
+            "audio/webm": "webm",
+            "audio/x-m4a": "m4a",
+            "audio/x-wav": "wav",
+        }
+        normalized_mime_type = mime_type.strip().lower()
+        extension = extension_by_mime.get(normalized_mime_type)
+        if extension is None:
+            raise CapabilityNotSupportedError(
+                provider="openai",
+                capability="audio_stt",
+                message=f"Audio MIME type '{mime_type}' is not supported by OpenAI transcription.",
+            )
+
+        try:
+            import requests
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            files = {"file": (f"audio.{extension}", audio_bytes, normalized_mime_type)}
+            data = {"model": "whisper-1"}
+            resp = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files=files, data=data, timeout=30)
+            if resp.status_code in (401, 403):
+                raise ProviderAuthError("openai", f"OpenAI Whisper auth failed: {resp.text}")
+            if resp.status_code == 429:
+                raise RateLimitError("openai", "OpenAI Whisper quota exceeded.")
+            resp_json = resp.json()
+            if "error" in resp_json:
+                raise AIProviderError(str(resp_json["error"]), provider="openai")
+            return resp_json.get("text", "").strip()
+        except AIProviderError:
+            raise
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def synthesize_speech(self, text: str, locale: str) -> bytes:
+        """Generate an MP3 response through OpenAI's speech endpoint."""
+        language_name, _ = TTS_LANGUAGE_BY_LOCALE.get(
+            locale,
+            TTS_LANGUAGE_BY_LOCALE["en"],
+        )
+        try:
+            response = self._get_openai_client().audio.speech.create(
+                model=DEFAULT_OPENAI_TTS_MODEL,
+                voice="cedar",
+                input=text,
+                instructions=f"Speak naturally in {language_name}.",
+                response_format="mp3",
+            )
+            content = getattr(response, "content", None)
+            if content is None and hasattr(response, "read"):
+                content = response.read()
+            return bytes(content or b"")
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def generate_image(
+        self,
+        prompt: str,
+        aspect_ratio: str = "1:1",
+    ) -> bytes:
+        if not self.api_key:
+            raise ProviderAuthError("openai", "OPENAI_API_KEY is not configured.")
+
+        ratio_map = {
+            "1:1": "1024x1024",
+            "16:9": "1792x1024",
+            "1792:1024": "1792x1024",
+            "9:16": "1024x1792",
+            "1024:1792": "1024x1792",
+        }
+        normalized_ratio = (aspect_ratio or "1:1").strip()
+        if normalized_ratio not in ratio_map:
+            raise CapabilityNotSupportedError(
+                provider="openai",
+                capability="image_gen",
+                message=(
+                    f"Aspect ratio '{aspect_ratio}' is not supported by OpenAI DALL-E 3. "
+                    f"Supported ratios are '1:1' (1024x1024), '16:9' (1792x1024), and '9:16' (1024x1792)."
+                ),
+            )
+        size = ratio_map[normalized_ratio]
+
+        try:
+            import requests
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+            data = {
+                "model": "dall-e-3",
+                "prompt": prompt,
+                "n": 1,
+                "size": size,
+                "response_format": "b64_json",
+            }
+            resp = requests.post("https://api.openai.com/v1/images/generations", headers=headers, json=data, timeout=60)
+            if resp.status_code in (401, 403):
+                raise ProviderAuthError("openai", f"OpenAI DALL-E auth failed: {resp.text}")
+            if resp.status_code == 429:
+                raise RateLimitError("openai", "OpenAI DALL-E rate limit exceeded.")
+            resp_json = resp.json()
+            if "error" in resp_json:
+                raise AIProviderError(str(resp_json["error"]), provider="openai")
+            b64_str = resp_json["data"][0]["b64_json"]
+            return base64.b64decode(b64_str)
+        except AIProviderError:
+            raise
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def embed_text(
+        self,
+        texts: str | Sequence[str],
+        is_query: bool = False,
+    ) -> list[list[float]]:
+        if not self.api_key:
+            raise ProviderAuthError("openai", "OPENAI_API_KEY is not configured.")
+        try:
+            normalized_texts = normalize_embedding_texts(texts)
+            from langchain_openai import OpenAIEmbeddings
+            embeddings_client = OpenAIEmbeddings(model=self.embedding_model, api_key=self.api_key)
+            if is_query:
+                return [embeddings_client.embed_query(text) for text in normalized_texts]
+            return embeddings_client.embed_documents(normalized_texts)
+        except Exception as e:
+            self._handle_exception(e)
+
+    def _handle_exception(self, e: Exception) -> None:
+        if isinstance(e, AIProviderError):
+            raise e
+        err_msg = str(e).lower()
+        if "401" in err_msg or "unauthorized" in err_msg or "invalid api key" in err_msg or "forbidden" in err_msg:
+            raise ProviderAuthError("openai", str(e), original_error=e) from e
+        if "429" in err_msg or "quota" in err_msg or "rate limit" in err_msg or "resource exhausted" in err_msg:
+            raise RateLimitError("openai", str(e), original_error=e) from e
+        raise AIProviderError(str(e), provider="openai", original_error=e) from e
+
+
+class GeminiAPIAdapter(AIProviderAdapter):
+    """Adapter for Google AI Studio Gemini (API Key)."""
+
+    provider_name = "gemini"
+    supported_capabilities = {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}
+
+    def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
+        if api_key is None:
+            self.api_key = getattr(config, "GEMINI_API_KEY", "") or getattr(config, "GOOGLE_API_KEY", "")
+        else:
+            self.api_key = api_key
+        self.fast_model, self.heavy_model = resolve_provider_models("gemini", fast_model, heavy_model)
+        self.transcription_model = DEFAULT_GEMINI_TRANSCRIPTION_MODEL
+        self.embedding_model = DEFAULT_GEMINI_EMBEDDING_MODEL
+
+    def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
+        if not self.api_key:
+            raise ProviderAuthError("gemini", "GEMINI_API_KEY is not configured.")
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        model = self.heavy_model if model_type == "heavy" else self.fast_model
+        temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
+        safety_settings = get_gemini_safety_settings()
+        return ChatGoogleGenerativeAI(model=model, temperature=temp, safety_settings=safety_settings, api_key=self.api_key)
+
+    def _get_genai_client(self):
+        if not self.api_key:
+            raise ProviderAuthError("gemini", "GEMINI_API_KEY is not configured.")
+        from google import genai
+        return genai.Client(api_key=self.api_key)
+
+    @trace_provider_operation
+    def generate_text(
+        self,
+        prompt: str,
+        model_type: str = "fast",
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        try:
+            llm = self._get_llm(model_type=model_type, temperature=temperature)
+            messages = []
+            if system_prompt:
+                from langchain_core.messages import SystemMessage
+                messages.append(SystemMessage(content=system_prompt))
+            from langchain_core.messages import HumanMessage
+            messages.append(HumanMessage(content=prompt))
+            response = llm.invoke(messages)
+            return getattr(response, "content", "") or ""
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def analyze_vision(
+        self,
+        prompt: str,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg",
+    ) -> str:
+        try:
+            llm = self._get_llm(model_type="fast")
+            b64_data = base64.b64encode(image_bytes).decode("utf-8")
+            from langchain_core.messages import HumanMessage
+            message = HumanMessage(
+                content=[
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}},
+                ]
+            )
+            response = llm.invoke([message])
+            return normalize_provider_text_content(getattr(response, "content", ""))
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def transcribe_audio(
+        self,
+        audio_bytes: bytes,
+        mime_type: str = "audio/ogg",
+    ) -> str:
+        uploaded_file = None
+        client = None
+        try:
+            client = self._get_genai_client()
+            import io
+            from google.genai import types
+
+            # 1. Upload in-memory audio bytes via Gemini Files API
+            uploaded_file = client.files.upload(
+                file=io.BytesIO(audio_bytes),
+                config=types.UploadFileConfig(mime_type=mime_type),
+            )
+
+            # 2. Call Interactions API with dedicated model and explicit verbatim transcription mode
+            file_uri = getattr(uploaded_file, "uri", None) or getattr(uploaded_file, "name", "")
+            language_codes, custom_vocabulary = _get_transcription_hints()
+            interaction = client.interactions.create(
+                model=self.transcription_model,
+                input=[
+                    {
+                        "type": "audio",
+                        "uri": file_uri,
+                        "mime_type": mime_type,
+                    }
+                ],
+                generation_config={
+                    "transcription_config": {
+                        "language_codes": language_codes,
+                        "custom_vocabulary": custom_vocabulary,
+                        "mode": {
+                            "type": "verbatim",
+                        },
+                    },
+                },
+            )
+            text = getattr(interaction, "output_text", "").strip() if getattr(interaction, "output_text", None) else ""
+            return text or "[ΣΙΩΠΗ]"
+        except Exception as e:
+            err_str = str(e).lower()
+
+            # 1. Non-fallback categories: Auth, API keys, permissions
+            if (
+                "401" in err_str
+                or "403" in err_str
+                or "unauthenticated" in err_str
+                or "unauthorized" in err_str
+                or "permission_denied" in err_str
+                or "api_key_invalid" in err_str
+                or "api key not valid" in err_str
+                or "invalid api key" in err_str
+                or "credentials" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 2. Non-fallback categories: Quota, Rate Limit
+            if (
+                "429" in err_str
+                or "quota" in err_str
+                or "resource_exhausted" in err_str
+                or "rate_limit" in err_str
+                or "rate limit" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 3. Non-fallback categories: Bad request, invalid audio / mime input, 4xx validation errors
+            if (
+                "400" in err_str
+                or "invalid_argument" in err_str
+                or "invalid argument" in err_str
+                or "bad request" in err_str
+                or "mime" in err_str
+                or "malformed" in err_str
+                or "audio format" in err_str
+                or "codec" in err_str
+                or "sample rate" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 4. Dedicated Model Absence: Fall back to generic Flash using generate_content + prompt
+            if _is_model_unavailable_error(err_str):
+                logger.warning(
+                    f"[Gemini] Dedicated transcription model '{self.transcription_model}' unavailable ({e}). "
+                    f"Falling back to generic Flash transcription ({self.fast_model})."
+                )
+                try:
+                    fallback_client = client or self._get_genai_client()
+                    fallback_response = fallback_client.models.generate_content(
+                        model=self.fast_model,
+                        contents=[
+                            {"inline_data": {"mime_type": mime_type, "data": audio_bytes}},
+                            AUDIO_TRANSCRIPTION_PROMPT,
+                        ],
+                    )
+                    fallback_text = getattr(fallback_response, "text", "").strip() if getattr(fallback_response, "text", None) else ""
+                    return fallback_text or "[ΣΙΩΠΗ]"
+                except Exception as fb_exc:
+                    self._handle_exception(fb_exc)
+
+            # 5. Non-fallback categories: Transient 5xx / Network / Service Unavailable
+            if (
+                "500" in err_str
+                or "502" in err_str
+                or "503" in err_str
+                or "504" in err_str
+                or "internal server error" in err_str
+                or "service unavailable" in err_str
+                or "temporarily unavailable" in err_str
+                or "server unavailable" in err_str
+                or "backend unavailable" in err_str
+                or "deadline_exceeded" in err_str
+                or "timeout" in err_str
+                or "timed out" in err_str
+                or "connection" in err_str
+                or "econnreset" in err_str
+            ):
+                self._handle_exception(e)
+
+            self._handle_exception(e)
+        finally:
+            if uploaded_file is not None and getattr(uploaded_file, "name", None) and client is not None:
+                try:
+                    client.files.delete(name=uploaded_file.name)
+                except Exception as del_err:
+                    logger.warning(f"[Gemini] Failed to delete temporary uploaded audio file '{uploaded_file.name}': {del_err}")
+
+    @trace_provider_operation
+    def synthesize_speech(self, text: str, locale: str) -> bytes:
+        """Generate MP3 speech through Gemini using the configured API key."""
+        _, language_code = TTS_LANGUAGE_BY_LOCALE.get(
+            locale,
+            TTS_LANGUAGE_BY_LOCALE["en"],
+        )
+        try:
+            interaction = self._get_genai_client().interactions.create(
+                model=DEFAULT_GEMINI_TTS_MODEL,
+                input=(
+                    "Synthesize natural speech for the following transcript. "
+                    "Speak only the transcript.\n\n"
+                    f"Spoken transcript:\n{text}"
+                ),
+                response_format={
+                    "type": "audio",
+                    "mime_type": "audio/mp3",
+                    "delivery": "inline",
+                },
+                generation_config={
+                    "speech_config": [
+                        {"voice": "Charon", "language": language_code},
+                    ],
+                },
+            )
+            output_audio = getattr(interaction, "output_audio", None)
+            data = getattr(output_audio, "data", None)
+            if isinstance(data, str):
+                return base64.b64decode(data)
+            return bytes(data or b"")
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def generate_image(
+        self,
+        prompt: str,
+        aspect_ratio: str = "1:1",
+    ) -> bytes:
+        try:
+            client = self._get_genai_client()
+            from google.genai import types
+            response = client.models.generate_content(
+                model=google_model_from_environment(
+                    "ASTAKOS_GOOGLE_IMAGE_MODEL",
+                    DEFAULT_GOOGLE_IMAGE_MODEL,
+                ),
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=[types.Modality.TEXT, types.Modality.IMAGE],
+                    image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
+                ),
+            )
+            return _extract_google_image_bytes(response, "gemini")
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def embed_text(
+        self,
+        texts: str | Sequence[str],
+        is_query: bool = False,
+    ) -> list[list[float]]:
+        if not self.api_key:
+            raise ProviderAuthError("gemini", "GEMINI_API_KEY is not configured.")
+        try:
+            normalized_texts = normalize_embedding_texts(texts)
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+            emb_client = GoogleGenerativeAIEmbeddings(model=self.embedding_model, google_api_key=self.api_key)
+            if is_query:
+                return [emb_client.embed_query(text) for text in normalized_texts]
+            return emb_client.embed_documents(normalized_texts)
+        except Exception as e:
+            self._handle_exception(e)
+
+    def _handle_exception(self, e: Exception) -> None:
+        if isinstance(e, AIProviderError):
+            raise e
+        err_msg = str(e).lower()
+        if (
+            "401" in err_msg
+            or "unauthorized" in err_msg
+            or "permission_denied" in err_msg
+            or "403" in err_msg
+            or "api_key_invalid" in err_msg
+            or "api key not valid" in err_msg
+            or "invalid api key" in err_msg
+        ):
+            raise ProviderAuthError("gemini", str(e), original_error=e) from e
+        if (
+            "429" in err_msg
+            or "quota" in err_msg
+            or "resource_exhausted" in err_msg
+            or "rate_limit" in err_msg
+            or "rate limit" in err_msg
+            or "too_many_requests" in err_msg
+        ):
+            raise RateLimitError("gemini", str(e), original_error=e) from e
+        raise AIProviderError(str(e), provider="gemini", original_error=e) from e
+
+
+class VertexAIAdapter(AIProviderAdapter):
+    """Adapter for Google Cloud Vertex AI (Service Account)."""
+
+    provider_name = "vertex"
+    supported_capabilities = {"text", "vision", "audio_stt", "audio_tts", "image_gen", "embeddings"}
+
+    def __init__(
+        self,
+        project_id: str | None = None,
+        location: str | None = None,
+        fast_model: str | None = None,
+        heavy_model: str | None = None,
+        credentials_path: str | None = None,
+    ):
+        self.credentials_path = resolve_vertex_credentials_path(credentials_path)
+        self.project_id = resolve_vertex_project_id(project_id, cred_file=self.credentials_path)
+        self.location = resolve_vertex_location(location)
+        self.fast_model, self.heavy_model = resolve_provider_models("vertex", fast_model, heavy_model)
+        self.transcription_model = DEFAULT_VERTEX_TRANSCRIPTION_MODEL
+        self.embedding_model = DEFAULT_VERTEX_EMBEDDING_MODEL
+        self._credentials = get_vertex_credentials(self.credentials_path)
+
+    def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        model = self.heavy_model if model_type == "heavy" else self.fast_model
+        temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
+        safety_settings = get_gemini_safety_settings()
+        kwargs = {
+            "model": model,
+            "temperature": temp,
+            "safety_settings": safety_settings,
+            "vertexai": True,
+            "project": self.project_id,
+            "location": self.location,
+        }
+        if self._credentials is not None:
+            kwargs["credentials"] = self._credentials
+        return ChatGoogleGenerativeAI(**kwargs)
+
+    def _get_genai_client(self, location: str | None = None):
+        from google import genai
+        kwargs = {
+            "vertexai": True,
+            "project": self.project_id,
+            "location": location or self.location,
+        }
+        if self._credentials is not None:
+            kwargs["credentials"] = self._credentials
+        return genai.Client(**kwargs)
+
+    @trace_provider_operation
+    def generate_text(
+        self,
+        prompt: str,
+        model_type: str = "fast",
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        try:
+            llm = self._get_llm(model_type=model_type, temperature=temperature)
+            messages = []
+            if system_prompt:
+                from langchain_core.messages import SystemMessage
+                messages.append(SystemMessage(content=system_prompt))
+            from langchain_core.messages import HumanMessage
+            messages.append(HumanMessage(content=prompt))
+            response = llm.invoke(messages)
+            return getattr(response, "content", "") or ""
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def analyze_vision(
+        self,
+        prompt: str,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg",
+    ) -> str:
+        try:
+            llm = self._get_llm(model_type="fast")
+            b64_data = base64.b64encode(image_bytes).decode("utf-8")
+            from langchain_core.messages import HumanMessage
+            message = HumanMessage(
+                content=[
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}},
+                ]
+            )
+            response = llm.invoke([message])
+            return normalize_provider_text_content(getattr(response, "content", ""))
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def transcribe_audio(
+        self,
+        audio_bytes: bytes,
+        mime_type: str = "audio/ogg",
+    ) -> str:
+        try:
+            # The dedicated transcription preview model and its locale hints use Vertex global.
+            from google.genai import types
+
+            client = self._get_genai_client(location="global")
+            language_codes, custom_vocabulary = _get_transcription_hints()
+            response = client.models.generate_content(
+                model=self.transcription_model,
+                contents=[
+                    {"inline_data": {"mime_type": mime_type, "data": audio_bytes}},
+                ],
+                config=types.GenerateContentConfig(
+                    audio_transcription_config=types.AudioTranscriptionConfig(
+                        language_codes=language_codes,
+                        custom_vocabulary=custom_vocabulary,
+                    ),
+                ),
+            )
+            text = getattr(response, "text", "").strip() if getattr(response, "text", None) else ""
+            return text or "[ΣΙΩΠΗ]"
+        except Exception as e:
+            err_str = str(e).lower()
+
+            # 1. Non-fallback categories: Auth, permissions, scopes
+            if (
+                "401" in err_str
+                or "403" in err_str
+                or "unauthenticated" in err_str
+                or "permission_denied" in err_str
+                or "invalid_scope" in err_str
+                or "credentials" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 2. Non-fallback categories: Quota, Rate Limit
+            if (
+                "429" in err_str
+                or "quota" in err_str
+                or "resource_exhausted" in err_str
+                or "rate_limit" in err_str
+                or "rate limit" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 3. Non-fallback categories: Bad request, invalid audio / mime input, 4xx validation errors
+            if (
+                "400" in err_str
+                or "invalid_argument" in err_str
+                or "invalid argument" in err_str
+                or "bad request" in err_str
+                or "mime" in err_str
+                or "malformed" in err_str
+                or "audio format" in err_str
+                or "codec" in err_str
+                or "sample rate" in err_str
+            ):
+                self._handle_exception(e)
+
+            # 4. Dedicated Model Absence: Fall back to generic Flash using normal Vertex location
+            if _is_model_unavailable_error(err_str):
+                logger.warning(
+                    f"[VertexAI] Dedicated transcription model '{self.transcription_model}' unavailable ({e}). "
+                    f"Falling back to generic Flash transcription ({self.fast_model})."
+                )
+                try:
+                    fallback_client = self._get_genai_client()
+                    fallback_response = fallback_client.models.generate_content(
+                        model=self.fast_model,
+                        contents=[
+                            {"inline_data": {"mime_type": mime_type, "data": audio_bytes}},
+                            AUDIO_TRANSCRIPTION_PROMPT,
+                        ],
+                    )
+                    fallback_text = getattr(fallback_response, "text", "").strip() if getattr(fallback_response, "text", None) else ""
+                    return fallback_text or "[ΣΙΩΠΗ]"
+                except Exception as fb_exc:
+                    self._handle_exception(fb_exc)
+
+            # 5. Non-fallback categories: Transient 5xx / Network / Service Unavailable
+            if (
+                "500" in err_str
+                or "502" in err_str
+                or "503" in err_str
+                or "504" in err_str
+                or "internal server error" in err_str
+                or "service unavailable" in err_str
+                or "temporarily unavailable" in err_str
+                or "server unavailable" in err_str
+                or "backend unavailable" in err_str
+                or "deadline_exceeded" in err_str
+                or "timeout" in err_str
+                or "timed out" in err_str
+                or "connection" in err_str
+                or "econnreset" in err_str
+            ):
+                self._handle_exception(e)
+
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def synthesize_speech(self, text: str, locale: str) -> bytes:
+        """Generate MP3 speech through Cloud TTS with Vertex credentials."""
+        try:
+            from core.text_to_speech import _synthesize_google_cloud_chunk
+
+            return _synthesize_google_cloud_chunk(
+                text,
+                locale,
+                credentials=self._credentials,
+            )
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def generate_image(
+        self,
+        prompt: str,
+        aspect_ratio: str = "1:1",
+    ) -> bytes:
+        try:
+            client = self._get_genai_client()
+            from google.genai import types
+            response = client.models.generate_content(
+                model=google_model_from_environment(
+                    "ASTAKOS_GOOGLE_IMAGE_MODEL",
+                    DEFAULT_GOOGLE_IMAGE_MODEL,
+                ),
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=[types.Modality.TEXT, types.Modality.IMAGE],
+                    image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
+                ),
+            )
+            return _extract_google_image_bytes(response, "vertex")
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def embed_text(
+        self,
+        texts: str | Sequence[str],
+        is_query: bool = False,
+    ) -> list[list[float]]:
+        try:
+            normalized_texts = normalize_embedding_texts(texts)
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+            kwargs = {
+                "model": self.embedding_model,
+                "vertexai": True,
+                "project": self.project_id,
+                "location": self.location,
+            }
+            if self._credentials is not None:
+                kwargs["credentials"] = self._credentials
+            emb_client = GoogleGenerativeAIEmbeddings(**kwargs)
+            if is_query:
+                return [emb_client.embed_query(text) for text in normalized_texts]
+            return emb_client.embed_documents(normalized_texts)
+        except Exception as e:
+            self._handle_exception(e)
+
+    def _handle_exception(self, e: Exception) -> None:
+        if isinstance(e, AIProviderError):
+            raise e
+        from google.auth.exceptions import DefaultCredentialsError, RefreshError
+        if isinstance(e, (DefaultCredentialsError, RefreshError)):
+            raise ProviderAuthError("vertex", str(e), original_error=e) from e
+        err_msg = str(e).lower()
+        if "permission_denied" in err_msg or "403" in err_msg or "401" in err_msg or "unauthenticated" in err_msg or "invalid_scope" in err_msg:
+            raise ProviderAuthError("vertex", str(e), original_error=e) from e
+        if (
+            "429" in err_msg
+            or "quota" in err_msg
+            or "resource_exhausted" in err_msg
+            or "rate_limit" in err_msg
+            or "rate limit" in err_msg
+            or "too_many_requests" in err_msg
+        ):
+            raise RateLimitError("vertex", str(e), original_error=e) from e
+        raise AIProviderError(str(e), provider="vertex", original_error=e) from e
+
+
+class AnthropicAdapter(AIProviderAdapter):
+    """Adapter for Anthropic Claude with explicit capability guardrails."""
+
+    provider_name = "anthropic"
+    supported_capabilities = {"text", "vision"}
+
+    def __init__(self, api_key: str | None = None, fast_model: str | None = None, heavy_model: str | None = None):
+        self.api_key = getattr(config, "ANTHROPIC_API_KEY", "") if api_key is None else api_key
+        self.fast_model, self.heavy_model = resolve_provider_models("anthropic", fast_model, heavy_model)
+
+    def _get_llm(self, model_type: str = "fast", temperature: float | None = None):
+        if not self.api_key:
+            raise ProviderAuthError("anthropic", "ANTHROPIC_API_KEY is not configured.")
+        from langchain_anthropic import ChatAnthropic
+        model = self.heavy_model if model_type == "heavy" else self.fast_model
+        temp = temperature if temperature is not None else (0.1 if model_type == "heavy" else 0.7)
+        return ChatAnthropic(model=model, temperature=temp, api_key=self.api_key)
+
+    @trace_provider_operation
+    def generate_text(
+        self,
+        prompt: str,
+        model_type: str = "fast",
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        try:
+            llm = self._get_llm(model_type=model_type, temperature=temperature)
+            messages = []
+            if system_prompt:
+                from langchain_core.messages import SystemMessage
+                messages.append(SystemMessage(content=system_prompt))
+            from langchain_core.messages import HumanMessage
+            messages.append(HumanMessage(content=prompt))
+            response = llm.invoke(messages)
+            return getattr(response, "content", "") or ""
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def analyze_vision(
+        self,
+        prompt: str,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg",
+    ) -> str:
+        try:
+            llm = self._get_llm(model_type="fast")
+            b64_data = base64.b64encode(image_bytes).decode("utf-8")
+            from langchain_core.messages import HumanMessage
+            message = HumanMessage(
+                content=[
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}},
+                ]
+            )
+            response = llm.invoke([message])
+            return normalize_provider_text_content(getattr(response, "content", ""))
+        except Exception as e:
+            self._handle_exception(e)
+
+    @trace_provider_operation
+    def transcribe_audio(
+        self,
+        audio_bytes: bytes,
+        mime_type: str = "audio/ogg",
+    ) -> str:
+        raise CapabilityNotSupportedError(
+            provider="anthropic",
+            capability="audio_stt",
+            message="Audio transcription is not natively supported by Anthropic API alone. Multilingual local STT fallback will be configured in PR 3A.",
+        )
+
+    @trace_provider_operation
+    def generate_image(
+        self,
+        prompt: str,
+        aspect_ratio: str = "1:1",
+    ) -> bytes:
+        raise CapabilityNotSupportedError(
+            provider="anthropic",
+            capability="image_gen",
+            message="Image generation is not supported by Anthropic. Configure an OpenAI (DALL-E) or Google (Imagen) provider to generate images.",
+        )
+
+    @trace_provider_operation
+    def embed_text(
+        self,
+        texts: str | Sequence[str],
+        is_query: bool = False,
+    ) -> list[list[float]]:
+        raise CapabilityNotSupportedError(
+            provider="anthropic",
+            capability="embeddings",
+            message="Embeddings are not natively supported by Anthropic API alone. Configure a separate Vertex, Gemini, OpenAI, or optional local embeddings provider.",
+        )
+
+    def _handle_exception(self, e: Exception) -> None:
+        if isinstance(e, AIProviderError):
+            raise e
+        err_msg = str(e).lower()
+        if "401" in err_msg or "unauthorized" in err_msg or "invalid api key" in err_msg or "authentication_error" in err_msg:
+            raise ProviderAuthError("anthropic", str(e), original_error=e) from e
+        if "429" in err_msg or "rate_limit" in err_msg:
+            raise RateLimitError("anthropic", str(e), original_error=e) from e
+        raise AIProviderError(str(e), provider="anthropic", original_error=e) from e
+
+
+# ────────────────────────────────────────────────────────────────
+# 5. PROVIDER ADAPTER FACTORY
+# ────────────────────────────────────────────────────────────────
+
+_ADAPTER_REGISTRY: dict[str, type[AIProviderAdapter]] = {
+    "openai": OpenAIAdapter,
+    "gemini": GeminiAPIAdapter,
+    "vertex": VertexAIAdapter,
+    "anthropic": AnthropicAdapter,
+}
+
+_EMBEDDINGS_PROVIDER_NAMES = frozenset({"vertex", "gemini", "openai", "local"})
+_VOICE_PROVIDER_NAMES = frozenset({"vertex", "gemini", "openai"})
+
+
+def resolve_voice_provider(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+) -> str:
+    """Resolve one explicit provider for both speech input and output."""
+    configured = provider_name
+    if configured is None:
+        configured = getattr(config, "VOICE_PROVIDER", "auto")
+    resolved = str(configured).strip().lower()
+    if resolved == "auto":
+        chat_provider = str(
+            chat_provider_name or getattr(config, "LLM_PROVIDER", "vertex")
+        ).strip().lower()
+        if chat_provider in _VOICE_PROVIDER_NAMES:
+            return chat_provider
+        raise VoiceProviderSetupRequired(
+            "Voice input and output need a provider. Configure VOICE_PROVIDER "
+            "as vertex, gemini, or openai; Anthropic does not provide native speech.",
+            provider=chat_provider,
+        )
+    if resolved not in _VOICE_PROVIDER_NAMES:
+        valid = ", ".join(sorted(_VOICE_PROVIDER_NAMES | {"auto"}))
+        raise VoiceProviderSetupRequired(
+            f"Unknown voice provider '{resolved}'. Valid options: {valid}.",
+            provider=resolved,
+        )
+    return resolved
+
+
+def resolve_embeddings_provider(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+) -> str:
+    """Resolve the embeddings backend independently from the chat provider.
+
+    ``auto`` deliberately uses the chat provider only when it exposes native
+    embeddings.  It never silently selects OpenAI or downloads a local model
+    for providers such as Anthropic.
+    """
+    configured = provider_name
+    if configured is None:
+        configured = os.getenv("EMBEDDINGS_PROVIDER", "auto")
+    resolved = configured.strip().lower()
+    if resolved == "auto":
+        chat_provider = (
+            chat_provider_name
+            or getattr(config, "LLM_PROVIDER", "vertex")
+        ).strip().lower()
+        adapter = get_provider_adapter(chat_provider)
+        if adapter.is_capability_supported("embeddings"):
+            return adapter.provider_name
+        raise EmbeddingsProviderSetupRequired(
+            "Semantic memory needs an embeddings provider. Configure "
+            "EMBEDDINGS_PROVIDER as vertex, gemini, openai, or local; "
+            "Anthropic does not provide native embeddings.",
+            provider=chat_provider,
+        )
+    if resolved not in _EMBEDDINGS_PROVIDER_NAMES:
+        valid = ", ".join(sorted(_EMBEDDINGS_PROVIDER_NAMES | {"auto"}))
+        raise EmbeddingsProviderSetupRequired(
+            f"Unknown embeddings provider '{resolved}'. Valid options: {valid}.",
+            provider=resolved,
+        )
+    return resolved
+
+
+class LocalE5EmbeddingsAdapter:
+    """Optional local multilingual E5 backend with no install or download side effects."""
+
+    provider_name = "local"
+    model_name = DEFAULT_LOCAL_EMBEDDING_MODEL
+
+    def __init__(self, model_name: str | None = None):
+        self.model_name = model_name or os.getenv("ASTAKOS_LOCAL_EMBEDDING_MODEL", self.model_name)
+        self._model: Any | None = None
+
+    def _get_model(self) -> Any:
+        if self._model is not None:
+            return self._model
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise EmbeddingsProviderSetupRequired(
+                "Local embeddings are selected but sentence-transformers is not installed. "
+                "Install sentence-transformers before selecting local embeddings.",
+                provider="local",
+                original_error=exc,
+            ) from exc
+        try:
+            # Local-only prevents a background model download during normal use.
+            self._model = SentenceTransformer(self.model_name, local_files_only=True)
+            return self._model
+        except FileNotFoundError as exc:
+            raise EmbeddingsProviderSetupRequired(
+                f"Local embeddings model '{self.model_name}' is not installed locally. "
+                "Download it explicitly during setup before selecting local embeddings.",
+                provider="local",
+                original_error=exc,
+            ) from exc
+        except Exception as exc:
+            raise EmbeddingsProviderSetupRequired(
+                f"Could not initialize local embeddings model '{self.model_name}': {exc}. "
+                "Repair or reinstall the local model before selecting local embeddings.",
+                provider="local",
+                original_error=exc,
+            ) from exc
+
+    @trace_provider_operation
+    def embed_text(
+        self,
+        texts: str | Sequence[str],
+        is_query: bool = False,
+    ) -> list[list[float]]:
+        normalized_texts = normalize_embedding_texts(texts)
+        prefix = "query: " if is_query else "passage: "
+        vectors = self._get_model().encode(
+            [f"{prefix}{text}" for text in normalized_texts],
+            normalize_embeddings=True,
+        )
+        return [vector.tolist() for vector in vectors]
+
+
+def get_provider_adapter(provider_name: str | None = None, **kwargs: Any) -> AIProviderAdapter:
+    """Factory function returning the configured AIProviderAdapter instance."""
+    resolved_name = (provider_name or getattr(config, "LLM_PROVIDER", "vertex")).strip().lower()
+    adapter_cls = _ADAPTER_REGISTRY.get(resolved_name)
+    if not adapter_cls:
+        raise AIProviderError(f"Unknown AI provider: '{resolved_name}'. Valid options: {list(_ADAPTER_REGISTRY.keys())}")
+    return adapter_cls(**kwargs)
+
+
+def get_embeddings_adapter(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+    **kwargs: Any,
+) -> EmbeddingsAdapter:
+    """Return the explicitly resolved backend used only for semantic embeddings."""
+    resolved = resolve_embeddings_provider(provider_name, chat_provider_name)
+    if resolved == "local":
+        return LocalE5EmbeddingsAdapter(**kwargs)
+    adapter = get_provider_adapter(resolved, **kwargs)
+    if not adapter.is_capability_supported("embeddings"):
+        raise EmbeddingsProviderSetupRequired(
+            f"Provider '{resolved}' does not support embeddings.",
+            provider=resolved,
+        )
+    return adapter
+
+
+def get_embeddings_backend_identity(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+) -> str:
+    """Return a stable identity for cache and Chroma namespace selection."""
+    adapter = get_embeddings_adapter(provider_name, chat_provider_name)
+    model = getattr(adapter, "embedding_model", getattr(adapter, "model_name", "default"))
+    return f"{adapter.provider_name}:{model}"
+
+
+def build_embeddings_cache_key(backend_identity: str, role: str, text: str) -> str:
+    """Build a provider/model/role-scoped cache key for one embedding input."""
+    payload = f"{backend_identity}\0{role}\0{text.strip()}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def get_embeddings_collection_name(
+    provider_name: str | None = None,
+    chat_provider_name: str | None = None,
+) -> str:
+    """Return the isolated Chroma collection for the selected embeddings backend.
+
+    The long-standing Vertex collection keeps its legacy name so existing
+    installations retain semantic retrieval. Every other backend begins in an
+    empty namespace; historical semantic memories can be re-indexed later by
+    an explicit user action.
+    """
+    identity = get_embeddings_backend_identity(provider_name, chat_provider_name)
+    if identity == f"vertex:{DEFAULT_VERTEX_EMBEDDING_MODEL}":
+        return "astakos_long_term"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+    return f"astakos_vec_{digest}"

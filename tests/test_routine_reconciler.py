@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import sys
+import pytest
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -18,6 +19,13 @@ from services.routine_reconciler import (
 )
 
 
+@pytest.fixture(autouse=True)
+def offline_reconciliation_model(monkeypatch):
+    """Legacy rule tests must never invoke a cloud provider implicitly."""
+    monkeypatch.setattr("services.routine_reconciler._infer_llm_reconciliation_candidates",
+                        lambda *a, **k: [])
+
+
 def _make_routines_db(path, rows):
     conn = sqlite3.connect(path)
     conn.execute(
@@ -30,6 +38,7 @@ def _make_routines_db(path, rows):
             event_type TEXT,
             confidence REAL,
             state TEXT,
+            is_active BOOLEAN DEFAULT 1,
             muted_until TEXT,
             muted_from TEXT,
             sentimental_last_sent TEXT,
@@ -37,8 +46,10 @@ def _make_routines_db(path, rows):
             active_from TEXT,
             active_until TEXT,
             paused_until TEXT,
+            paused_indefinitely BOOLEAN DEFAULT 0,
             resume_rule TEXT,
-            pause_reason TEXT
+            pause_reason TEXT,
+            external_content_sources_json TEXT NOT NULL DEFAULT '[]'
         )
         """
     )
@@ -119,28 +130,58 @@ def test_infer_summer_break_pause_directive():
 
 def test_infer_camp_absence_mute_directive():
     fact = "[USER_FACT]: Ο Kid1 λείπει σε κατασκήνωση από τις 16/06/2026 και επιστρέφει στις 25/06/2026."
-    directives = infer_routine_reconciliation_directives(
-        fact,
-        category="family",
-        reason="user_stated",
-        now=datetime(2026, 6, 17, 12, 0, 0),
-    )
+    with patch("services.routine_reconciler._infer_llm_reconciliation_candidates", return_value=[]):
+        directives = infer_routine_reconciliation_directives(
+            fact,
+            category="family",
+            reason="user_stated",
+            now=datetime(2026, 6, 17, 12, 0, 0),
+        )
 
     assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_from_home" and d["value"] == "true" and d["until_date"] == "2026-06-25" for d in directives)
     assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_reason" and d["value"] == "camp" and d["until_date"] == "2026-06-25" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_absence_scope" and d["value"] == "extended" and d["until_date"] == "2026-06-25" for d in directives)
     assert any(d["kind"] == "condition_add" for d in directives)
+    assert any(
+        d["kind"] == "condition_add"
+        and d["condition_payload"] == {"flag": "kid1_unavailable_for_routine", "equals": True}
+        for d in directives
+    )
 
 def test_infer_return_home_unmute_directive():
     fact = "[USER_FACT]: Ο Kid1 γύρισε από την κατασκήνωση και είναι πάλι σπίτι."
-    directives = infer_routine_reconciliation_directives(
-        fact,
-        category="family",
-        reason="user_stated",
-        now=datetime(2026, 6, 25, 18, 0, 0),
-    )
+    with patch("services.routine_reconciler._infer_llm_reconciliation_candidates", return_value=[]):
+        directives = infer_routine_reconciliation_directives(
+            fact,
+            category="family",
+            reason="user_stated",
+            now=datetime(2026, 6, 25, 18, 0, 0),
+        )
 
     assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_from_home" and d["value"] == "false" for d in directives)
     assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_away_reason" and d["value"] == "" for d in directives)
+    assert any(d["kind"] == "context_state_set" and d["key"] == "kid1_absence_scope" and d["value"] == "home" for d in directives)
+
+
+def test_temporary_absence_directive_retires_old_extended_reason(tmp_path, monkeypatch):
+    """A reconciled family outing must not revive an obsolete camp absence."""
+    import memory.routine_db as routine_db
+    from services.routine_reconciler import apply_routine_reconciliation_directives
+
+    monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "routines.db"))
+    routine_db.setup_db()
+    routine_db.set_context_state("kid1_away_reason", "camp", "2099-01-01")
+
+    with patch("memory.event_log.log_event"):
+        apply_routine_reconciliation_directives([{
+            "kind": "context_state_set",
+            "key": "kid1_absence_scope",
+            "value": "temporary",
+            "until_date": "2099-01-01",
+        }])
+
+    assert routine_db.get_context_state("kid1_absence_scope")["value"] == "temporary"
+    assert routine_db.get_context_state("kid1_away_reason")["value"] == ""
 
 
 def test_infer_school_break_requires_child_subject():
@@ -388,8 +429,8 @@ def test_not_together_phrase_without_active_sofia_context_does_nothing():
     assert not any(d.get("key") == "partner_with_user" for d in directives)
 
 
-def test_shift_logic_candidate_scores_debug_only():
-    """Generic weekly shift statements stay debug_only by design."""
+def test_shift_logic_weekly_state_auto_applies():
+    """A direct weekly shift declaration safely updates temporary context."""
     fact = "[USER_FACT]: Αυτή την εβδομάδα δουλεύω απόγευμα στη βάρδια."
 
     candidates = infer_routine_reconciliation_candidates(
@@ -403,10 +444,10 @@ def test_shift_logic_candidate_scores_debug_only():
     assert any(
         c["kind"] == "context_state_set"
         and c["reason"] == "shift_afternoon_week"
-        and c["until_date"] == "2026-06-21"
+        and c["until_date"] == "2026-06-19"
         and c["rule_name"] == "shift_logic"
         for c in candidates
-    ), "Expected shift_logic candidate with shift_afternoon_week reason and Sunday until_date"
+    ), "Expected shift_logic candidate with shift_afternoon_week reason and Friday until_date"
     # Score it and verify it auto applies now
     normalized_fact = _normalize(fact)
     scored = [
@@ -420,21 +461,91 @@ def test_shift_logic_candidate_scores_debug_only():
 
     assert any(
         d["rule_name"] == "shift_logic"
-        and d["decision"] == "debug_only"
+        and d["decision"] == "auto_apply"
+        and d["auto_apply"] is True
+        and d["key"] == "current_shift"
         for d in scored
     )
 
-    # The backward-compat wrapper only returns the auto_apply bucket, so a
-    # debug_only-only rule like shift_logic must NOT show up in its output.
     directives = infer_routine_reconciliation_directives(
         fact,
         category="lazaros",
         reason="user_stated",
         now=datetime(2026, 6, 17, 12, 0, 0),
     )
+    assert any(
+        d.get("kind") == "context_state_set"
+        and d.get("key") == "current_shift"
+        and d.get("value") == "afternoon"
+        and d.get("reason") == "shift_afternoon_week"
+        for d in directives
+    )
+
+
+def test_shift_logic_negated_weekly_statement_does_not_set_current_shift():
+    """A negated weekly shift statement must not infer the opposite shift."""
+    fact = "[USER_FACT]: Δεν δουλεύω απογευματινή βάρδια αυτή την εβδομάδα."
+
+    candidates = infer_routine_reconciliation_candidates(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 6, 17, 12, 0, 0),
+    )
+
     assert not any(
-        d.get("reason") == "shift_afternoon_week" for d in directives
-    ), "infer_routine_reconciliation_directives returns auto_apply directives"
+        c.get("kind") == "context_state_set"
+        and c.get("key") == "current_shift"
+        for c in candidates
+    )
+
+
+def test_shift_logic_correction_sets_current_workweek():
+    fact = "[USER_FACT]: Απογευματινή βάρδια είμαι στη δουλειά, διόρθωσέ το."
+
+    candidates = infer_routine_reconciliation_candidates(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 7, 21, 9, 0, 0),
+    )
+
+    shift = next(
+        candidate
+        for candidate in candidates
+        if candidate.get("kind") == "context_state_set"
+        and candidate.get("key") == "current_shift"
+    )
+
+    assert shift["value"] == "afternoon"
+    assert shift["until_date"] == "2026-07-24"
+    assert shift["reason"] == "shift_afternoon_week"
+
+    scored = score_candidate_directive(
+        shift,
+        normalized_fact=_normalize(fact),
+        matched_rule_name=shift["rule_name"],
+    )
+
+    assert scored["decision"] == "auto_apply"
+    assert scored["auto_apply"] is True
+
+
+def test_shift_logic_deletion_request_does_not_set_current_workweek():
+    fact = "[USER_FACT]: Σβήσε ότι είμαι απογευματινή βάρδια στη δουλειά."
+
+    candidates = infer_routine_reconciliation_candidates(
+        fact,
+        category="lazaros",
+        reason="user_stated",
+        now=datetime(2026, 7, 21, 9, 0, 0),
+    )
+
+    assert not any(
+        candidate.get("kind") == "context_state_set"
+        and candidate.get("key") == "current_shift"
+        for candidate in candidates
+    )
 
 
 def test_shift_logic_explicit_weekday_auto_applies():
@@ -451,7 +562,7 @@ def test_shift_logic_explicit_weekday_auto_applies():
         c["kind"] == "context_state_set"
         and c["reason"] == "shift_afternoon_week"
         and c["key"] == "current_shift"
-        and c["until_date"] == "2026-07-05"
+        and c["until_date"] == "2026-07-03"
         and c["rule_name"] == "shift_logic"
         for c in candidates
     )
@@ -719,6 +830,47 @@ def test_llm_candidates_merge_with_rule_candidates_without_duplicates(monkeypatc
     assert len(fps) == len(set(fps))
 
 
+def test_return_home_from_outing_ignores_future_return_after_departure():
+    from services.routine_reconciler import _normalize, _rule_return_home_from_outing
+
+    now = datetime(2026, 7, 23, 9, 0)
+
+    with patch(
+        "memory.routine_db.get_context_state",
+        side_effect=lambda key: {"value": "true"} if key == "user_out_of_home" else None,
+    ):
+        directives = _rule_return_home_from_outing(
+            normalized=_normalize(
+                "Καλημέρα φίλε μόλις τελείωσα τις δουλίτσες στο σπίτι, "
+                "καθάρισα τον κούνελο και τώρα πάω λαϊκή. "
+                "Θα λέμε όταν γυρίσω από τη λαϊκή."
+            ),
+            dates=[],
+            now=now,
+        )
+
+    assert directives == []
+
+
+def test_return_home_from_outing_keeps_legacy_explicit_return_phrases():
+    from services.routine_reconciler import _normalize, _rule_return_home_from_outing
+
+    now = datetime(2026, 7, 23, 9, 0)
+
+    for message in ("Γύρισα σπίτι.", "Φτάσαμε σπίτι."):
+        with patch(
+            "memory.routine_db.get_context_state",
+            side_effect=lambda key: {"value": "true"} if key == "user_out_of_home" else None,
+        ):
+            directives = _rule_return_home_from_outing(
+                normalized=_normalize(message),
+                dates=[],
+                now=now,
+            )
+
+        assert [directive["value"] for directive in directives] == ["false"]
+
+
 def test_return_home_from_outing_requires_active_out_of_home_context():
     from services.routine_reconciler import _rule_return_home_from_outing
 
@@ -779,6 +931,11 @@ def test_family_outing_in_progress_adds_outing_and_home_conditions():
     )
 
     condition_directives = [d for d in directives if d.get("kind") == "condition_add"]
+
+    assert any(
+        d.get("key") == "kid1_absence_scope" and d.get("value") == "temporary"
+        for d in directives
+    )
 
     assert any(
         d.get("condition_payload") == {"flag": "state:kid1:outing", "equals": "in_progress"}
@@ -1020,3 +1177,34 @@ def test_sofia_with_kid1_at_home_while_user_at_work_does_not_set_partner_with_us
     ]
 
     assert sofia_true == []
+
+
+def test_cigarette_does_not_enable_quiet_hours():
+    candidates = infer_routine_reconciliation_candidates(
+        "Καλά είναι φίλε, έξω όταν βγαίνω για τσιγάρο λιώνω",
+        category="work",
+        reason="user_stated",
+        now=datetime(2026, 7, 21, 13, 57),
+    )
+
+    assert not any(
+        candidate.get("key") == "quiet_hours"
+        for candidate in candidates
+    )
+
+
+def test_future_bedtime_does_not_enable_quiet_hours():
+    """Routine reconciliation must not turn an upcoming bedtime into quiet time now."""
+    with patch("services.routine_reconciler._infer_llm_reconciliation_candidates", return_value=[]):
+        candidates = infer_routine_reconciliation_candidates(
+            "Είμαστε σπίτι, τρώμε και σε λίγο ύπνο με τον Αλέξανδρο.",
+            category="family",
+            reason="user_stated",
+            now=datetime(2026, 9, 23, 21, 48),
+        )
+
+    assert not any(
+        candidate.get("kind") == "context_state_set"
+        and candidate.get("key") == "quiet_hours"
+        for candidate in candidates
+    )

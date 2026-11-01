@@ -1,7 +1,8 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 import os
@@ -86,6 +87,14 @@ def _maybe_trigger_auto_session_summary(channel: str) -> None:
             _auto_summary_lock.release()
 
     threading.Thread(target=_worker, daemon=True).start()
+
+
+def wait_for_auto_session_summary(timeout: float) -> bool:
+    """Wait until a previously spawned auto-summary has finished persisting."""
+    if not _auto_summary_lock.acquire(timeout=max(0, timeout)):
+        return False
+    _auto_summary_lock.release()
+    return True
 
 
 def load_last_session_hint(channel: str = "web") -> str:
@@ -1048,28 +1057,17 @@ def _extract_confirmed_memory_candidate(
     if len(source_text) < 8 and len(confirmation_text) < 20:
         return None
 
-    # Explicit confirmation from the AI is required — and whether the user gave explicit
-    # "Remember that X", we keep X, not meta-text like
-    # "the user requested to save".of_thought
-    detail = None
-    explicit_payload = _extract_explicit_memory_payload(source_text)
-    if confirmation_text:
-        memory_match = re.search(
-            t("prompts.ext_n_0_220"),
-            confirmation_text,
-            flags=re.IGNORECASE,
-        )
-        if memory_match:
-            detail = memory_match.group(0).strip()
-    if not detail:
-        # AI did not explicitly confirm → bypass, the LLM sifter will decide
+    # Confirmation is evidence of acknowledgement, never the fact's author.
+    # Context-dependent confirmations are resolved by the semantic sifter instead.
+    detail = _extract_explicit_memory_payload(source_text)
+    if not detail or not re.search(
+        t("prompts.ext_n_0_220"), confirmation_text, flags=re.IGNORECASE
+    ):
         return None
-    if explicit_payload and _looks_like_generic_memory_confirmation(detail):
-        detail = explicit_payload
     if len(detail) > 300:
         detail = detail[:297].rstrip() + "..."
 
-    category = _infer_memory_category(f"{safe_user} {safe_ai}")
+    category = _infer_memory_category(safe_user)
 
     ts = now or datetime.now()
     fact = t("memory.session_memory.user_fact", date=ts.strftime('%Y-%m-%d'), text=detail)
@@ -1085,7 +1083,7 @@ def _extract_confirmed_memory_candidate(
     }, now=ts)
 
 
-def _run_session_summary(channel: str = "web"):
+def _run_session_summary(channel: str = "web") -> bool:
     """Archives the session (per channel) with protection against duplicate entries."""
     global is_summarizing, SESSION_LOGS
 
@@ -1097,8 +1095,10 @@ def _run_session_summary(channel: str = "web"):
     using_persistent_log = bool(persistent_log)
     current_log = persistent_log if using_persistent_log else list(SESSION_LOGS)
     # 1. Shield: If it is already running or if there are no messages, exit immediately
-    if is_summarizing or not current_log:
-        return
+    if is_summarizing:
+        return False
+    if not current_log:
+        return True
 
     try:
         is_summarizing = True
@@ -1138,7 +1138,7 @@ def _run_session_summary(channel: str = "web"):
                 print("\033[91m[Session]: Invalid format. Messages returned to log.\033[0m")
             else:
                 print("\033[91m[Session]: Invalid format. Shared exchanges left unsummarized.\033[0m")
-            return
+            return False
 
         # 4. Enrichment of the text for the Vector DB
         session_text = (
@@ -1148,17 +1148,21 @@ def _run_session_summary(channel: str = "web"):
         )
 
         # 5. Save (Here the MemoryManager will also perform the overwrite if needed)
-        memory.save(memory_type="session", summary=summary, session_text=session_text)
+        success = memory.save(memory_type="session", summary=summary, session_text=session_text)
+        if success is False:
+            raise RuntimeError("Vector store failed to save session memory.")
         if using_persistent_log:
             mark_exchanges_summarized([e["id"] for e in current_batch])
         print(f"\033[92m[Session]: ✅ Archived successfully! Mood: {summary.get('mood', '?')}\033[0m")
         bus.emit("session_ended", channel=summary_channel, mood=summary.get("mood", "unknown"), summary=summary.get("summary", ""))
+        return True
 
     except Exception as e:
         # Recovery in case of error
         if not using_persistent_log:
             SESSION_LOGS[:0] = current_batch  # Reset to the beginning
         print(f"\033[91m[Session Error]: {e}\033[0m")
+        return False
     finally:
         is_summarizing = False
 
@@ -1874,6 +1878,7 @@ def run_memory_sifter_slow(
     agent_name: str = "Unknown",
     channel: str = "web",
     deterministic_seed_facts: list[str] | None = None,
+    include_recent_context: bool = True,
 ):
     deterministic_seed_facts = deterministic_seed_facts or []
     print("\033[90m[MemorySifterSlow]: start\033[0m")
@@ -1926,19 +1931,20 @@ def run_memory_sifter_slow(
         # in api/server.py), so the SESSION_LOGS here does NOT yet contain the
         # current exchange -> no double entry/race condition.
         recent_context_block = ""
-        try:
-            recent_entries = SESSION_LOGS[-4:]
-            if recent_entries:
-                ctx_lines = "\n".join(
-                    t("memory.session_memory.conversation_log_short", user=e['user'], ai=e['ai'])
-                    for e in recent_entries
-                )
-                recent_context_block = (
-                    f"{t('memory.session_memory.context_warning')}\n"
-                    f"{ctx_lines}\n"
-                )
-        except Exception:
-            recent_context_block = ""
+        if include_recent_context:
+            try:
+                recent_entries = SESSION_LOGS[-4:]
+                if recent_entries:
+                    ctx_lines = "\n".join(
+                        t("memory.session_memory.conversation_log_short", user=e['user'], ai=e['ai'])
+                        for e in recent_entries
+                    )
+                    recent_context_block = (
+                        f"{t('memory.session_memory.context_warning')}\n"
+                        f"{ctx_lines}\n"
+                    )
+            except Exception:
+                recent_context_block = ""
 
         sifter_prompt = load_prompt("memory_sifter.md").replace(
             "{language}", config.RESPONSE_LANGUAGE
@@ -2059,6 +2065,7 @@ def run_memory_sifter_slow(
                 # Permanent saving (Chroma + PHOTOS_INDEX_FILE) is done only
                 # via memory.save(memory_type="photo", ...) after explicit confirm.
                 print("\033[90m[MemorySifterSlow]: photo fact detected — skip direct photo index write\033[0m")
+                continue
 
             # 3. Save to ChromaDB
             memory.save(**candidate)
@@ -2085,10 +2092,23 @@ def run_memory_sifter_slow(
         print(f"⚠️ [Sifter Error]: {e}")
 
 
-def trigger_memory_sifter(user_text: str, ai_text: str, agent_name: str = "Unknown", channel: str = "web"):
+def trigger_memory_sifter(
+    user_text: str,
+    ai_text: str,
+    agent_name: str = "Unknown",
+    channel: str = "web",
+    include_recent_context: bool = True,
+) -> None:
     """Wrapper — executed via Queue Worker."""
     seed_facts = run_memory_sifter_fast(user_text, ai_text, agent_name, channel)
-    run_memory_sifter_slow(user_text, ai_text, agent_name, channel, deterministic_seed_facts=seed_facts)
+    run_memory_sifter_slow(
+        user_text,
+        ai_text,
+        agent_name,
+        channel,
+        deterministic_seed_facts=seed_facts,
+        include_recent_context=include_recent_context,
+    )
 
 
 # ════════════════════════════════════════════════════════════════

@@ -1,6 +1,7 @@
 # Secrets and local credentials
 .env
 .env.*
+!.env.example
 .astakos_token
 credentials/
 credentials.json
@@ -15,6 +16,9 @@ token.json
 !astakos_nlp.json
 !astakos_context_schema.json
 !locales/*.json
+# Versioned source data in the vendored Agent Skills snapshot
+!vendor/agent-skills/*.json
+!vendor/agent-skills/**/*.json
 # Databases and vector stores
 *.db
 *.sqlite
@@ -29,15 +33,34 @@ chroma_db - Copy/
 .goal_followup_sent
 runtime_snapshot.json
 scheduler_state.json
+behavioral_conversation_preferences.json
+behavioral_conversation_preferences.json.lock
+behavioral_initiative_state.json
+behavioral_initiative_state.json.lock
+.behavioral-initiative-*.tmp
+behavioral_initiative_state.diagnostics.json.lock
+.behavioral-diagnostic-*.tmp
+.behavioral-prefs-*.tmp
 last_location.json
+last_location.json.lock
+known_places.json.lock
+.known-places-*.tmp
+owntracks-pending.json.lock
+.owntracks-*
 linkedin_draft.json
 run_telegram.lock
+run_matrix.lock
+astakos_pending_approval.json.lock
+.approval-*.tmp
 # User uploads, generated output, and local browser profiles
 telegram_photos/
 telegram_uploads/
+matrix_store/
+matrix_media/
 outputs/
 watch_folder/
 astakos_skills/messenger_profile/
+debug_voice.webm
 astakos_skills/food_history.json
 astakos_skills/recipe_library.json
 _cleaner_backups/
@@ -81,8 +104,18 @@ tmp/
 !data/routine_tokens.json
 # OfficeCLI binary
 vendor/officecli/*.exe
+vendor/officecli/officecli
+vendor/officecli/.officecli-install-*/
 # Personal configuration files
 persona.md
 astakos_settings.json
 astakos_custom_intents.json
+astakos_routines.json
 .hn_briefing_sent
+.matrix-backup-maintenance.json
+.matrix-backup-paused.json
+.matrix-backup-maintenance.lock
+.matrix-backup-request-*
+.daily-backup-*
+astakos_routine_context_questions.json
+astakos_routine_context_questions.json.lock

@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-trixie
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -6,6 +6,7 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
     rsync \
     ca-certificates \
+    libicu76 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/astakos
@@ -15,6 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install --with-deps chromium
 
 COPY . /opt/astakos
+RUN python scripts/install_officecli.py && OFFICECLI_SKIP_UPDATE=1 OFFICECLI_NO_AUTO_RESIDENT=1 vendor/officecli/officecli --version
+RUN mkdir -p /opt/astakos-tools && cp vendor/officecli/officecli /opt/astakos-tools/officecli
 COPY docker/release-entrypoint.sh /usr/local/bin/astakos-release-entrypoint
 RUN chmod +x /usr/local/bin/astakos-release-entrypoint
 

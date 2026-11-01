@@ -9,6 +9,9 @@ from memory import session_memory
 def isolated_state_db(tmp_path, monkeypatch):
     state_db = tmp_path / "state.db"
     monkeypatch.setattr(session_memory, "STATE_DB", str(state_db))
+    from memory import pending_followups
+    monkeypatch.setattr(pending_followups, "STATE_DB", str(state_db))
+    pending_followups.ensure_pending_followups_table()
     return state_db
 
 
@@ -305,18 +308,8 @@ def test_slow_sifter_no_mark_on_parse_error(isolated_state_db, monkeypatch):
     assert len(saved) == 1
     assert "valid and sufficiently long fact" in saved[0]["fact"]
 
-def test_sifter_assistant_paraphrase_guard(monkeypatch):
+def test_sifter_assistant_paraphrase_guard(isolated_state_db, monkeypatch):
     from memory import session_memory
-    
-    # Clean up replay DB to prevent test pollution
-    import sqlite3
-    try:
-        conn = sqlite3.connect(session_memory.STATE_DB)
-        conn.execute("DELETE FROM memory_sifter_runs")
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
 
     saved = []
     def mock_save(**kwargs):

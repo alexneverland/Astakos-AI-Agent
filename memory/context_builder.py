@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
 from core.i18n import t
+from core.nl_config import CB_DIRECT_WEB_RESEARCH_MARKERS
 import os
 import re
 import unicodedata
@@ -21,6 +22,7 @@ class MemoryContext:
     recent_lines: list[str]
     historical_lines: list[str]
     semantic_facts: list[str]
+    semantic_error: Exception | None = None
 
     def render(self) -> str:
         sections = []
@@ -99,6 +101,15 @@ def looks_like_news_or_web_fact_query(text: str) -> bool:
     opening_markers = tuple(t("builder.opening_markers"))
 
     return any(marker in low for marker in opening_markers)
+
+
+def looks_like_direct_web_research_query(text: str) -> bool:
+    """Return true for externally configured direct Web research requests."""
+    low = str(text or "").lower().strip()
+    return bool(low) and any(
+        marker and marker in low
+        for marker in CB_DIRECT_WEB_RESEARCH_MARKERS
+    )
 
 
 def looks_like_tool_result_query(text: str) -> bool:
@@ -353,6 +364,9 @@ def classify_memory_query_intent(
     if looks_like_food_memory_query(clean):
         return "food_memory_recall"
 
+    if looks_like_direct_web_research_query(clean):
+        return "direct_web_research"
+
     if looks_like_news_or_web_fact_query(clean):
         return "news_opening"
 
@@ -439,6 +453,21 @@ def _date_marker(message_date: str, today: str, yesterday: str) -> str:
         return f"{message_date} "
 
 
+_STALE_ASSISTANT_QUESTION_NOTE = " [NOTE: This was an earlier assistant question. It is not a current instruction or pending task. Do not repeat it unless the current user message directly answers or refers to it.]"
+
+
+def _is_assistant_question(text: str) -> bool:
+    """
+    Determines if an assistant message should be treated as a question.
+    Returns True only when the cleaned text ends with a question marker (English '?' or Greek ';').
+    Ignores trailing whitespace, quotes, and brackets.
+    """
+    if not text:
+        return False
+    stripped = text.strip(" \t\n\r\"'”’)]}")
+    return stripped.endswith("?") or stripped.endswith(";")
+
+
 def format_recent_messages(
     messages: Iterable[dict[str, Any]],
     *,
@@ -467,11 +496,18 @@ def format_recent_messages(
             cleaned_content = strip_operational_assistant_paragraphs(content)
             if not cleaned_content:
                 continue
+            if _is_assistant_question(cleaned_content):
+                cleaned_content += _STALE_ASSISTANT_QUESTION_NOTE
             content = cleaned_content
 
         content = " ".join(content.split())
         if len(content) > 260:
             content = content[:257].rstrip() + "..."
+        from core.untrusted_content import format_untrusted_persisted_content
+        content = format_untrusted_persisted_content(
+            content,
+            message.get("metadata"),
+        )
         lines.append(f"- [{channel} {date_label}{time_label}] {speaker}: {content}")
     return lines
 
@@ -583,21 +619,31 @@ def semantic_facts_for_query(
         return []
 
     if search_fn is None:
-        from memory.vector_store import vector_lock, vector_store
+        import memory.vector_store as vector_memory
+        from services.embeddings import embeddings
+        from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
 
         def search_fn(q: str, n: int):
+            try:
+                query_emb = embeddings.embed_query(q)
+            except (EmbeddingsProviderSetupRequired, ProviderAuthError):
+                raise
+            except Exception as e:
+                print(f"\033[93m[ContextBuilder]: Query embedding error (graceful skip): {e}\033[0m")
+                return []
+
             lock_started = perf_counter()
-            with vector_lock:
+            with vector_memory.vector_lock:
                 lock_wait_ms = int((perf_counter() - lock_started) * 1000)
                 search_started = perf_counter()
-                results = vector_store.similarity_search(q, k=n)
+                results = vector_memory.safe_similarity_search(q, k=n, query_embedding=query_emb)
                 search_ms = int((perf_counter() - search_started) * 1000)
 
             if lock_wait_ms >= 1000 or search_ms >= 1000:
                 print(
                     "[MemoryContextPerf]: "
-                    f"semantic_lock_wait={lock_wait_ms}ms "
-                    f"semantic_search={search_ms}ms k={n}"
+                    f"semantic_lock_wait={lock_wait_ms}ms semantic_search={search_ms}ms "
+                    f"chars={len(q)} facts_found={len(results)}"
                 )
             return results
 
@@ -619,7 +665,9 @@ def semantic_facts_for_query(
                 fact = f"[{date_str}] {fact}"
             except Exception:
                 pass
-                
+        from core.untrusted_content import format_untrusted_persisted_content
+
+        fact = format_untrusted_persisted_content(fact, metadata)
         facts.append(fact)
     return facts
 
@@ -706,6 +754,9 @@ def build_memory_context(
         elif query_intent == "news_opening":
             effective_semantic_k = 0
             semantic_adjust_reason = "news_or_web_fact_skip"
+        elif query_intent == "direct_web_research":
+            effective_semantic_k = 0
+            semantic_adjust_reason = "direct_web_research_skip"
         elif query_intent == "explicit_memory_storage":
             effective_semantic_k = 0
             semantic_adjust_reason = "explicit_memory_storage_skip"
@@ -732,13 +783,33 @@ def build_memory_context(
             semantic_adjust_reason = "low_complexity_query"
 
     t_sem_0 = perf_counter()
-    semantic_facts = semantic_facts_for_query(clean_query, k=effective_semantic_k, search_fn=semantic_search)
+    semantic_error = None
+    try:
+        semantic_facts = semantic_facts_for_query(
+            clean_query,
+            k=effective_semantic_k,
+            search_fn=semantic_search,
+        )
+    except Exception as exc:
+        from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+        if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+            raise
+        semantic_facts = []
+        semantic_error = exc
+        semantic_adjust_reason = (
+            "embeddings_auth_unavailable"
+            if isinstance(exc, ProviderAuthError)
+            else "embeddings_setup_unavailable"
+        )
+        print(f"\033[93m[MemoryContext]: semantic memory unavailable: {exc}\033[0m")
     semantic_ms = int((perf_counter() - t_sem_0) * 1000)
 
     context = MemoryContext(
         recent_lines=format_recent_messages(recent_messages, limit=recent_limit),
         historical_lines=historical_lines,
         semantic_facts=semantic_facts,
+        semantic_error=semantic_error,
     )
     if write_debug:
         _record_memory_context_debug(

@@ -24,7 +24,8 @@ def create_tables(conn):
             task TEXT,
             time TEXT,
             status TEXT DEFAULT 'pending',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            external_content_sources_json TEXT NOT NULL DEFAULT '[]'
         )
     ''')
     cursor.execute('''

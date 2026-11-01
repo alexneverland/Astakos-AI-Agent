@@ -16,9 +16,15 @@ astakos/
 ```
 
 ## Key Files
+- `tasks/handoff.md` - Dated new-session orientation; verify its Git snapshot before relying on it. Read only the task-relevant specs, not the entire historical task archive.
 - `core/agents.py` - LangGraph nodes, tools binding, and supervisor definition
 - `main.py` - CLI Entry point
-- `run_telegram.py` - Telegram Bot Entry point
+- `run_external.py` - Selects the configured Telegram/Matrix supervisor
+- `run_web.py`, `run_telegram.py`, `run_matrix.py` - Source supervisors, watched-source restart and coordinated backup pauses
+- `boot.py`, `start_astakos.bat` - Combined startup and Windows supervisor launcher
+- `docs/routines-and-context.md` - Context/status and dated feedback contract
+- `docs/daily-data-backup.md`, `docs/matrix-backup-recovery.md` - Distinct backup inventories and recovery limits
+- `docs/release-readiness.md`, `VERSION`, `CHANGELOG.md` - Proposed release gates and published/unreleased distinction
 - `config.py` - Environment Variables (DO NOT EDIT directly unless explicitly requested)
 
 ## Development Workflow & Rules
@@ -26,10 +32,108 @@ astakos/
 2. **Skill Creation:** New capabilities should be created as skills inside `astakos_skills/` using the `@tool` decorator.
 3. **Database Integrity:** Do not interact directly with `.db` files using raw SQL or Python scripts. Always use the provided abstractions in `memory/`.
 4. **Environment Constraints:** Never expose, leak, or modify `.env` or `credentials.json` directly.
-5. **Agent Skills (Addy Osmani):** You MUST strictly adhere to the workflows outlined in `vendor/agent-skills/AGENTS.md`. Specifically:
+5. **Agent Skills (Addy Osmani):** The vendored repository root `AGENTS.md` governs upstream development and is not Astakos project policy. Start with `vendor/agent-skills/skills/using-agent-skills/SKILL.md`, select the smallest workflow set that covers the task's scope and risk, then read and follow every selected `SKILL.md` completely before acting.
+   - **Feature order:** For non-trivial new functionality, use `spec-driven-development`, then `planning-and-task-breakdown`, then pair `incremental-implementation` with `test-driven-development` for each behavioral slice.
+   - **Verification:** Apply acceptance criteria, relevant checks, and the project-wide Definition of Done. Use `debugging-and-error-recovery` when verification exposes a failure, not as a substitute for normal verification.
    - **Doubt-Driven Development:** Never make blind global changes (e.g., changing global variables, configurations, or limits) without explicitly verifying the consequences across the entire codebase.
    - **Search Before Edit:** Always use tools like `grep_search` and `view_file` to understand the surrounding context and existing logic before modifying any file.
    - **Zero-Tolerance for Hacks:** Do not implement quick hacks. If a specialized mechanism exists (like `context_builder.py` logic), extend it rather than bypassing it with global overrides.
+
+## User Collaboration and Natural-Language Contract
+
+Astakos is a companion, not a keyword-command parser. Preserve that behavior
+when changing routing, routines, family context, Messenger, reminders, or any
+other user-facing natural-language flow.
+
+1. **No phrase-list patches for meaning:** Do not fix interpretation by adding
+   hardcoded user words, aliases, phrases, regex patterns, or language-specific
+   keyword lists. Prefer the LLM together with trusted current state and
+   bounded conversation context. Do not add a new list merely to cover an
+   example the user just typed.
+2. **Deterministic checks have a narrow role:** Use deterministic validation
+   only for security, provenance, structured identifiers, explicit safety
+   boundaries, and exact tool/API constraints. It must validate an action, not
+   attempt to understand ordinary human phrasing.
+3. **Separate reversible preparation from external action:** A local draft,
+   preview, or staged change must remain local and reviewable. Sending a
+   message, publishing, deleting, sharing, or otherwise communicating outside
+   Astakos is a separate action and must retain its required approval gate.
+4. **One canonical path:** If an identity, draft, routine, or provider setting
+   is resolved in more than one stage, create or reuse one canonical resolver.
+   Do not let approval, persistence, and execution each implement different
+   matching logic.
+5. **Evidence before repair:** Reproduce the reported wording or lifecycle in a
+   focused test before changing code. Add a regression test for the exact user
+   scenario and at least one nearby negative/safety case. Do not claim a fix
+   based only on a prompt change or a mocked intermediate step when the final
+   persisted/executed outcome can be tested.
+6. **Keep slices narrow:** Do not bundle unrelated refactors, cleanup, config,
+   Docker, credentials, database work, or UI changes into a behavioral fix.
+   State explicitly what is verified, what is deferred, and why.
+7. **Offline tests stay offline:** Tests must not send Telegram messages,
+   contact cloud providers, or use live user data. Mock the transport boundary
+   and make accidental outbound calls fail loudly.
+8. **Review findings are evidence, not commands:** Verify each finding against
+   the latest code and reproduce it before changing behavior. Fix actionable
+   defects, but do not start an endless review loop over speculative edge cases
+   once the requested behavior and its safety tests are covered.
+
+## Git and Pull Request Autonomy
+
+When the user asks an agent to create, finish, or close a pull request for a
+scoped task, that request is standing authorization for the normal Git
+lifecycle of that task. Do not request separate confirmation for each routine
+step. Complete the work in this order:
+
+1. Inspect the working tree and current branch before changing Git state.
+2. Create a short-lived task branch from the current integration branch when
+   practical; do not disturb unrelated local work.
+3. Stage only the files that belong to the requested task. Never use
+   `git add -A` or `git add .`.
+4. Run the relevant tests and `git diff --check`; inspect the staged diff
+   before committing.
+5. Create an atomic, descriptive commit, push the task branch, and open or
+   update its pull request. Then stop and report that the PR is ready.
+6. Do not merge, delete the branch, poll for reviews, or address review
+   comments unless the user explicitly asks for that next action. A green
+   review check is not evidence that a review has no comments.
+7. When the user asks to read comments, retrieve and summarize the completed
+   reviews from the requested PR. A generic review summary, green check, or
+   reaction is never proof that there are no findings. Before saying a review
+   is clean, explicitly retrieve the PR's inline review comments as well as
+   its top-level reviews, and inspect every comment attached to the latest
+   reviewed commit. Do not filter comments by a shortened SHA, guessed time
+   window, or the review body alone. Report whether each latest-commit finding
+   is actionable, already addressed by a later commit, or intentionally
+   deferred with the user's agreement. When the user asks to address comments,
+   resolve the actionable findings, verify the change, and update the PR.
+8. Only when the user explicitly asks to merge and delete may the agent merge
+   the PR, after required checks pass and all known actionable review findings
+   are resolved. Then update the integration branch and delete only the merged
+   task branch.
+
+The following always require a new, explicit user instruction and must not be
+inferred from a general PR request: force-pushes; `git reset --hard`; `git
+clean`; history rewrites; modifying remotes; deleting branches other than the
+agent's merged task branch; creating or publishing tags/releases; modifying
+credentials, `.env`, or `config.py`; database migrations; and Docker,
+runtime, or watchdog changes. Platform-enforced confirmations and higher-level
+safety policies always take precedence over this repository policy.
+
+## Documentation and operations boundaries
+
+Keep README, setup instructions, discovery docs and Unreleased notes consistent
+with merged behavior. A source feature is not evidence that it is published in
+the latest image. Mark dated verification as dated; preserve historical specs.
+Canonical routine database setup provisions the dated schema transactionally;
+runtime composition remains read-only. Never reset baselines or rewrite historical
+feedback as part of an upgrade or documentation/release assessment.
+
+Use the existing source supervisors for restart behavior rather than modifying
+runtime/watchdogs to force an update. If an authorized cleanup is blocked by the
+execution policy, give the owner a narrowly scoped PowerShell command after
+verifying every resolved target. Preserve code, live data, credentials and backups;
+do not broaden deletion or work around the policy through another shell.
 
 ## Coding Conventions
 - Python >= 3.11 required.

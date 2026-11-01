@@ -6,6 +6,9 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch, MagicMock
+import pytest
+
+pytestmark = pytest.mark.usefixtures("offline_fact_storage")
 
 
 # -- Routing tests (correct function per memory_type) ---------------
@@ -15,7 +18,13 @@ def test_save_fact_calls_save_fact():
     m = AstakosMemoryManager()
     with patch.object(m, '_save_fact', return_value=True) as mock:
         m.save(memory_type="fact", fact="test", category="general", agent_name="Chat_Agent")
-        mock.assert_called_once_with(fact="test", category="general", agent_name="Chat_Agent")
+        mock.assert_called_once()
+        kwargs = mock.call_args.kwargs
+        assert kwargs["fact"] == "test"
+        assert kwargs["category"] == "general"
+        assert kwargs["agent_name"] == "Chat_Agent"
+        assert "query_emb" in kwargs
+        assert "doc_emb" in kwargs
 
 def test_save_reflection_calls_save_reflection():
     from memory.vector_store import AstakosMemoryManager

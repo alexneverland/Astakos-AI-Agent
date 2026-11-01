@@ -7,13 +7,16 @@ Run: pytest tests/test_mail_agent_loop_guard.py -v
 import re
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 
+from core.mail_intent import (
+    is_mail_body_result,
+    is_mail_tool_result,
+    select_mail_read_action,
+)
 
 # ── Extraction of logic corresponding to the agents.py code ──────────────
 
 def _clean(x):
     return x if isinstance(x, str) else (x or "")
-
-
 def _extract_known_ids(history):
     """Replicates the v4 ID extraction logic: newest IDs first."""
     known_ids = []
@@ -293,3 +296,37 @@ def test_full_flow_second_turn_uses_hint():
     # v4 hint: ID available from previous turn
     ids = _extract_known_ids(history)
     assert "19ec7b7695a56646" in ids, "ID should be found in history for hint"
+
+
+def test_reply_review_request_prefers_thread_read():
+    intents = {
+        "read_words": ["διαβασε"],
+        "thread_words": ["thread"],
+        "thread_review_words": ["την απαντηση που εδωσ"],
+    }
+
+    assert select_mail_read_action(
+        "διαβασε το mail και την απαντηση που εδωσσα",
+        intents,
+    ) == "read_thread"
+
+
+def test_mail_body_result_uses_configured_prefixes():
+    content_prefix = "📩 Content:"
+    thread_prefix = "📩 Entire thread"
+
+    assert is_mail_body_result(
+        "📩 Content:\nBody",
+        content_prefix,
+        thread_prefix,
+    )
+    assert is_mail_body_result(
+        "📩 Entire thread (2 messages):\nBody",
+        content_prefix,
+        thread_prefix,
+    )
+    assert is_mail_tool_result(
+        "📩 Entire thread (2 messages):\nBody",
+        content_prefix,
+        thread_prefix,
+    )

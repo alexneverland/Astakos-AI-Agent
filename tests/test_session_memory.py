@@ -108,6 +108,57 @@ def test_run_session_summary_uses_persistent_unsummarized_exchanges(monkeypatch)
     session_memory.is_summarizing = False
 
 
+def test_run_session_summary_save_failure_keeps_exchanges(monkeypatch, capsys):
+    import memory.session_memory as session_memory
+
+    class Response:
+        text = json.dumps({
+            "date": "2026-06-04 18:42",
+            "channel": "mixed",
+            "summary": "Συζητήθηκαν web και Telegram.",
+            "completed": [],
+            "pending": [],
+            "next_session_hint": "",
+            "mood": "productive",
+        }, ensure_ascii=False)
+
+    exchanges = [
+        {
+            "id": "ex-web",
+            "time": "18:40",
+            "channel": "web",
+            "agent": "Chat_Agent",
+            "user": "web question",
+            "ai": "web answer",
+        },
+    ]
+    marked = []
+    emitted = []
+
+    session_memory.SESSION_LOGS[:] = []
+    session_memory.is_summarizing = False
+
+    monkeypatch.setattr(session_memory, "load_unsummarized_exchanges", lambda limit=200: exchanges)
+    monkeypatch.setattr(session_memory, "mark_exchanges_summarized", lambda ids: marked.extend(ids))
+    monkeypatch.setattr(session_memory, "safe_gemini_call", lambda prompt: Response())
+
+    # Mock save to return False, simulating a Chroma failure
+    monkeypatch.setattr(session_memory.memory, "save", lambda **kwargs: False)
+    monkeypatch.setattr(session_memory.bus, "emit", lambda *args, **kwargs: emitted.append((args, kwargs)))
+
+    assert session_memory._run_session_summary(channel="web") is False
+
+    # The save failed, so exchanges should NOT be marked as summarized
+    assert marked == []
+    # No session_ended event should be emitted
+    assert emitted == []
+    # is_summarizing must be reset to False
+    assert session_memory.is_summarizing is False
+    # The success terminal message should be absent
+    captured = capsys.readouterr()
+    assert "Archived successfully!" not in captured.out
+
+
 def test_event_memory_candidate_captures_family_day_event():
     import datetime
     import memory.session_memory as session_memory
@@ -267,7 +318,7 @@ def test_memory_sifter_saves_temporary_family_memory_even_if_llm_returns_empty(m
     )
 
 
-def test_confirmed_memory_candidate_captures_family_watch():
+def test_contextual_gift_confirmation_defers_to_semantic_sifter():
     import datetime
     import memory.session_memory as session_memory
 
@@ -279,13 +330,9 @@ def test_confirmed_memory_candidate_captures_family_watch():
         now=datetime.datetime(2026, 6, 5, 19, 30),
     )
 
-    assert candidate["memory_type"] == "fact"
-    assert candidate["category"] == "family"
-    assert candidate["source"] == "telegram"
-    assert candidate["confidence"] == 0.9
-    assert "2026-06-05" in candidate["fact"]
-    assert "Rosefield Bangle S - White Gold" in candidate["fact"]
-    assert "Partner" in candidate["fact"]
+    # The user supplied a reference, not the product identity. An assistant
+    # confirmation must not become a user-authored fact without context resolution.
+    assert candidate is None
 
 
 def test_confirmed_memory_candidate_infers_project_category():

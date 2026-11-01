@@ -33,7 +33,7 @@ def _run_missed(db_rows, fixed_now, grace=90, quiet=False, muted=False, cooldown
     """
     Calls startup_check_missed_routines() against a real sqlite DB
     with all external side-effects mocked.
-    Returns the list of messages passed to send_telegram_msg.
+    Returns the list of messages passed to the assistant delivery boundary.
 
     BASE_DIR and ROUTINE_MISS_GRACE_MINUTES are imported *from config*
     inside the function, so we patch them at the source module (config).
@@ -56,7 +56,9 @@ def _run_missed(db_rows, fixed_now, grace=90, quiet=False, muted=False, cooldown
             patch.object(bot, "is_proactive_muted",   return_value=muted),
             patch.object(bot, "is_duplicate_routine", return_value=cooldown),
             patch.object(bot, "_craft_deferred_msg",  return_value="deferred_msg"),
-            patch.object(bot, "send_telegram_msg",    side_effect=lambda m: sent.append(m)),
+            patch.object(bot, "_dated_deferred_routine_sender", None),
+            patch.object(bot, "_send_and_record_assistant",
+                         side_effect=lambda m, **kwargs: sent.append(m)),
             patch.object(bot, "log_event"),
             patch.object(bot, "bus", MagicMock()),
             patch.object(bot, "pending_routine_confirmations", {}),
