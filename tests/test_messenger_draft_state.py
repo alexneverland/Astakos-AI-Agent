@@ -140,7 +140,7 @@ def test_relay_local_payload_overwrites_draft_with_conversational_text(monkeypat
 
     draft_file = tmp_path / "messenger_draft.json"
     monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
-    monkeypatch.setattr("tools.web._messenger_target_status", lambda target: (True, ""))
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"sofia": "Sofia"})
     save_draft("Sofia", "Παλιό μήνυμα")
 
     result = relay_local_payload.func("Sofia", "Ποιο draft λες; Θα το δω μετά.")

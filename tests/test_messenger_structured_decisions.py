@@ -34,6 +34,7 @@ def test_reported_request_persists_draft_then_send_requires_approval(
     from datetime import date
     env = lifecycle
     monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"demo": "test-recipient"})
+    monkeypatch.setattr("core.messaging_channel.resolve_external_channel", lambda: "matrix")
     old = env["save"]("test-recipient", "Previously sent synthetic message")
     old["status"] = "sent"
     Path(env["config"].MESSENGER_DRAFT_FILE).write_text(json.dumps(old), encoding="utf-8")

@@ -7,7 +7,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
+from typing import Any
 import pytest
+from tests.test_messenger_lifecycle_regression import lifecycle, owner_messages
 
 
 @pytest.fixture(autouse=True)
@@ -786,20 +788,34 @@ def test_active_draft_edit_history_excludes_external_messages():
     ]) == [trusted_user_message]
 
 
-def test_active_draft_edit_filter_runs_after_registry_expansion():
-    """A draft-only run retains no dynamically registered tools."""
-    from types import SimpleNamespace
-    from core.agents import _draft_edit_tools_only
+def test_primary_draft_preserves_sibling_tool_but_removes_batched_send(
+    lifecycle: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mixed preparation keeps sibling work while the native draft remains unsent."""
+    from langchain_core.messages import AIMessage
+    from core.messenger_draft import capture_draft_write_guard, load_draft
+    from services.messenger_lifecycle import primary_preparation_result
+    from tools.web import relay_local_payload
 
-    relay_tool = SimpleNamespace(name="relay_local_payload")
-    dynamic_write = SimpleNamespace(name="mark_recipe_favorite")
-    dynamic_read = SimpleNamespace(name="get_saved_recipe")
-
-    assert _draft_edit_tools_only([
-        relay_tool,
-        dynamic_write,
-        dynamic_read,
-    ]) == [relay_tool]
+    env = lifecycle
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"demo": "demo-recipient"})
+    rows = owner_messages(env, "Prepare a greeting for Demo and read the saved recipe")
+    state = {"messages": rows, "channel": "web",
+             "messenger_draft_write_guard": capture_draft_write_guard(rows)}
+    response = AIMessage(content="", tool_calls=[
+        {"name": "relay_local_payload", "id": "draft", "args": {
+            "target_entity": "Demo", "payload_data": "A local greeting"}},
+        {"name": "get_saved_recipe", "id": "recipe", "args": {"recipe_id": "demo"}},
+        {"name": "execute_local_pipeline", "id": "send", "args": {}},
+    ])
+    filtered, selected = primary_preparation_result(state, rows, response)
+    assert selected
+    assert [call["name"] for call in filtered.tool_calls] == ["relay_local_payload", "get_saved_recipe"]
+    relay_local_payload.invoke({"target_entity": "Demo", "payload_data": "A local greeting",
+                                "state": {**state, "messenger_draft_preparation_authorized": selected}})
+    assert load_draft()["message"] == "A local greeting"
+    assert load_draft()["status"] == "pending"
+    assert not env["approval"].list_pending()
 
 
 def test_active_draft_edit_cannot_change_target_after_memory_read(monkeypatch, tmp_path):
