@@ -19,6 +19,8 @@ import json
 import time
 import uuid
 import threading
+import re
+from filelock import FileLock
 from datetime import datetime
 
 _TRACES_DIR = os.path.join(os.path.dirname(__file__), "..", "logs", "traces")
@@ -30,7 +32,101 @@ _MAX_MSG = 200   # max chars for user/response preview
 
 def _truncate(val, maxlen: int = _MAX_STR) -> str:
     s = str(val) if not isinstance(val, str) else val
+    s = _redact_preview(s)
     return s[:maxlen] + ("…" if len(s) > maxlen else "")
+
+
+def _credential_field(key: str) -> bool:
+    """Recognize credential field names consistently in JSON and text."""
+    normalized = key.casefold().replace("_", "").replace("-", "").replace(" ", "")
+    return any(part in normalized for part in (
+        "token", "password", "secret", "apikey", "authorization", "credentials",
+        "privatekey", "passphrase"))
+
+
+def _redact_private_key_blocks(value: str) -> str:
+    """Remove complete or interrupted PEM private keys with forward-only scans."""
+    chunks: list[str] = []
+    cursor = 0
+    headers = re.finditer(r"-----BEGIN ([A-Z0-9 ]*PRIVATE KEY)-----", value)
+    for header in headers:
+        if header.start() < cursor:
+            continue
+        closing = "-----END " + header[1] + "-----"
+        end = value.find(closing, header.end())
+        end = len(value) if end < 0 else end + len(closing)
+        chunks.extend((value[cursor:header.start()], "[REDACTED]"))
+        cursor = end
+    chunks.append(value[cursor:])
+    return "".join(chunks)
+
+
+def _redact_text_fields(value: str) -> str:
+    """Scan field tokens once; consume quoted values without regex backtracking."""
+    chunks: list[str] = []
+    cursor = 0
+    for field in re.finditer(r"[\w-]+", value):
+        if field.start() < cursor:
+            continue
+        key, end = field[0], field.end()
+        # Preserve support for prose labels such as "API key" and "private key".
+        if key.casefold() in {"api", "private"}:
+            second = end
+            while second < len(value) and value[second] in " \t":
+                second += 1
+            if value[second:second + 3].casefold() == "key":
+                key += "key"
+                end = second + 3
+        if not _credential_field(key):
+            continue
+        if end < len(value) and value[end] in "\"'":
+            end += 1
+        while end < len(value) and value[end].isspace():
+            end += 1
+        if end == len(value) or value[end] not in ":=":
+            continue
+        end += 1
+        while end < len(value) and value[end].isspace():
+            end += 1
+        start = end
+        if end < len(value) and value[end] in "\"'":
+            quote = value[end]
+            end += 1
+            while end < len(value):
+                char = value[end]
+                end += 1
+                if char == "\\":
+                    end = min(end + 1, len(value))
+                elif char == quote:
+                    break
+        else:
+            while end < len(value) and not value[end].isspace() and value[end] not in ",;}<":
+                end += 1
+        chunks.extend((value[cursor:start], '"[REDACTED]"'))
+        cursor = end
+    chunks.append(value[cursor:])
+    return "".join(chunks)
+
+
+def _redact_preview(value: str) -> str:
+    """Redact credential-shaped fields before truncating diagnostic previews."""
+    def redact(data: object) -> object:
+        """Walk structured previews without copying credential values."""
+        if isinstance(data, dict):
+            return {key: ("[REDACTED]" if _credential_field(str(key))
+                else redact(item)) for key, item in data.items()}
+        if isinstance(data, list):
+            return [redact(item) for item in data]
+        return data
+    try:
+        decoded = json.loads(value)
+        if isinstance(decoded, (dict, list)):
+            value = json.dumps(redact(decoded), ensure_ascii=False)
+    except (ValueError, TypeError):
+        pass
+    value = _redact_private_key_blocks(value)
+    value = re.sub(r"(?i)\bBearer\s+[^\s\"'<>]+", "Bearer [REDACTED]", value)
+    return _redact_text_fields(value)
 
 
 class ExecutionTrace:
@@ -47,11 +143,19 @@ class ExecutionTrace:
         trace.save()
     """
 
-    def __init__(self, channel: str, user_message: str):
+    def __init__(self, channel: str, user_message: str, *,
+                 console: bool = True, correlation_id: str | None = None) -> None:
+        from services.turn_timing import current_timing
+        timing = current_timing()
         self.trace_id       = str(uuid.uuid4())[:8]
         self.start_ts       = time.monotonic()
         self.timestamp      = datetime.now().isoformat(timespec="seconds")
+        if timing is not None:
+            self.trace_id, self.start_ts, self.timestamp = timing.trace_id, timing.start, timing.timestamp
+            timing.trace = self
         self.channel        = channel
+        self.correlation_id = correlation_id or self.trace_id
+        self._console = console and channel in {"matrix", "web", "telegram"}
         self.user_message   = _truncate(user_message, _MAX_MSG)
         self.agent          = None          # last agent node
         self.tool_calls     = []            # list of dicts
@@ -59,17 +163,44 @@ class ExecutionTrace:
         self.error          = None
         self.loop_guard     = False
         self.phase_timings  = {}            # extra per-turn timing breakdown
+        self._phase_timing_counts: dict[str, int] = {}
         self._pending: dict = {}            # tool_call_id → {name, args, t0}
+        self._log_console("turn_started", user_message=self.user_message)
+
+    def _log_console(self, event: str, **fields: object) -> None:
+        """Mirror bounded, redacted evidence without interrupting a turn on I/O failure."""
+        if not self._console:
+            return
+        record = {
+            "event": event, "channel": self.channel, "trace_id": self.trace_id,
+            "correlation_id": _truncate(self.correlation_id) if self.correlation_id else None,
+            "elapsed_ms": int((time.monotonic() - self.start_ts) * 1000),
+            **{key: _truncate(value) if isinstance(value, str) else value
+               for key, value in fields.items()},
+        }
+        try:
+            print(f"[{self.channel.title()}Trace]: " + json.dumps(record, ensure_ascii=False), flush=True)
+        except (OSError, UnicodeError, ValueError):
+            # A closed/unsupported terminal must not change execution or persistence.
+            pass
 
     # ── Stream event processor ───────────────────────────────────
 
     def process_event(self, event: dict):
         """Called for each event of graph.stream()."""
         for node, data in event.items():
+            self._log_console("graph_step", node=node)
             if node == "tool_loop_block":
                 self.loop_guard = True
             if data is None:
                 continue
+            node_phase_timings = data.get("trace_phase_timings", {})
+            if isinstance(node_phase_timings, dict):
+                for key, value in node_phase_timings.items():
+                    try:
+                        self._record_phase_timing(key, int(value))
+                    except Exception:
+                        continue
             msgs = data.get("messages", [])
             for msg in msgs:
                 self._process_message(node, msg)
@@ -82,7 +213,7 @@ class ExecutionTrace:
         if phase_timings:
             for key, value in phase_timings.items():
                 try:
-                    self.phase_timings[key] = int(value)
+                    self._record_phase_timing(key, int(value))
                 except Exception:
                     continue
 
@@ -98,6 +229,8 @@ class ExecutionTrace:
                     "args":       _truncate(json.dumps(args, ensure_ascii=False)),
                     "t0":         time.monotonic(),
                 }
+                self._log_console("tool_called", node=node, tool=name,
+                    tool_call_id=tid, args=self._pending[tid]["args"])
 
         # ToolMessage → match with pending and record result
         if getattr(msg, "type", None) == "tool" or msg.__class__.__name__ == "ToolMessage":
@@ -123,6 +256,26 @@ class ExecutionTrace:
                 "duration_ms": duration_ms,
                 "error":       result_str.startswith("❌") or "Error" in result_str[:80],
             })
+            self._log_console("tool_result", tool_call_id=tid, **self.tool_calls[-1])
+
+    def _record_phase_timing(self, key: str, value: int) -> None:
+        """Retain individual samples when an agent phase repeats in one turn."""
+        previous = self.phase_timings.get(key)
+        count = self._phase_timing_counts.get(key, 0) + 1
+        self._phase_timing_counts[key] = count
+        self._log_console("phase", phase=key, value=value)
+
+        if previous is not None and key.endswith("_ms"):
+            stem = key[:-3]
+            if count == 2:
+                self.phase_timings[f"{stem}_1_ms"] = previous
+                self.phase_timings[f"{stem}_total_ms"] = previous
+            self.phase_timings[f"{stem}_{count}_ms"] = value
+            self.phase_timings[f"{stem}_total_ms"] += value
+            self.phase_timings[key] = self.phase_timings[f"{stem}_total_ms"]
+            return
+
+        self.phase_timings[key] = value
 
     # ── Finalize & Save ──────────────────────────────────────────
 
@@ -132,6 +285,7 @@ class ExecutionTrace:
             self.phase_timings[name] = int(duration_ms)
         except Exception:
             self.phase_timings[name] = duration_ms
+        self._log_console("phase", phase=name, value=self.phase_timings[name])
 
     def finalize(self, response: str | None = None, error: str | None = None):
         """Closes the trace with a final response and error."""
@@ -141,10 +295,24 @@ class ExecutionTrace:
                 self.loop_guard = True
         if error:
             self.error = _truncate(str(error), 200)
+        for pending in self._pending.values():
+            self.tool_calls.append({"tool": pending["tool"], "args": pending["args"],
+                "result": "No tool result recorded", "status": "unresolved",
+                "duration_ms": int((time.monotonic()-pending["t0"]) * 1000), "error": False})
+            self._log_console("tool_unresolved", **self.tool_calls[-1])
+        self._pending.clear()
         self.duration_ms = int((time.monotonic() - self.start_ts) * 1000)
+        self._log_console("turn_finished", response=self.response, error=self.error,
+            agent=self.agent, duration_ms=self.duration_ms, loop_guard=self.loop_guard,
+            tool_count=len(self.tool_calls))
 
     def save(self):
         """Saves to logs/traces/YYYY-MM-DD.json (thread-safe append)."""
+        from services.turn_timing import current_timing
+        timing = current_timing()
+        if timing is not None:
+            timing.trace = self
+            return  # The handler owns the final save, including pre/post-graph work.
         try:
             os.makedirs(_TRACES_DIR, exist_ok=True)
             today     = datetime.now().strftime("%Y-%m-%d")
@@ -155,6 +323,7 @@ class ExecutionTrace:
                 "trace_id":    self.trace_id,
                 "timestamp":   self.timestamp,
                 "channel":     self.channel,
+                "correlation_id": self.correlation_id,
                 "agent":       self.agent,
                 "user_message": self.user_message,
                 "tool_calls":  self.tool_calls,
@@ -163,9 +332,10 @@ class ExecutionTrace:
                 "error":       self.error,
                 "duration_ms": getattr(self, "duration_ms", None),
                 "phase_timings": self.phase_timings,
+                "latency": getattr(self, "latency", None),
             }
 
-            with _write_lock:
+            with _write_lock, FileLock(log_file + ".lock", timeout=5):
                 entries = []
                 if os.path.exists(log_file):
                     try:

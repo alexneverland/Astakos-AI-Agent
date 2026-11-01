@@ -1,3 +1,12 @@
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+pytestmark = pytest.mark.usefixtures("offline_behavioral_io")
+
 from core.utils import (
     looks_like_web_tool_error,
     filter_recent_web_tool_results,
@@ -8,9 +17,39 @@ from core.utils import (
     looks_like_terminal_messenger_draft_result,
     build_messenger_draft_ready_reply,
 )
-from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
+from langchain_core.messages import HumanMessage, ToolMessage, AIMessage, SystemMessage
+from core.i18n import t
+
+
+@pytest.fixture(autouse=True)
+def isolated_draft_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give direct node tests the isolated draft and entry guard used by the graph."""
+    import config
+    import core.agents as agents
+    import core.approval as approval
+    from core.messenger_draft import capture_draft_write_guard
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(tmp_path / "draft.json"))
+    monkeypatch.setattr(approval, "PENDING_FILE", str(tmp_path / "pending.json"))
+    # These tests exercise tool binding and failure handling, not live retrieval.
+    monkeypatch.setattr(agents, "build_prompt", lambda history, base, **kwargs: base)
+    monkeypatch.setattr("core.utils.build_prompt", lambda history, base, **kwargs: base)
+    boundary = agents.messenger_lifecycle_boundary
+    def guarded(state: dict, history: list, agent: str, invoke: Any) -> tuple:
+        """Supply graph-entry identity only when the test calls the node directly."""
+        if "messenger_draft_write_guard" not in state:
+            state = {**state, "messenger_draft_write_guard": capture_draft_write_guard(history)}
+        return boundary(state, history, agent, invoke)
+    monkeypatch.setattr(agents, "messenger_lifecycle_boundary", guarded)
+
 
 # 1. Detect web error sentinel
+def _invoke_with_native_guard(node, state):
+    """Supply the guard normally captured by the graph entry node."""
+    from core.messenger_draft import capture_draft_write_guard
+    return node({**state, "messenger_draft_write_guard": capture_draft_write_guard(state["messages"])})
+
+
+
 def test_looks_like_web_tool_error_detects_structured_prefix():
     assert looks_like_web_tool_error("[WEB_TOOL_ERROR][duckduckgo_search][reason=timeout] ...") is True
 
@@ -77,7 +116,7 @@ def test_guard_ignores_old_failures():
     assert len(web_successes) == 1
 
 
-from core.agents import web_agent_node
+from core.agents import chat_agent_node, web_agent_node
 
 def test_web_agent_node_overrides_hallucinated_answer_when_all_web_tools_fail(monkeypatch):
     class FakeBoundLLM:
@@ -110,6 +149,123 @@ def test_web_agent_node_overrides_hallucinated_answer_when_all_web_tools_fail(mo
     assert "4.300" not in reply
     assert "δεν θέλω να σου πω" in reply
     assert "αξιόπιστο αποτέλεσμα" in reply
+
+
+def test_web_agent_node_surfaces_unverified_search_links_without_llm_synthesis(monkeypatch):
+    """Link-only search fallback is shown directly and never treated as evidence."""
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="Βρήκα επιβεβαιωμένες ενεργές αγγελίες.")
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *a, **k: "test prompt", raising=False)
+
+    fallback = (
+        "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]\n"
+        "Δεν μπόρεσα να επιβεβαιώσω αποτελέσματα.\n"
+        "Ζωντανή αναζήτηση Google: https://www.google.com/search?q=test\n"
+        "Ζωντανή αναζήτηση Bing: https://www.bing.com/search?q=test"
+    )
+    state = {
+        "messages": [
+            HumanMessage(content="Βρες μου αγγελίες"),
+            AIMessage(content="", tool_calls=[{"name": "duckduckgo_search", "args": {}, "id": "t1"}]),
+            ToolMessage(tool_call_id="t1", name="duckduckgo_search", content=fallback),
+        ],
+        "channel": "telegram",
+    }
+
+    result = web_agent_node(state)
+    reply = result["messages"][-1].content
+
+    assert "επιβεβαιωμένες ενεργές αγγελίες" not in reply
+    assert "https://www.google.com/search?q=test" in reply
+    assert "https://www.bing.com/search?q=test" in reply
+    assert "[WEB_TOOL_ERROR]" not in reply
+
+
+def test_web_agent_node_handles_unverified_links_alongside_successful_web_tool(monkeypatch):
+    """A successful companion tool cannot make link-only search evidence trustworthy."""
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="Βρήκα επιβεβαιωμένες ενεργές αγγελίες.")
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *a, **k: "test prompt", raising=False)
+
+    fallback = (
+        "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]\n"
+        "Δεν μπόρεσα να επιβεβαιώσω αγγελίες.\n"
+        "Ζωντανή αναζήτηση Google: https://www.google.com/search?q=jobs"
+    )
+    state = {
+        "messages": [
+            HumanMessage(content="Πες μου τον καιρό και βρες αγγελίες"),
+            AIMessage(content="", tool_calls=[
+                {"name": "get_weather_forecast", "args": {}, "id": "t1"},
+                {"name": "duckduckgo_search", "args": {}, "id": "t2"},
+            ]),
+            ToolMessage(
+                tool_call_id="t1",
+                name="get_weather_forecast",
+                content="Ο καιρός σήμερα είναι αίθριος.",
+            ),
+            ToolMessage(tool_call_id="t2", name="duckduckgo_search", content=fallback),
+        ],
+        "channel": "telegram",
+    }
+
+    result = web_agent_node(state)
+    reply = result["messages"][-1].content
+
+    assert "Ο καιρός σήμερα είναι αίθριος." in reply
+    assert "https://www.google.com/search?q=jobs" in reply
+    assert "επιβεβαιωμένες ενεργές αγγελίες" not in reply
+    assert "[WEB_TOOL_ERROR]" not in reply
+
+
+def test_chat_agent_node_surfaces_unverified_search_links_without_synthesis(monkeypatch):
+    """The shared fallback boundary protects a non-Web search consumer."""
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="Βρήκα επιβεβαιωμένες ενεργές αγγελίες.")
+
+    class FakeLLM:
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents._has_active_messenger_draft", lambda: False)
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *a, **k: "test prompt", raising=False)
+
+    fallback = (
+        "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]\n"
+        "Δεν μπόρεσα να επιβεβαιώσω αγγελίες.\n"
+        "Ζωντανή αναζήτηση Google: https://www.google.com/search?q=jobs"
+    )
+    result = chat_agent_node({
+        "messages": [
+            HumanMessage(content="Βρες μου αγγελίες"),
+            AIMessage(content="", tool_calls=[
+                {"name": "duckduckgo_search", "args": {}, "id": "t1"},
+            ]),
+            ToolMessage(tool_call_id="t1", name="duckduckgo_search", content=fallback),
+        ],
+        "channel": "telegram",
+    })
+    reply = result["messages"][-1].content
+
+    assert "https://www.google.com/search?q=jobs" in reply
+    assert "επιβεβαιωμένες ενεργές αγγελίες" not in reply
+    assert "[WEB_TOOL_ERROR]" not in reply
 
 def test_web_agent_node_does_not_override_when_one_web_tool_succeeds(monkeypatch):
     class FakeBoundLLM:
@@ -296,7 +452,7 @@ def test_parse_linkedin_draft_result_detects_json_payload():
     assert looks_like_terminal_linkedin_draft_result(raw) is True
 
 
-def test_web_agent_recovers_from_stale_messenger_send_without_draft(monkeypatch, tmp_path):
+def test_web_agent_returns_inactive_draft_reply_without_retrying_stale_send(monkeypatch, tmp_path):
     import config
     from core.agents import web_agent_node
     from langchain_core.messages import AIMessage, HumanMessage
@@ -324,15 +480,11 @@ def test_web_agent_recovers_from_stale_messenger_send_without_draft(monkeypatch,
             )
 
     class FakeLLM:
-        def __init__(self):
-            self.recovery_calls = 0
-
         def bind_tools(self, tools):
             return FakeBoundLLM()
 
         def invoke(self, messages):
-            self.recovery_calls += 1
-            return AIMessage(content="Ωραία, να περάσετε όμορφα απόψε.")
+            raise AssertionError("stale Messenger send must not retry the LLM")
 
     fake_llm = FakeLLM()
     monkeypatch.setattr("core.agents.llm", fake_llm)
@@ -343,6 +495,1254 @@ def test_web_agent_recovers_from_stale_messenger_send_without_draft(monkeypatch,
     })
 
     reply = result["messages"][-1]
-    assert fake_llm.recovery_calls == 1
-    assert reply.content == "Ωραία, να περάσετε όμορφα απόψε."
+    assert reply.content == t("prompts.ext_str_14")
     assert not getattr(reply, "tool_calls", [])
+
+
+def test_web_agent_retries_empty_synthesis_before_returning_to_user(monkeypatch):
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="")
+
+    class FakeLLM:
+        def __init__(self):
+            self.retry_calls = 0
+
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+        def invoke(self, messages):
+            if "MESSENGER_PREPARATION_DECISION" in str(messages[0].content):
+                return AIMessage(content='{"prepare":false}')
+            self.retry_calls += 1
+            return AIMessage(content="Βρήκα νωπό κοτόπουλο στον Μασούτη.")
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+    monkeypatch.setattr(
+        "core.agents.load_agent_prompt",
+        lambda *args, **kwargs: "test prompt",
+        raising=False,
+    )
+
+    result = web_agent_node({
+        "messages": [
+            HumanMessage(content="Πού έχει νωπό κοτόπουλο;"),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "search_supermarket_prices", "args": {}, "id": "t1"}],
+            ),
+            ToolMessage(
+                tool_call_id="t1",
+                name="search_supermarket_prices",
+                content="RAW_TOOL_RESULT_MUST_NOT_REACH_USER",
+            ),
+        ],
+        "channel": "web",
+    })
+
+    reply = result["messages"][-1].content
+
+    assert fake_llm.retry_calls == 1
+    assert reply
+    assert reply != t("tools.web.empty_synthesis")
+    assert "RAW_TOOL_RESULT_MUST_NOT_REACH_USER" not in reply
+
+
+def test_web_agent_never_returns_raw_results_after_empty_retries(monkeypatch):
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="")
+
+    class FakeLLM:
+        def __init__(self):
+            self.retry_calls = 0
+
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+        def invoke(self, messages):
+            if "MESSENGER_PREPARATION_DECISION" in str(messages[0].content):
+                return AIMessage(content='{"prepare":false}')
+            self.retry_calls += 1
+            return AIMessage(content="")
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+    monkeypatch.setattr(
+        "core.agents.load_agent_prompt",
+        lambda *args, **kwargs: "test prompt",
+        raising=False,
+    )
+
+    result = web_agent_node({
+        "messages": [
+            HumanMessage(content="Πού έχει νωπό κοτόπουλο;"),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "search_supermarket_prices", "args": {}, "id": "t1"}],
+            ),
+            ToolMessage(
+                tool_call_id="t1",
+                name="search_supermarket_prices",
+                content="RAW_TOOL_RESULT_MUST_NOT_REACH_USER",
+            ),
+        ],
+        "channel": "web",
+    })
+
+    reply = result["messages"][-1].content
+
+    assert fake_llm.retry_calls == 3
+    assert reply == t("tools.web.empty_synthesis")
+    assert result["messages"][-1]._astakos_phase_timings[
+        "web_empty_synthesis_fallback"
+    ] == 1
+    assert "RAW_TOOL_RESULT_MUST_NOT_REACH_USER" not in reply
+
+
+def test_web_agent_skips_empty_retries_when_all_web_tools_failed(monkeypatch):
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="")
+
+    class FakeLLM:
+        def __init__(self):
+            self.retry_calls = 0
+
+        def bind_tools(self, tools):
+            return FakeBoundLLM()
+
+        def invoke(self, messages):
+            if "MESSENGER_PREPARATION_DECISION" in str(messages[0].content):
+                return AIMessage(content='{"prepare":false}')
+            self.retry_calls += 1
+            return AIMessage(content="should not be used")
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+    monkeypatch.setattr(
+        "core.agents.load_agent_prompt",
+        lambda *args, **kwargs: "test prompt",
+        raising=False,
+    )
+
+    result = web_agent_node({
+        "messages": [
+            HumanMessage(content="Πού έχει νωπό κοτόπουλο;"),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "search_supermarket_prices", "args": {}, "id": "t1"}],
+            ),
+            ToolMessage(
+                tool_call_id="t1",
+                name="search_supermarket_prices",
+                content="[WEB_TOOL_ERROR][search_supermarket_prices][reason=timeout]",
+            ),
+        ],
+        "channel": "web",
+    })
+
+    assert fake_llm.retry_calls == 0
+    assert result["messages"][-1].content != t("tools.web.empty_synthesis")
+
+
+def test_web_research_budget_is_exhausted_after_three_generic_research_calls():
+    from core.agents import _has_exhausted_web_research_budget
+
+    history = [
+        HumanMessage(content="Research this topic."),
+        AIMessage(content="", tool_calls=[
+            {"name": "duckduckgo_search", "args": {"query": "first"}, "id": "t1"},
+        ]),
+        ToolMessage(tool_call_id="t1", name="duckduckgo_search", content="first source"),
+        AIMessage(content="", tool_calls=[
+            {"name": "browse_url", "args": {"url": "https://example.com/1"}, "id": "t2"},
+        ]),
+        ToolMessage(tool_call_id="t2", name="browse_url", content="second source"),
+        AIMessage(content="", tool_calls=[
+            {"name": "duckduckgo_search", "args": {"query": "third"}, "id": "t3"},
+        ]),
+        ToolMessage(tool_call_id="t3", name="duckduckgo_search", content="third source"),
+    ]
+
+    assert _has_exhausted_web_research_budget(history) is True
+
+
+def test_multi_source_research_counts_toward_existing_budget():
+    """The aggregate provider tool cannot bypass the three-call loop guard."""
+    from core.agents import _has_exhausted_web_research_budget
+
+    history = [HumanMessage(content="Research this topic.")]
+    for index in range(3):
+        call_id = f"research-{index}"
+        history.extend([
+            AIMessage(content="", tool_calls=[{
+                "name": "research_web",
+                "args": {"query": "topic", "sources": ["web", "github"]},
+                "id": call_id,
+            }]),
+            ToolMessage(
+                tool_call_id=call_id,
+                name="research_web",
+                content="[RESEARCH_RESULTS]",
+            ),
+        ])
+
+    assert _has_exhausted_web_research_budget(history) is True
+
+
+@pytest.mark.parametrize(
+    ("result_counts", "requested_limits", "sources_by_call", "search_tools_expected"),
+    [
+        ([8], [8], [["reddit"]], False),
+        ([6], [8], [["reddit"]], True),
+        ([1, 0], [1, 2], [["reddit"], ["reddit"]], True),
+        ([1, 2], [1, 2], [["reddit"], ["reddit"]], False),
+        ([8], [8], [["web", "github"]], True),
+    ],
+    ids=[
+        "full-result-cap",
+        "partial-results",
+        "independent-partial-subquery",
+        "all-independent-subqueries-full",
+        "multi-source-global-cap",
+    ],
+)
+def test_web_agent_hides_new_search_only_after_research_web_fills_limit(
+    monkeypatch,
+    result_counts,
+    requested_limits,
+    sources_by_call,
+    search_tools_expected,
+):
+    """Full bounded results stop new searches; partial results may be supplemented."""
+    from core.agents import web_agent_node
+
+    class FakeBoundLLM:
+        def __init__(self, tools):
+            self.tool_names = {getattr(tool, "name", "") for tool in tools}
+
+        def invoke(self, messages):
+            return AIMessage(content="Research synthesis")
+
+    class FakeLLM:
+        def __init__(self):
+            self.bound = None
+
+        def bind_tools(self, tools):
+            self.bound = FakeBoundLLM(tools)
+            return self.bound
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+    monkeypatch.setattr("core.utils.load_agent_prompt", lambda *args, **kwargs: "test prompt")
+
+    messages = [HumanMessage(content="Find Reddit discussions for each subquestion.")]
+    for call_index, (result_count, requested_limit, sources) in enumerate(
+        zip(result_counts, requested_limits, sources_by_call)
+    ):
+        call_id = f"research-{call_index}"
+        payload = {
+            "results": [
+                {"title": f"Thread {call_index}-{index}", "url": f"https://reddit.com/r/test/{call_index}-{index}", "content": "", "source": "reddit"}
+                for index in range(result_count)
+            ],
+            "providers": {"reddit": {"available": True, "detail": "ready"}},
+            "fallback_used": False,
+        }
+        messages.extend([
+            AIMessage(content="", tool_calls=[{
+                "name": "research_web",
+                "args": {"query": f"subquestion {call_index}", "sources": sources, "max_results": requested_limit},
+                "id": call_id,
+            }]),
+            ToolMessage(
+                tool_call_id=call_id,
+                name="research_web",
+                content="[RESEARCH_RESULTS]\n" + json.dumps(payload),
+            ),
+        ])
+
+    result = web_agent_node({
+        "messages": messages,
+        "channel": "web",
+    })
+
+    assert result["messages"][-1].content == "Research synthesis"
+    assert ("research_web" in fake_llm.bound.tool_names) is search_tools_expected
+    assert ("duckduckgo_search" in fake_llm.bound.tool_names) is search_tools_expected
+    assert "browse_url" in fake_llm.bound.tool_names
+
+
+def test_recent_web_results_include_multi_source_research():
+    """Existing failure and synthesis guards observe the aggregate tool output."""
+    from core.utils import filter_recent_web_tool_results
+
+    history = [
+        HumanMessage(content="Find GitHub bugs."),
+        ToolMessage(
+            tool_call_id="research-1",
+            name="research_web",
+            content="[RESEARCH_RESULTS] result",
+        ),
+    ]
+
+    assert filter_recent_web_tool_results(history) == [
+        ("research_web", "[RESEARCH_RESULTS] result")
+    ]
+
+
+def test_web_research_budget_ignores_non_research_tools():
+    from core.agents import _has_exhausted_web_research_budget
+
+    history = [
+        HumanMessage(content="Find supermarket prices."),
+        AIMessage(content="", tool_calls=[
+            {"name": "search_supermarket_prices", "args": {"query": "chicken"}, "id": "t1"},
+        ]),
+        AIMessage(content="", tool_calls=[
+            {"name": "search_supermarket_prices", "args": {"query": "milk"}, "id": "t2"},
+        ]),
+        AIMessage(content="", tool_calls=[
+            {"name": "get_weather_forecast", "args": {}, "id": "t3"},
+        ]),
+    ]
+
+    assert _has_exhausted_web_research_budget(history) is False
+
+
+def test_web_agent_trims_parallel_research_calls_to_remaining_budget(monkeypatch):
+    from core.agents import clean_orphan_tool_calls, web_agent_node
+
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(
+                content=[
+                    {
+                        "type": "function_call",
+                        "name": "duckduckgo_search",
+                        "args": {"query": "third"},
+                        "id": "t3",
+                    },
+                    {
+                        "type": "function_call",
+                        "name": "browse_url",
+                        "args": {"url": "https://example.com/2"},
+                        "id": "t4",
+                    },
+                ],
+                tool_calls=[
+                    {
+                        "name": "duckduckgo_search",
+                        "args": {"query": "third"},
+                        "id": "t3",
+                    },
+                    {
+                        "name": "browse_url",
+                        "args": {"url": "https://example.com/2"},
+                        "id": "t4",
+                    },
+                ],
+            )
+
+    class FakeLLM:
+        def __init__(self):
+            self.bound_calls = 0
+
+        def bind_tools(self, tools):
+            self.bound_calls += 1
+            return FakeBoundLLM()
+
+        def invoke(self, messages):
+            raise AssertionError("synthesis should not run before the budget is reached")
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr(
+        "core.utils.load_agent_prompt",
+        lambda *args, **kwargs: "test prompt",
+    )
+
+    result = web_agent_node({
+        "messages": [
+            HumanMessage(content="Research this topic."),
+            AIMessage(content="", tool_calls=[
+                {
+                    "name": "duckduckgo_search",
+                    "args": {"query": "first"},
+                    "id": "t1",
+                },
+            ]),
+            ToolMessage(
+                tool_call_id="t1",
+                name="duckduckgo_search",
+                content="first source",
+            ),
+            AIMessage(content="", tool_calls=[
+                {
+                    "name": "browse_url",
+                    "args": {"url": "https://example.com/1"},
+                    "id": "t2",
+                },
+            ]),
+            ToolMessage(
+                tool_call_id="t2",
+                name="browse_url",
+                content="second source",
+            ),
+        ],
+        "channel": "web",
+    })
+
+    calls = result["messages"][-1].tool_calls
+
+    assert [call["id"] for call in calls] == ["t3"]
+    inline_ids = [
+        part.get("id")
+        for part in result["messages"][-1].content
+        if isinstance(part, dict)
+        and part.get("type") in ("function_call", "tool_use")
+    ]
+    assert inline_ids == ["t3"]
+
+    cleaned = clean_orphan_tool_calls([
+        result["messages"][-1],
+        ToolMessage(
+            tool_call_id="t3",
+            name="duckduckgo_search",
+            content="third source",
+        ),
+    ])
+
+    assert len(cleaned) == 2
+    assert cleaned[0].tool_calls == calls
+
+def test_web_agent_synthesizes_without_tools_after_research_budget(monkeypatch):
+    from core.agents import web_agent_node
+
+    class FakeBoundLLM:
+        def invoke(self, messages):
+            return AIMessage(content="TOOL_PATH_MUST_NOT_RUN")
+
+    class FakeLLM:
+        def __init__(self):
+            self.bound_calls = 0
+            self.synthesis_calls = 0
+            self.synthesis_messages = []
+
+        def bind_tools(self, tools):
+            self.bound_calls += 1
+            return FakeBoundLLM()
+
+        def invoke(self, messages):
+            if "MESSENGER_PREPARATION_DECISION" in str(messages[0].content):
+                return AIMessage(content='{"prepare":false}')
+            self.synthesis_calls += 1
+            self.synthesis_messages.append(messages)
+            return AIMessage(content="Research synthesis from verified sources.")
+
+    fake_llm = FakeLLM()
+    monkeypatch.setattr("core.agents.llm", fake_llm)
+    loaded_prompt_names = []
+
+    def fake_load_agent_prompt(name: str, *_args, **_kwargs) -> str:
+        loaded_prompt_names.append(name)
+        return {
+            "Web_Agent": "test prompt",
+            "Web_Research_Synthesis": "[TEST RESEARCH SYNTHESIS CONTRACT]",
+        }.get(name, "")
+
+    monkeypatch.setattr(
+        "core.utils.load_agent_prompt",
+        fake_load_agent_prompt,
+    )
+
+    result = web_agent_node({
+        "messages": [
+            HumanMessage(content="Research this topic."),
+            AIMessage(content="", tool_calls=[
+                {"name": "duckduckgo_search", "args": {"query": "first"}, "id": "t1"},
+            ]),
+            ToolMessage(tool_call_id="t1", name="duckduckgo_search", content="first source"),
+            AIMessage(content="", tool_calls=[
+                {"name": "browse_url", "args": {"url": "https://example.com/1"}, "id": "t2"},
+            ]),
+            ToolMessage(tool_call_id="t2", name="browse_url", content="second source"),
+            AIMessage(content="", tool_calls=[
+                {"name": "duckduckgo_search", "args": {"query": "third"}, "id": "t3"},
+            ]),
+            ToolMessage(tool_call_id="t3", name="duckduckgo_search", content="third source"),
+        ],
+        "channel": "web",
+    })
+
+    reply = result["messages"][-1].content
+
+    assert fake_llm.bound_calls == 0
+    assert fake_llm.synthesis_calls == 1
+    assert reply == "Research synthesis from verified sources."
+    assert "TOOL_PATH_MUST_NOT_RUN" not in reply
+    assert "Web_Research_Synthesis" in loaded_prompt_names
+    synthesis_system_messages = [
+        message.content
+        for message in fake_llm.synthesis_messages[0]
+        if getattr(message, "type", "") == "system"
+    ]
+    assert any(
+        "[TEST RESEARCH SYNTHESIS CONTRACT]" in content
+        for content in synthesis_system_messages
+    )
+
+
+def test_web_research_budget_resets_for_a_new_user_turn():
+    from core.agents import _has_exhausted_web_research_budget
+
+    history = [
+        HumanMessage(content="Research the first topic."),
+        AIMessage(content="", tool_calls=[
+            {"name": "duckduckgo_search", "args": {"query": "first"}, "id": "t1"},
+        ]),
+        AIMessage(content="", tool_calls=[
+            {"name": "browse_url", "args": {"url": "https://example.com/1"}, "id": "t2"},
+        ]),
+        AIMessage(content="", tool_calls=[
+            {"name": "duckduckgo_search", "args": {"query": "third"}, "id": "t3"},
+        ]),
+        HumanMessage(content="Research a new topic."),
+    ]
+
+    assert _has_exhausted_web_research_budget(history) is False
+
+
+def test_web_research_trim_supports_object_calls_without_model_copy():
+    from core.agents import _trim_web_research_tool_calls
+
+    class ToolCall:
+        def __init__(self, name, call_id):
+            self.name = name
+            self.id = call_id
+
+    class LegacyResponse:
+        def __init__(self):
+            self.content = []
+            self.tool_calls = [
+                ToolCall("duckduckgo_search", "t3"),
+                ToolCall("browse_url", "t4"),
+            ]
+
+    history = [
+        HumanMessage(content="Research this topic."),
+        AIMessage(content="", tool_calls=[
+            {"name": "duckduckgo_search", "args": {}, "id": "t1"},
+        ]),
+        AIMessage(content="", tool_calls=[
+            {"name": "browse_url", "args": {}, "id": "t2"},
+        ]),
+    ]
+
+    response = LegacyResponse()
+    trimmed = _trim_web_research_tool_calls(response, history)
+
+    assert trimmed is not response
+    assert [call.id for call in trimmed.tool_calls] == ["t3"]
+
+
+def test_web_agent_hides_draft_tool_without_known_recipient(
+    monkeypatch: Any,
+) -> None:
+    """Unrelated natural language must not expose a Messenger mutation tool."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Web agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr(
+        "tools.web.has_known_messenger_contact_reference",
+        lambda _text: False,
+    )
+
+    _invoke_with_native_guard(web_agent_node, {
+        "messages": [HumanMessage(content="Ο Πασσιάς έχει και κρέας εκτός από αλλαντικά.")],
+        "channel": "telegram",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+    assert "execute_local_pipeline" in bound_tool_names
+
+
+def test_web_agent_hides_messenger_draft_tool_for_contextual_web_search(
+    monkeypatch: Any,
+) -> None:
+    """A contextual Web search must not expose an unrelated draft mutation."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        def invoke(self, messages: Any) -> AIMessage:
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"γυναικάρα μου": "123"},
+    )
+
+    _invoke_with_native_guard(web_agent_node, {
+        "messages": [HumanMessage(
+            content="βρεσ μου αγγελιεσ στο linkedin gia logistic manager θεσσαλονικι"
+        )],
+        "channel": "web",
+    })
+
+    assert "duckduckgo_search" in bound_tool_names
+    assert "relay_local_payload" in bound_tool_names
+
+
+def test_web_agent_keeps_draft_tool_for_mixed_search_and_known_recipient(
+    monkeypatch: Any,
+) -> None:
+    """A mixed Web mention may still create a reversible recipient draft."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        def invoke(self, messages: Any) -> AIMessage:
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        def invoke(self, messages: Any) -> AIMessage:
+            return AIMessage(content='{}')
+
+        def bind_tools(self, tools: list[Any], **kwargs: Any) -> FakeBoundLLM:
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr(
+        "tools.web._load_messenger_contacts",
+        lambda: {"σοφία": "123"},
+    )
+
+    _invoke_with_native_guard(web_agent_node, {
+        "messages": [HumanMessage(content="Πες στη Σοφία ότι ενημέρωσα το LinkedIn.")],
+        "channel": "web",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+
+
+def test_web_multi_result_prompt_honors_explicit_count() -> None:
+    """The Web contract must prefer an explicit count over the maximum ten."""
+    from core.utils import load_agent_prompt
+
+    prompt = load_agent_prompt("Web_Agent")
+
+    assert "requested count, capped at 10" in prompt
+    assert "use 10 only when no smaller count was specified" in prompt
+
+
+def test_web_search_tool_description_honors_explicit_count() -> None:
+    """The bound tool schema must agree with the Web-agent count contract."""
+    from tools.web import duckduckgo_search
+
+    assert "requested count, capped at 10" in duckduckgo_search.description
+    assert "Use 10 only when no smaller count was specified" in duckduckgo_search.description
+
+
+def test_web_agent_exposes_messenger_draft_tool_for_explicit_request(monkeypatch: Any) -> None:
+    """A direct request to compose a message retains the Messenger draft flow."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Web agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    _invoke_with_native_guard(web_agent_node, {
+        "messages": [HumanMessage(content="Γράψε ένα μήνυμα στη Σοφία.")],
+        "channel": "telegram",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+    assert "execute_local_pipeline" not in bound_tool_names
+
+
+def test_web_agent_exposes_reversible_draft_tool_for_natural_recipient_request(
+    monkeypatch: Any,
+) -> None:
+    """The Web LLM can persist a naturally phrased recipient-specific draft request."""
+    from core.agents import web_agent_node
+    from services.messenger_intent import classify_messenger_intent
+
+    bound_tool_names: list[str] = []
+    request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture bindings while excluding semantic decisions from synthesis counts."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return no lifecycle decision outside the explicitly stubbed resolver."""
+            return AIMessage(content='{}')
+
+        def bind_tools(self, tools: list[Any], **kwargs: Any) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    assert classify_messenger_intent(request).intent == "general_chat"
+
+    _invoke_with_native_guard(web_agent_node, {
+        "messages": [HumanMessage(content=request)],
+        "channel": "web",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+    assert "execute_local_pipeline" in bound_tool_names
+
+
+@pytest.mark.parametrize("existing_message", [None, "Παλιό μήνυμα"])
+def test_natural_recipient_request_persists_draft_through_chat_graph(
+    monkeypatch: Any,
+    tmp_path: Path,
+    existing_message: str | None,
+) -> None:
+    """The canonical Chat route creates or replaces a draft end to end."""
+    import config
+    from core.graph import build_graph
+    from services.messenger_intent import classify_messenger_intent
+
+    request = "φτιαξε τοτε ενα ομορφο καληεμρα για την σοφια"
+    draft_file = tmp_path / "messenger_draft.json"
+    draft_requested = False
+
+    class FakeBoundLLM:
+        """Issue one deterministic Messenger draft tool call, then finish."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a tool call only on the first Chat-agent invocation."""
+            nonlocal draft_requested
+            if draft_requested:
+                return AIMessage(content="Το αποθήκευσα.")
+            draft_requested = True
+            return AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "relay_local_payload",
+                    "args": {
+                        "target_entity": "Σοφία",
+                        "payload_data": "Καλημέρα αγάπη μου! Καλή δύναμη στη δουλειά.",
+                    },
+                    "id": "natural-draft",
+                }],
+            )
+
+    class FakeLLM:
+        def invoke(self, messages: Any) -> AIMessage:
+            return AIMessage(content='{}')
+
+        """Provide deterministic routing and Chat tool selection."""
+
+        def with_structured_output(self, _schema: Any) -> "FakeLLM":
+            """Return self because registry routing avoids LLM routing output."""
+            return self
+
+        def bind_tools(self, tools: list[Any], **kwargs: Any) -> FakeBoundLLM:
+            """Require the canonical Chat path to expose the draft writer."""
+            if kwargs.get("tool_choice"):
+                assert "relay_local_payload" in {tool.name for tool in tools}
+            return FakeBoundLLM()
+
+    monkeypatch.setattr(config, "MESSENGER_DRAFT_FILE", str(draft_file))
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr("core.capability_lookup.lookup_agent", lambda _text: "Chat_Agent")
+    monkeypatch.setattr("core.plan_judge.should_auto_plan", lambda _text: False)
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
+
+    assert classify_messenger_intent(request).intent == "general_chat"
+    if existing_message:
+        draft_file.write_text(
+            json.dumps({"target_name": "old", "message": existing_message, "status": "pending"}),
+            encoding="utf-8",
+        )
+
+    build_graph().invoke({
+        "messages": [HumanMessage(content=request)],
+        "channel": "web",
+    })
+
+    draft = json.loads(draft_file.read_text(encoding="utf-8"))
+    assert draft["target_name"] == "123"
+    assert draft["message"] == "Καλημέρα αγάπη μου! Καλή δύναμη στη δουλειά."
+    assert draft["status"] == "pending"
+
+
+def test_web_agent_does_not_recreate_draft_for_timestamped_bare_send(monkeypatch: Any) -> None:
+    """A Web send confirmation keeps only the external-send path available."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Web agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    _invoke_with_native_guard(web_agent_node, {
+        "messages": [HumanMessage(content="[11:03] στειλε")],
+        "channel": "web",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+    assert "execute_local_pipeline" in bound_tool_names
+
+
+def test_web_agent_exposes_messenger_draft_tool_for_accepted_routine_offer(monkeypatch: Any) -> None:
+    """A trusted accepted routine offer allows drafting after a bare affirmative."""
+    from core.agents import web_agent_node
+    from services.messenger_intent import MESSENGER_ROUTINE_DRAFT_OFFER_MARKER
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Web agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    _invoke_with_native_guard(web_agent_node, {
+        "messages": [
+            SystemMessage(content=MESSENGER_ROUTINE_DRAFT_OFFER_MARKER),
+            HumanMessage(content="ναι"),
+        ],
+        "channel": "telegram",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+    assert "execute_local_pipeline" not in bound_tool_names
+
+
+def test_web_agent_exposes_messenger_draft_tool_for_active_draft_edit(monkeypatch: Any) -> None:
+    """An active draft keeps the persistence tool available for a natural edit request."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Web agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr(
+        "core.messenger_draft.active_draft_status",
+        lambda: (True, "active", {"message": "Initial draft"}),
+    )
+    _invoke_with_native_guard(web_agent_node, {
+        "messages": [
+            HumanMessage(content="Γράψε ένα μήνυμα"),
+            AIMessage(
+                content=(
+                    "Έτοιμο το προσχέδιο, μάστορα:\n\n"
+                    "«Initial draft»\n\n"
+                    "Το αποθήκευσα. Θέλεις αλλαγές ή να το στείλω;"
+                ),
+            ),
+            HumanMessage(content="Κάν' το πιο ζεστό."),
+        ],
+        "channel": "telegram",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+
+
+def test_web_agent_hides_messenger_draft_tool_for_unrelated_active_draft_turn(monkeypatch: Any) -> None:
+    """An active draft must not expose persistence during unrelated conversation."""
+    from core.agents import web_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Web agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr(
+        "core.messenger_draft.active_draft_status",
+        lambda: (True, "active", {"message": "Initial draft"}),
+    )
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
+
+    _invoke_with_native_guard(web_agent_node, {
+        "messages": [HumanMessage(content="Σε τρεις μέρες φεύγουμε Γεωργία")],
+        "channel": "web",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+
+
+def test_chat_agent_hides_messenger_draft_tool_for_unrelated_active_draft_turn(monkeypatch: Any) -> None:
+    """Chat routing cannot expose draft persistence for unrelated active-draft text."""
+    from core.agents import chat_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Chat agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+    monkeypatch.setattr(
+        "core.messenger_draft.active_draft_status",
+        lambda: (True, "active", {"message": "Initial draft"}),
+    )
+    monkeypatch.setattr("tools.web._load_messenger_contacts", lambda: {"σοφια": "123"})
+
+    _invoke_with_native_guard(chat_agent_node, {
+        "messages": [HumanMessage(content="Σε τρεις μέρες φεύγουμε Γεωργία")],
+        "channel": "web",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+
+
+def test_chat_agent_hides_direct_memory_write_for_external_context(monkeypatch: Any) -> None:
+    """A trusted user update must not issue a direct write from tainted context."""
+    from core.agents import chat_agent_node
+    from core.untrusted_content import external_content_history_metadata
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Chat agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    _invoke_with_native_guard(chat_agent_node, {
+        "messages": [
+            AIMessage(
+                content="External summary.",
+                additional_kwargs=external_content_history_metadata(["browse_url"]),
+            ),
+            HumanMessage(content="Σε τρεις μέρες φεύγουμε Γεωργία"),
+        ],
+        "channel": "web",
+    })
+
+    assert "save_to_memory" not in bound_tool_names
+
+
+def test_chat_agent_hides_stale_research_tools_for_unrelated_new_turn(
+    monkeypatch: Any,
+) -> None:
+    """A home update must not re-run an older Web research request."""
+    from core.agents import chat_agent_node
+    from core.untrusted_content import external_content_history_metadata
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Chat agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    _invoke_with_native_guard(chat_agent_node, {
+        "messages": [
+            HumanMessage(content="Τι καιρό θα έχει στο Rustavi;"),
+            AIMessage(
+                content="External weather summary.",
+                additional_kwargs=external_content_history_metadata(["get_weather_forecast"]),
+            ),
+            HumanMessage(content="Γύρισα σπίτι φίλε."),
+        ],
+        "channel": "telegram",
+    })
+
+    assert "duckduckgo_search" not in bound_tool_names
+    assert "search_supermarket_prices" not in bound_tool_names
+
+
+def test_chat_agent_keeps_research_tools_for_current_direct_web_request(
+    monkeypatch: Any,
+) -> None:
+    """A current direct Web request may still use research tools."""
+    from core.agents import chat_agent_node
+    from core.untrusted_content import external_content_history_metadata
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Chat agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    _invoke_with_native_guard(chat_agent_node, {
+        "messages": [
+            HumanMessage(content="Τι καιρό θα έχει στο Rustavi;"),
+            AIMessage(
+                content="External weather summary.",
+                additional_kwargs=external_content_history_metadata(["get_weather_forecast"]),
+            ),
+            HumanMessage(content="Ψάξε στο web τι καιρό θα έχει στη Γεωργία."),
+        ],
+        "channel": "telegram",
+    })
+
+    assert "duckduckgo_search" in bound_tool_names
+    assert "search_supermarket_prices" in bound_tool_names
+
+
+def test_chat_agent_keeps_explicit_memory_save_for_external_context(
+    monkeypatch: Any,
+) -> None:
+    """An explicit save request must reach the provenance-aware approval path."""
+    from core.agents import chat_agent_node
+    from core.untrusted_content import external_content_history_metadata
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Chat agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    _invoke_with_native_guard(chat_agent_node, {
+        "messages": [
+            AIMessage(
+                content="External deadline summary.",
+                additional_kwargs=external_content_history_metadata(["browse_url"]),
+            ),
+            HumanMessage(content="Save that deadline to my memory."),
+        ],
+        "channel": "web",
+    })
+
+    assert "save_to_memory" in bound_tool_names
+
+
+def test_chat_agent_ignores_routine_tool_text_for_messenger_draft_gate(
+    monkeypatch: Any,
+) -> None:
+    """Routine-search output mentioning a message must not authorize a draft."""
+    from core.agents import chat_agent_node
+
+    bound_tool_names: list[str] = []
+
+    class FakeBoundLLM:
+        """Return a plain reply without issuing tool calls."""
+
+        def invoke(self, messages: Any) -> AIMessage:
+            """Return a deterministic assistant response for the bound tool set."""
+            return AIMessage(content="plain reply")
+
+    class FakeLLM:
+        """Capture the tools exposed to the Chat agent."""
+
+        def bind_tools(self, tools: list[Any]) -> FakeBoundLLM:
+            """Record the tool names and return the deterministic bound model."""
+            bound_tool_names.extend(tool.name for tool in tools)
+            return FakeBoundLLM()
+
+    monkeypatch.setattr("core.agents.llm", FakeLLM())
+    monkeypatch.setattr("core.agents.load_agent_prompt", lambda *_args: "test prompt")
+
+    _invoke_with_native_guard(chat_agent_node, {
+        "messages": [
+            HumanMessage(content="Σε τρεις μέρες φεύγουμε Γεωργία."),
+            AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "search_routines",
+                    "args": {"query": "*"},
+                    "id": "routine-search",
+                }],
+            ),
+            ToolMessage(
+                content="11:00 — Σύνταξη πρωινού μηνύματος στη Σοφία στο Messenger",
+                name="search_routines",
+                tool_call_id="routine-search",
+            ),
+        ],
+        "channel": "web",
+    })
+
+    assert "relay_local_payload" in bound_tool_names
+
+
+def test_proactive_prompt_requires_message_routines_to_request_draft_first() -> None:
+    """Message routines must ask before generating a Messenger draft or message body."""
+    prompt_path = Path(__file__).resolve().parents[1] / "prompts" / "telegram_bot_craft_proactive.md"
+    prompt = prompt_path.read_text(encoding="utf-8")
+
+    assert re.search(
+        r"routine.*(?:composing|sending).*message.*ask whether.*draft first",
+        prompt,
+        flags=re.IGNORECASE,
+    )
+    assert re.search(
+        r"Do not generate.*message text.*until the user explicitly asks",
+        prompt,
+        flags=re.IGNORECASE,
+    )

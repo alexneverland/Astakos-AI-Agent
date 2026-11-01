@@ -1,0 +1,131 @@
+"""Trusted graph context for already-recorded routine decisions."""
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from html import escape
+from typing import TYPE_CHECKING, Mapping
+
+from langchain_core.messages import BaseMessage, SystemMessage
+
+from core.i18n import load_prompt
+from services.messenger_intent import MESSENGER_ROUTINE_DRAFT_OFFER_MARKER
+
+if TYPE_CHECKING:
+    from services.routine_feedback_turn import FeedbackTurnResult
+
+
+def build_dated_routine_feedback_context(result: FeedbackTurnResult) -> SystemMessage | None:
+    """Expose verified outcomes with a separate untrusted display reference.
+
+    Failed/stale inference conveys no claimed action. Deferral requests a
+    clarification, not a fabricated new time. External authorization stays in
+    the existing draft/critical-tool paths.
+    """
+    selection = result.selection
+    successful = result.status in {"applied", "clarify"}
+    payload = {
+        "status": result.status,
+        "action": selection.action if successful else "none",
+        "routine_id": selection.routine_id if successful else None,
+        "occurrence_date": (
+            selection.occurrence_date.isoformat()
+            if successful and selection.occurrence_date is not None else None
+        ),
+    }
+    if successful and result.selections:
+        payload = {"status": result.status, "outcomes": [
+            {"action": item.action, "routine_id": item.routine_id,
+             "occurrence_date": item.occurrence_date.isoformat()} for item in result.selections]}
+    content = json.dumps(payload) + "\n" + load_prompt("routine_feedback_context.md")
+    if successful and result.routine_names:
+        from core.untrusted_content import format_untrusted_tool_result
+        content += "\n" + format_untrusted_tool_result("recorded routine display names",
+            json.dumps([name[:200] for name in result.routine_names], ensure_ascii=False))
+    if successful and isinstance(result.routine_name, str) and result.routine_name.strip():
+        from core.untrusted_content import format_untrusted_tool_result
+        content += "\n" + format_untrusted_tool_result(
+            "recorded routine display name", result.routine_name.strip()[:200])
+    return SystemMessage(content=content, additional_kwargs={
+        "astakos_routine_feedback_action_consumed": result.status != "none"})
+
+
+def routine_feedback_consumes_turn(context: SystemMessage | None) -> bool:
+    """Distinguish a no-change notice from routine-owned actions or failures.
+
+    Legacy contexts and failed/uncertain outcomes retain their consuming behavior.
+    Only the canonical explicit no-action receipt allows normal pending flows.
+    """
+    return context is not None and getattr(context, "additional_kwargs", {}).get(
+        "astakos_routine_feedback_action_consumed", True) is not False
+
+
+@dataclass(frozen=True)
+class AcceptedMessengerDraftOffer:
+    """Trusted pending routine draft offer accepted by one explicit user reply."""
+
+    routine_id: int
+    context: SystemMessage
+
+
+def build_routine_completion_context() -> SystemMessage:
+    """Create fixed trusted context without embedding user-derived routine data."""
+    template = load_prompt("routine_completion_context.md")
+    return SystemMessage(content=template)
+
+
+def build_messenger_draft_offer_context(event_name: str) -> SystemMessage:
+    """Create trusted graph context for one accepted pending message routine offer."""
+    template = load_prompt("routine_messenger_draft_offer.md").format(
+        routine_event=escape(event_name, quote=False),
+    )
+    return SystemMessage(content=f"{MESSENGER_ROUTINE_DRAFT_OFFER_MARKER}\n{template}")
+
+
+def accept_pending_messenger_draft_offer(
+    pending_confirmations: Mapping[int, object],
+    user_text: str,
+) -> AcceptedMessengerDraftOffer | None:
+    """Return one trusted offer acceptance only for a sole persisted structured offer.
+
+    This deliberately relies only on ``draft_offer`` stored at proactive-message
+    creation time. It never infers authorization from a routine name or from
+    assistant prose, and fails closed for batches and malformed pending data.
+    """
+    if len(pending_confirmations) != 1:
+        return None
+
+    routine_id, _pending_data = next(iter(pending_confirmations.items()))
+    from services.messenger_intent import is_draft_offer_acceptance
+
+    if not is_draft_offer_acceptance(user_text):
+        return None
+    return get_pending_messenger_draft_offer(pending_confirmations, routine_id)
+
+
+def get_pending_messenger_draft_offer(
+    pending_confirmations: Mapping[int, object],
+    routine_id: int,
+) -> AcceptedMessengerDraftOffer | None:
+    """Return trusted local-draft context for one persisted structured offer."""
+    pending_data = pending_confirmations.get(routine_id)
+    if type(routine_id) is not int or not isinstance(pending_data, Mapping):
+        return None
+    if pending_data.get("draft_offer") is not True:
+        return None
+    event_name = pending_data.get("event")
+    if not isinstance(event_name, str) or not event_name.strip():
+        return None
+
+    return AcceptedMessengerDraftOffer(
+        routine_id=routine_id,
+        context=build_messenger_draft_offer_context(event_name.strip()),
+    )
+
+
+def append_routine_completion_context(
+    messages: list[BaseMessage],
+    *contexts: SystemMessage | None,
+) -> list[BaseMessage]:
+    """Append supplied trusted routine contexts to one graph message list."""
+    return messages + [context for context in contexts if context is not None]

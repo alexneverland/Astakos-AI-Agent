@@ -1,7 +1,8 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 import os
@@ -11,10 +12,20 @@ load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
+def get_custom_intents_path() -> str:
+    """Return the optional test override or the local custom-intents path."""
+    return os.getenv(
+        "ASTAKOS_CUSTOM_INTENTS_PATH",
+        os.path.join(BASE_DIR, "astakos_custom_intents.json"),
+    )
+
+
 # ==========================================
 # 1. CREDENTIALS & API KEYS
 # ==========================================
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "vertex").lower()
+VOICE_PROVIDER = os.getenv("VOICE_PROVIDER", "auto").lower()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
@@ -36,13 +47,14 @@ WORKSPACE_DIR     = os.path.join(BASE_DIR, "astakos_skills")
 PHOTOS_DIR        = os.path.join(BASE_DIR, "telegram_photos")
 CHROMA_DB_DIR     = os.path.join(BASE_DIR, "chroma_db")
 UPLOADS_DIR       = os.path.join(BASE_DIR, "telegram_uploads")  # ← main uploads folder
+DOCUMENTS_DIR     = os.path.join(BASE_DIR, "outputs", "documents_archive")
 MEMORY_AUDIT_DIR  = os.path.join(BASE_DIR, "logs", "memory_audit")
 WATCH_DIR         = os.path.join(BASE_DIR, "watch_folder")
 CREDENTIALS_DIR   = os.path.join(BASE_DIR, "credentials")
 TOKEN_PATH        = os.path.join(CREDENTIALS_DIR, "token.json")
 CREDENTIALS_PATH  = os.path.join(CREDENTIALS_DIR, "credentials.json")
 
-for directory in [WORKSPACE_DIR, PHOTOS_DIR, CHROMA_DB_DIR, UPLOADS_DIR, MEMORY_AUDIT_DIR, WATCH_DIR, CREDENTIALS_DIR]:
+for directory in [WORKSPACE_DIR, PHOTOS_DIR, CHROMA_DB_DIR, UPLOADS_DIR, DOCUMENTS_DIR, MEMORY_AUDIT_DIR, WATCH_DIR, CREDENTIALS_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # ==========================================
@@ -103,6 +115,7 @@ PARTNER_NAME = "Partner"
 KID1_NAME = "Kid1"
 KID2_NAME = "Kid2"
 BOT_NAME = "Astakos"
+VOICE_WAKE_NAME = "Astakos"
 DEVELOPER_NAME = "LocalUser"
 DEFAULT_CITY = "London"
 SENTIMENTAL_OVERRIDE_KEYWORDS = ()
@@ -118,6 +131,7 @@ if os.path.exists(SETTINGS_FILE):
             KID1_NAME = _settings.get("kid1_name", "Kid1")
             KID2_NAME = _settings.get("kid2_name", "Kid2")
             BOT_NAME = _settings.get("bot_name", "Astakos")
+            VOICE_WAKE_NAME = _settings.get("voice_wake_name", BOT_NAME)
             DEVELOPER_NAME = _settings.get("developer_name", "LocalUser")
             DEFAULT_CITY = _settings.get("default_city", "London")
             BACKUP_DRIVE_FOLDER_ID = _settings.get("backup_drive_folder_id", "")
@@ -162,7 +176,7 @@ def _deep_merge_dicts(base: dict, custom: dict) -> dict:
 def _load_nlp_config() -> dict:
     lang_code = "el" if RESPONSE_LANGUAGE.lower() == "greek" else "en"
     base_path = os.path.join(BASE_DIR, "core", f"intents_{lang_code}.json")
-    custom_path = os.path.join(BASE_DIR, "astakos_custom_intents.json")
+    custom_path = get_custom_intents_path()
     legacy_path = os.path.join(BASE_DIR, "astakos_nlp.json")
 
     data = {}

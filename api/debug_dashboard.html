@@ -288,16 +288,20 @@
 <div class="grid" id="timeline-section" style="margin-top:16px"></div>
 <div class="grid" id="goals-section" style="margin-top:16px"></div>
 <div class="grid" id="reflections-section" style="margin-top:16px"></div>
+<div class="grid" id="behavioral-patterns-section" style="margin-top:16px"></div>
 <div id="memory-audit-section" style="margin-top:16px"></div>
 <div id="traces-section" style="margin-top:16px;padding:0"></div>
 <div id="log-section" style="margin-top:16px;padding:0 0 24px 0"></div>
 <script>
 const REFRESH = 5000;
+const BEHAVIORAL_PATTERNS_REFRESH = 60000;
 let rafId;
 let timelineData = [];
 let dashboardFilter = 'all';
 let focusedRoutineId = null;
 let focusedRoutineName = '';
+let behavioralPatternsFetchInFlight = false;
+let behavioralPatternsLastFetchedAt = 0;
 let noiseCollapsed = localStorage.getItem('astakos_debug_noise_collapsed') !== 'false';
 const collapsedSections = new Set(
   JSON.parse(localStorage.getItem('astakos_debug_collapsed_sections') || '[]')
@@ -421,15 +425,66 @@ function renderStatusStrip(d) {
       <div class="label">Approvals</div><div class="value ${approvals ? 'warn' : 'ok'}">${approvals}</div>
     </div>
     <div class="status-item" data-search="routines active blocked" data-kind="routines">
-      <div class="label">Routines</div><div class="value">${active} active - <span class="${blocked ? 'warn' : 'ok'}">${blocked} blocked</span></div>
+      <div class="label">Routines</div><div class="value">${active} active - <span class="${blocked ? 'warn' : 'ok'}">${blocked} condition-blocked</span></div>
     </div>
     <div class="status-item" data-search="queue scheduler"><div class="label">Queue</div><div class="value ${s.queue_size > 5 ? 'warn' : ''}">${s.queue_size ?? '?'}</div></div>
     <div class="status-item" data-search="updated refresh"><div class="label">Updated</div><div class="value">${new Date().toLocaleTimeString('el-GR')}</div></div>
     <div class="status-actions">
       <button class="icon-btn" onclick="fetchAllNow()" title="Refresh now">↻</button>
+      <button class="icon-btn" id="workspace-reconnect-btn" onclick="reconnectGoogleWorkspace()" title="Reconnect Google Workspace">Google</button>
       <button class="icon-btn" onclick="openCharts()" title="Open charts">▥</button>
     </div>`;
 }
+
+async function reconnectGoogleWorkspace() {
+  const button = document.getElementById('workspace-reconnect-btn');
+  if (button) {
+    button.disabled = true;
+    button.textContent = '…';
+  }
+
+  const popup = window.open(
+    '',
+    'astakos_workspace_oauth',
+    'width=560,height=720,resizable=yes,scrollbars=yes',
+  );
+  if (!popup) {
+    alert('Your browser blocked the Google authorization window. Please allow popups for Astakos and try again.');
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Google';
+    }
+    return;
+  }
+
+  try {
+    const storedToken = localStorage.getItem('astakos_token');
+    const headers = storedToken ? {'Authorization': `Bearer ${storedToken}`} : {};
+    const response = await fetch('/api/workspace/oauth/start', {headers});
+    const payload = await response.json();
+    if (!response.ok || !payload.auth_url) {
+      throw new Error('Could not start Google Workspace authorization.');
+    }
+
+    popup.location.replace(payload.auth_url);
+    popup.focus();
+  } catch (error) {
+    popup.close();
+    alert(error instanceof Error ? error.message : 'Could not start Google Workspace authorization.');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Google';
+    }
+  }
+}
+
+window.addEventListener('message', (event) => {
+  if (event.origin !== window.location.origin || event.data !== 'workspace_oauth_complete') {
+    return;
+  }
+  fetchData();
+});
 
 function latencyColor(ms) {
   if (ms == null) return 'var(--text-muted)';
@@ -447,7 +502,8 @@ function renderLatencyPanel(traces) {
   }
   const phases = latest.phase_timings || {};
   const invokeEntries = Object.entries(phases).filter(([key]) => key.endsWith('_invoke_ms'));
-  const invokeMs = invokeEntries.length ? Math.max(...invokeEntries.map(([, value]) => Number(value) || 0)) : null;
+  const latency = latest.latency;
+  const invokeMs = latency?.model_wall_ms ?? (invokeEntries.length ? Math.max(...invokeEntries.map(([, value]) => Number(value) || 0)) : null);
   const toolMs = (latest.tool_calls || []).reduce((sum, item) => sum + (Number(item.duration_ms) || 0), 0);
   const sendMs = phases.telegram_send_ms ?? phases.telegram_voice_send_ms ?? phases.web_send_ms ?? phases.final_response_build_ms;
   const metrics = [
@@ -458,12 +514,14 @@ function renderLatencyPanel(traces) {
     ['Tools', toolMs || null],
     ['Send/build', sendMs],
   ];
+  if (latency) metrics.push(['Retry wait', latency.retry_wait_wall_ms], ['Uncovered', latency.uncovered_ms]);
   const maxMs = Math.max(...metrics.map(([, value]) => Number(value) || 0), 1);
   panel.innerHTML = `
     <div class="latency-summary" data-search="latency ${esc(latest.agent || '')}" data-channel="${esc(latest.channel || '')}">
       <div class="off" style="font-size:10px;text-transform:uppercase">Latest turn</div>
       <strong>${esc(latest.agent || 'Unknown agent')}</strong>
       <div class="off" style="margin-top:3px">${esc(latest.channel || '-')} - ${(latest.timestamp || '').slice(11,19)} - ${latest.tool_calls?.length || 0} tools</div>
+      ${latency ? `<div>Total: ${(latency.total_ms / 1000).toFixed(1)}s · ${esc(latest.trace_id || '')}</div>` : ''}
     </div>
     ${metrics.slice(1).map(([label, value]) => {
       const ms = value == null ? null : Number(value);
@@ -474,11 +532,20 @@ function renderLatencyPanel(traces) {
         <div class="metric-value" style="color:${color}">${ms == null ? '-' : ms >= 1000 ? `${(ms/1000).toFixed(1)}s` : `${Math.round(ms)}ms`}</div>
         <div class="metric-track"><div class="metric-fill" style="width:${width}%;background:${color}"></div></div>
       </div>`;
-    }).join('')}`;
+    }).join('')}
+    ${latency ? `<details style="grid-column:1/-1"><summary>Timing spans (${latency.spans.length})</summary>
+      <div class="off">Nested and parallel spans overlap; do not add their durations. Model time includes SDK retries; only exposed retries are counted. Uncovered is outside all recorded spans.</div>
+      <table><thead><tr><th>Start</th><th>Stage / call</th><th>Provider / model</th><th>Duration</th><th>Error</th></tr></thead><tbody>
+      ${latency.spans.slice().sort((a,b) => a.start_ms - b.start_ms).map(span => `<tr>
+        <td>${(span.start_ms / 1000).toFixed(1)}s</td>
+        <td>${esc(span.name)}${span.stage ? ` (${esc(span.stage)})` : ''}${span.attempt ? ` #${esc(span.attempt)}` : ''}</td>
+        <td>${esc(span.provider || '')} ${esc(span.model || '')}</td>
+        <td>${(span.duration_ms / 1000).toFixed(3)}s</td><td>${esc(span.error || '')}</td></tr>`).join('')}
+      </tbody></table>${latency.dropped_spans ? `<div>Omitted spans: ${esc(latency.dropped_spans)}</div>` : ''}</details>` : ''}`;
 }
 
 async function fetchAllNow() {
-  await Promise.all([fetchData(), fetchTimeline(), fetchTraces(), fetchMemoryAudit()]);
+  await Promise.all([fetchData(true), fetchTimeline(), fetchTraces(), fetchMemoryAudit()]);
   startCountdown();
 }
 
@@ -708,6 +775,9 @@ async function fetchTimeline(){
 }
 
 function stateBadge(r) {
+  if (r.paused_indefinitely) {
+    return `<span class="badge b-orange">PAUSED</span>`;
+  }
   if (r.paused_until) {
     return `<span class="badge b-orange">PAUSED</span>`;
   }
@@ -886,7 +956,9 @@ function render(d) {
 
   function renderCondition(r) {
     if (r.conditions && r.conditions.length > 0) {
-      const mainBadge = r.paused_until
+      const mainBadge = r.paused_indefinitely
+        ? '<span class="badge b-orange">PAUSED INDEFINITELY</span>'
+        : r.paused_until
         ? `<span class="badge b-orange" title="Paused until ${r.paused_until}">PAUSED</span>`
         : r.muted_until
           ? `<span class="badge b-purple" title="Muted until ${r.muted_until}">MUTED</span>`
@@ -935,7 +1007,9 @@ function render(d) {
     if (!r.condition_type) {
       return `<div class="cond-box"><span class="badge b-muted">No condition</span></div>`;
     }
-    const badge = r.paused_until
+    const badge = r.paused_indefinitely
+        ? '<span class="badge b-orange">PAUSED INDEFINITELY</span>'
+        : r.paused_until
         ? `<span class="badge b-orange" title="Paused until ${r.paused_until}">PAUSED</span>`
         : r.muted_until
           ? `<span class="badge b-purple" title="Muted until ${r.muted_until}">MUTED</span>`
@@ -971,20 +1045,46 @@ function render(d) {
 
   function renderOutcome(r) {
     let lbl = r.last_outcome_label || "Not evaluated";
-    let ts = r.last_outcome_ts ? " at " + r.last_outcome_ts.split('T')[1].substring(0, 5) : "";
+    let ts = r.last_outcome_ts ? " at " + esc(r.last_outcome_ts) : "";
     let reason = r.last_outcome_reason ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">${esc(r.last_outcome_reason)}</div>` : "";
     
     let colorVar = "var(--text-muted)";
-    if (lbl === "Sent") colorVar = "var(--green)";
+    if (lbl === "Sent" || lbl === "Sent: deferred follow-up" || lbl === "Completed today" || lbl === "Confirmed") colorVar = "var(--green)";
     else if (lbl.includes("Blocked") || lbl.includes("inactive") || lbl.includes("stale") || lbl.includes("Timed out")) colorVar = "var(--orange)";
     else if (lbl.includes("Skipped")) colorVar = "var(--yellow)";
+    const check = r.last_condition_check_action
+      ? `<div class="mono-small">Latest condition check: ${r.last_condition_check_action === 'routine_condition_allowed' ? 'passed' : 'blocked'}${r.last_condition_check_ts ? ' at ' + esc(r.last_condition_check_ts) : ''} — not proof of delivery</div>` : '';
 
     return `
       <div class="cond-box" style="border-left: 2px solid ${colorVar}; background: rgba(0,0,0,0.02);">
-        <div style="font-size:11px;font-weight:600;color:${colorVar}">Last outcome: ${esc(lbl)}${ts}</div>
+        <div style="font-size:11px;font-weight:600;color:${colorVar}">Last recorded decision: ${esc(lbl)}${ts}</div>
         ${reason}
+        ${check}
       </div>
     `;
+  }
+
+  function renderRoutineFeedback(r) {
+    const f = r.feedback_diagnostics;
+    if (!f) return '';
+    if (f.status === 'uninitialized') return '<div class="mono-small">Dated feedback: not activated</div>';
+    if (f.status !== 'recorded') return '<div class="mono-small err">Dated feedback: read error — unknown</div>';
+    const today = f.today;
+    const latest = f.latest_occurrence;
+    return `<div class="cond-box">
+      <div class="mono-small">${f.active === true ? 'Active dated feedback policy' : 'Staged policy preview — not the current dispatch gate'}</div>
+      <div class="mono-small">Today: ${today ? esc(today.date) + ' · ' + esc(today.feedback ?? (today.delivered_at ? 'delivered; no feedback' : 'no delivery')) : 'no dated record'}</div>
+      ${latest ? `<div class="mono-small">Latest occurrence: ${esc(latest.date)} · ${esc(latest.feedback ?? (latest.delivered_at ? 'delivered; no feedback' : 'no delivery'))}</div>` : ''}
+      <div class="mono-small">Unanswered days: ${esc(f.unanswered_streak ?? '?')} / 3 · Refusals: ${esc(f.refusal_streak ?? '?')} / 3</div>
+      <div class="mono-small">Derived backoff: ${esc(f.derived_cooldown_hours ?? '?')}h · until ${esc(f.backoff_until ?? 'none')} · remaining ${esc(f.backoff_remaining_h ?? 0)}h</div>
+      <div class="mono-small">Baseline: ${esc(f.baseline_at ?? 'not reset')}</div>
+    </div>`;
+  }
+
+  function renderRoutineCooldown(r) {
+    const hours = value => value == null ? 'unknown' : esc(value) + 'h';
+    return `<div class="mono-small">Stored: ${hours(r.cooldown_hours)} · Scheduler: ${hours(r.effective_cooldown_hours)}</div>
+      <div class="mono-small">Remaining: ${r.cooldown_read_error ? 'read error — unknown' : hours(r.cooldown_remaining_h)}</div>`;
   }
 
   const evts = d.events_1h||{}, pend = d.pending_confirmations||[];
@@ -1000,6 +1100,7 @@ function render(d) {
   if (ovr.sleeping)        flags.push(`<span class="badge b-red">😴 Sleep until ${ovr.sleep_until}</span>`);
   if (ovr.pause_reminders) flags.push('<span class="badge b-yellow">⏸ Reminders Paused</span>');
   if (ovr.mute_proactive)  flags.push('<span class="badge b-yellow">🔇 Proactive Muted</span>');
+  if (ovr.routines_paused) flags.push(`<span class="badge b-yellow">🌴 Vacation: routines paused for ${esc(ovr.routine_pause_remaining_days)} day(s), until ${esc(ovr.routine_pause_until)}</span>`);
   if (s.quiet_hours)       flags.push('<span class="badge b-muted">🌙 Quiet Hours</span>');
 
   let html = '';
@@ -1220,6 +1321,15 @@ function render(d) {
       </tr>`).join('')}</table></div>`;
   }
 
+  const clarification = rout.context_clarification || {};
+  const cp = clarification.pending;
+  html += `<div class="card"><h2>Context clarification</h2>
+    <div>${clarification.error ? 'Read error — held safely' : cp ? esc(cp.status) + ' · ' + esc(cp.channel) + ' · deadline ' + esc(cp.slot_at) : 'No pending question'}</div>
+    <div class="off">Delivered today: ${esc(clarification.delivered_today ?? 0)} / 2</div>
+    <div class="off">Last check: ${clarification.last_check ? esc(clarification.last_check.at) + ' · ' + esc(clarification.last_check.outcome) : 'Not recorded today'}</div>
+    <div class="table-wrap"><table><tr><th>Flag</th><th>Effective</th><th>Source / reason</th><th>Age</th></tr>
+    ${Object.entries(clarification.evidence || {}).map(([flag, item]) => `<tr><td>${esc(flag)}</td><td>${item.value === null ? 'unknown' : esc(item.value)}</td><td>${esc(item.source)} / ${esc(item.reason)}</td><td>${item.age_seconds == null ? '-' : Math.round(item.age_seconds / 60) + 'm'}</td></tr>`).join('')}</table></div>
+    <div class="off">Conditions passing alone do not prove delivery; see each routine’s last outcome and the timeline.</div></div>`;
   if ((rout.active||[]).length > 0) {
     html += `<div class="card" style="grid-column:1/-1"><h2>Active Routines (${rout.active.length})</h2>
       <div class="table-wrap"><table class="routines-table"><tr><th class="cell-tight">ID</th><th class="cell-tight">Schedule</th><th>Event</th><th>Rules</th><th class="cell-tight">Status</th><th class="cell-tight" style="text-align:right">Actions</th></tr>
@@ -1227,13 +1337,13 @@ function render(d) {
         <td class="off cell-tight" style="font-size:11px; vertical-align:middle">#${r.id}</td>
         <td class="cell-tight" style="vertical-align:middle"><div style="font-size:11px;color:var(--text-muted)">${r.day}</div><div style="font-weight:600;font-size:13px">${r.time}</div></td>
         <td class="cell-event" style="vertical-align:middle; font-weight: 500">${r.event}</td>
-        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}</div></td>
+        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}${renderRoutineFeedback(r)}</div></td>
         <td class="cell-tight" style="vertical-align:middle">
           <div style="margin-bottom:6px">${stateBadge(r)}</div>
-          ${r.paused_until ? `<div style="font-size:10px;color:var(--orange);margin-bottom:4px;font-weight:bold" title="Reason: ${r.pause_reason||'N/A'}">⏸️ Paused until: <br/>${r.paused_until}</div>` : ''}
+          ${r.paused_indefinitely ? `<div style="font-size:10px;color:var(--orange);margin-bottom:4px;font-weight:bold" title="Reason: ${r.pause_reason||'N/A'}">⏸️ Paused indefinitely</div>` : r.paused_until ? `<div style="font-size:10px;color:var(--orange);margin-bottom:4px;font-weight:bold" title="Reason: ${r.pause_reason||'N/A'}">⏸️ Paused until: <br/>${r.paused_until}</div>` : ''}
           ${r.muted_until ? `<div style="font-size:10px;color:var(--purple);margin-bottom:4px;font-weight:bold">🔇 Muted until: <br/>${r.muted_until}</div>` : ''}
-          <div style="width:80px;margin-bottom:4px">${confBar(r.confidence)}</div>
-          <div style="font-size:10px;color:var(--text-muted)">CD: <span class="${r.cooldown_remaining_h===0?'ok':r.cooldown_remaining_h>10?'err':'warn'}">${r.cooldown_remaining_h!=null?r.cooldown_remaining_h+'h':'-'}</span></div>
+          <div style="width:80px;margin-bottom:4px" title="Confidence in the habit, not a response rate">${confBar(r.confidence)}</div>
+          ${renderRoutineCooldown(r)}
         </td>
         <td class="cell-tight" style="text-align:right;vertical-align:middle;white-space:nowrap">
           <button onclick="resetCooldown(${r.id})" title="Reset Cooldown" style="background:rgba(56, 189, 248, 0.15);color:var(--blue-soft);border:none;padding:6px;border-radius:6px;cursor:pointer;margin-right:4px;font-size:14px">⚡</button>
@@ -1276,7 +1386,7 @@ function render(d) {
         <td class="off cell-tight" style="font-size:11px;vertical-align:middle">#${r.id}</td>
         <td class="cell-tight" style="vertical-align:middle"><div style="font-size:11px;color:var(--text-muted)">${r.day||'-'}</div><div style="font-weight:600;font-size:13px">${r.time||'-'}</div></td>
         <td class="cell-event" style="vertical-align:middle; font-weight: 500">${r.event}</td>
-        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}</div></td>
+        <td style="vertical-align:middle"><div style="display:flex;flex-direction:column;gap:6px">${renderCondition(r)}${renderMeta(r)}${renderOutcome(r)}${renderRoutineFeedback(r)}</div></td>
         <td class="cell-tight" style="vertical-align:middle">
           <div style="margin-bottom:6px">${stateBadge(r)}</div>
           <div style="width:80px">${confBar(r.confidence)}</div>
@@ -1448,7 +1558,7 @@ async function fetchTraces() {
   }
 }
 
-async function fetchData() {
+async function fetchData(forceBehavioralPatterns = false) {
   try {
   const r = await fetch('/debug/runtime');
     const data = await r.json();
@@ -1468,6 +1578,93 @@ async function fetchData() {
     const rj = await rr.json();
     renderReflections(rj.reflections || [], window._showApplied || false);
   } catch(e) {}
+  await fetchBehavioralPatterns(forceBehavioralPatterns);
+}
+
+
+async function fetchBehavioralPatterns(force = false) {
+  const now = Date.now();
+  if (behavioralPatternsFetchInFlight
+      || (!force && now - behavioralPatternsLastFetchedAt < BEHAVIORAL_PATTERNS_REFRESH)) {
+    return;
+  }
+  behavioralPatternsFetchInFlight = true;
+  try {
+    const pr = await fetch('/debug/behavioral-patterns');
+    const pj = await pr.json();
+    if (!pr.ok || pj.error) {
+      renderBehavioralPatternLoadError();
+      return;
+    }
+    renderBehavioralPatterns(pj.candidates || [], pj.summary || {}, pj.initiative || {});
+  } catch(e) {
+    renderBehavioralPatternLoadError();
+  } finally {
+    behavioralPatternsLastFetchedAt = Date.now();
+    behavioralPatternsFetchInFlight = false;
+  }
+}
+
+
+function renderBehavioralPatternLoadError() {
+  const container = document.getElementById('behavioral-patterns-section');
+  if (!container) return;
+  container.innerHTML = '<div class="card" style="grid-column:span 2;border-left:3px solid #f85149"><h2>🔎 BEHAVIORAL PATTERNS</h2><p class="err" role="status">Load error: Could not load behavioral patterns. The event store remains unchanged.</p></div>';
+  enhanceRenderedDashboard(container);
+}
+
+
+function behavioralPatternProgressText(summary) {
+  const confirmed = Number(summary.confirmed_event_count);
+  const strongest = Number(summary.strongest_distinct_dates);
+  const required = Number(summary.required_distinct_dates);
+  const confirmedCount = Number.isFinite(confirmed) && confirmed >= 0 ? Math.trunc(confirmed) : 0;
+  const strongestDates = Number.isFinite(strongest) && strongest >= 0 ? Math.trunc(strongest) : 0;
+  const requiredDates = Number.isFinite(required) && required > 0 ? Math.trunc(required) : 3;
+  return confirmedCount + ' confirmed events checked · Strongest repeated signature: '
+    + strongestDates + '/' + requiredDates + ' distinct dates.';
+}
+
+
+function renderBehavioralPatterns(candidates, summary, initiative = {}) {
+  const container = document.getElementById('behavioral-patterns-section');
+  if (!container) return;
+  const progressText = behavioralPatternProgressText(summary);
+  const diagnosticLine = (label, item) => item
+    ? '<p>' + label + ': ' + escapeHtml(item.at || '') + ' · '
+      + escapeHtml(item.reason || '') + ' · ' + escapeHtml(item.channel || '')
+      + (item.error_type ? ' · ' + escapeHtml(item.error_type) : '') + '</p>'
+    : '<p>' + label + ': No recorded check yet.</p>';
+  const diagnostics = '<h3>Spontaneous conversation</h3>'
+    + diagnosticLine('Last check', initiative.last_check)
+    + diagnosticLine('Last model evaluation', initiative.last_decision)
+    + (initiative.error ? '<p class="err">Diagnostics unavailable.</p>' : '')
+    + '<p style="color:var(--muted);font-size:12px">already_evaluated retains the previous decision; no extra model call. Reasons describe observed gates, not inferred model motives.</p>';
+  if (!candidates.length) {
+    container.innerHTML = '<div class="card" style="grid-column:span 2"><h2>🔎 BEHAVIORAL PATTERNS</h2>'
+      + '<p role="status">' + progressText + '</p>'
+      + '<p style="color:var(--muted)">No confirmed patterns with enough evidence yet.</p>' + diagnostics + '</div>';
+    enhanceRenderedDashboard(container);
+    return;
+  }
+  const rows = candidates.map(pattern => '<tr>'
+    + '<td><strong>' + escapeHtml(pattern.event_type || '') + '</strong></td>'
+    + '<td>' + escapeHtml(pattern.action_kind || 'legacy') + '</td>'
+    + '<td>' + escapeHtml(pattern.category || '') + '</td>'
+    + '<td>' + escapeHtml(pattern.subject || '') + '</td>'
+    + '<td>' + escapeHtml(pattern.item || '—') + '</td>'
+    + '<td>' + escapeHtml(pattern.status || '') + '</td>'
+    + '<td>' + escapeHtml(pattern.occurrence_count || 0) + '</td>'
+    + '<td>' + escapeHtml(pattern.first_date || '') + '</td>'
+    + '<td>' + escapeHtml(pattern.last_date || '') + '</td>'
+    + '</tr>').join('');
+  container.innerHTML = '<div class="card" style="grid-column:span 2">'
+    + '<h2>🔎 BEHAVIORAL PATTERNS (' + candidates.length + ')</h2>'
+    + '<p role="status">' + progressText + '</p>'
+    + '<p style="color:var(--muted);font-size:12px">Read-only observations from confirmed events; they do not change routines, memory, or prompts.</p>'
+    + '<div style="overflow-x:auto"><table><tr><th>Type</th><th>Action</th><th>Category</th><th>Subject</th><th>Item</th><th>Status</th><th>Events</th><th>First</th><th>Last</th></tr>'
+    + rows + '</table></div>' + diagnostics + '</div>';
+  enhanceRenderedDashboard(container);
 }
 
 
@@ -1496,12 +1693,17 @@ function renderGoals(goals) {
 }
 async function deleteGoal(project) {
   if (!confirm('Delete goal "' + project + '";')) return;
-  let token = localStorage.getItem('astakos_token') || prompt('Bearer token:');
-  if (!token) return;
-  localStorage.setItem('astakos_token', token);
-  const res = await fetch('/debug/goals/' + encodeURIComponent(project), {
-    method: 'DELETE', headers: {'Authorization': 'Bearer ' + token}
+  const deleteRequest = (token) => fetch('/debug/goals/' + encodeURIComponent(project), {
+    method: 'DELETE', headers: token ? {'Authorization': 'Bearer ' + token} : {}
   });
+  let token = localStorage.getItem('astakos_token');
+  let res = await deleteRequest(token);
+  if (res.status === 401) {
+    token = prompt('Bearer token:');
+    if (!token) return;
+    localStorage.setItem('astakos_token', token);
+    res = await deleteRequest(token);
+  }
   const j = await res.json();
   if (j.ok) { renderGoals((await (await fetch('/debug/goals')).json()).goals || []); }
   else { alert('Error: ' + (j.error||'unknown')); }
@@ -1770,7 +1972,7 @@ async function fetchMemoryAudit() {
       const col = opColor[e.op] || '#ccc';
       const fact = e.fact || e.lesson || e.observation || '';
       const extra = e.reason ? ` <span style="color:var(--muted);font-size:11px">(${escapeHtml(e.reason)})</span>` : '';
-      const dist  = e.distance != null ? ` <span style="color:var(--muted);font-size:11px">sim=${escapeHtml(e.distance)}</span>` : '';
+      const dist  = e.distance != null ? ` <span style="color:var(--muted);font-size:11px">distance=${escapeHtml(e.distance)}</span>` : '';
       const cat   = e.category ? `<span style="color:var(--muted);font-size:11px;margin-right:6px">[${escapeHtml(e.category)}]</span>` : '';
       return `<tr>
         <td style="color:var(--muted);font-size:11px;white-space:nowrap">${escapeHtml(e.ts||'')}</td>

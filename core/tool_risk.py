@@ -17,6 +17,7 @@ TOOL_RISK: dict[str, str] = {
     "post_to_linkedin":         "CRITICAL",
     "process_and_clear_linkedin_post": "CRITICAL",
     "write_project_file":       "CRITICAL",  # full rewrite
+    "write_custom_tool":        "CRITICAL",  # generates and tests custom skill
     "register_tool":            "CRITICAL",  # modifies system.py + tool_risk.py
     "grant_project_access":     "CRITICAL",  # permanent permission change
 
@@ -33,6 +34,7 @@ TOOL_RISK: dict[str, str] = {
     "delete_from_memory":       "WARNING",
     "control_vacuum":           "WARNING",
     "manage_list":              "WARNING",
+    "manage_known_places":      "WARNING",
     "set_local_reminder":       "WARNING",
     "google_tasks_tool":        "WARNING",
     "learn_routine":            "WARNING",
@@ -44,7 +46,6 @@ TOOL_RISK: dict[str, str] = {
     "control_routine_cooldown":  "WARNING",
     "control_pending_followup":  "WARNING",
     "write_code":               "WARNING",
-    "write_custom_tool":        "WARNING",
     "update_pending_linkedin_post": "WARNING",
     "relay_local_payload":      "WARNING",
     "save_to_memory":           "WARNING",
@@ -60,10 +61,12 @@ TOOL_RISK: dict[str, str] = {
     # ── SAFE: reads / queries / zero side-effects ────────────────
     "search_memory":            "SAFE",
     "retrieve_photo":           "SAFE",
+    "retrieve_document":        "SAFE",
     "read_local_file":          "SAFE",
     "get_news":                 "SAFE",
     "get_weather_forecast":     "SAFE",
     "duckduckgo_search":        "SAFE",
+    "research_web":             "SAFE",
     "browse_url":               "SAFE",
     "morning_briefing":         "SAFE",
     "hn_briefing":              "SAFE",
@@ -97,6 +100,7 @@ TOOL_RISK: dict[str, str] = {
     "list_agent_skills":        "SAFE",
     "read_agent_skill":         "SAFE",
     "manage_context_flag":     "SAFE",
+    "get_world_time":          "SAFE",
 }
 
 def get_risk(tool_name: str) -> str:

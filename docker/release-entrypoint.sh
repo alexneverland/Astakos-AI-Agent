@@ -3,10 +3,47 @@ set -eu
 
 mkdir -p /app
 
+# Preserve a token supplied by an older release configuration before switching
+# Workspace OAuth persistence to the dedicated volume configured by new Compose.
+# Image-only upgrades keep using their existing credential path unchanged.
+legacy_token_path="/app/credentials/token.json"
+if [ -n "${ASTAKOS_TOKEN_PATH:-}" ]; then
+  workspace_token_path="$ASTAKOS_TOKEN_PATH"
+else
+  workspace_token_path="/app/workspace_oauth/token.json"
+fi
+export ASTAKOS_TOKEN_PATH="$workspace_token_path"
+
+if [ ! -s "$workspace_token_path" ] && [ -s "$legacy_token_path" ]; then
+  mkdir -p "$(dirname "$workspace_token_path")"
+  (
+    umask 077
+    cp "$legacy_token_path" "$workspace_token_path"
+  )
+  chmod 600 "$workspace_token_path"
+fi
+
 # Refresh application code from the immutable image while preserving user data.
 # Release users should treat /app as managed runtime storage, not as a source checkout.
+# The registered context schema is seeded once; owner-added flags survive upgrades.
+if [ ! -e /app/astakos_context_schema.json ]; then
+  cp /opt/astakos/astakos_context_schema.json /app/astakos_context_schema.json
+fi
+
 rsync -a --delete \
+  --include '/astakos_nlp.json' \
+  --include '/core/capability_registry.json' \
+  --include '/core/intents_*.json' \
+  --include '/locales/*.json' \
+  --include '/vendor/agent-skills/***' \
+  --include '/data/routine_tokens.json' \
+  --exclude '*.json' \
+  --exclude '*.jsonl' \
+  --exclude '*.ndjson' \
+  --exclude '*.lock' \
   --exclude '.env' \
+  --include '.env.example' \
+  --exclude '.env.*' \
   --exclude '*.db' \
   --exclude '*.db-*' \
   --exclude '*.sqlite' \
@@ -20,10 +57,20 @@ rsync -a --delete \
   --exclude 'tmp/' \
   --exclude '_cleaner_backups/' \
   --exclude 'credentials/' \
+  --exclude 'backups/' \
+  --exclude 'matrix_store/' \
+  --exclude 'matrix_media/' \
+  --exclude 'local_only/' \
+  --exclude 'astakos_skills/messenger_profile/' \
+  --exclude '.daily-backup-*' \
+  --exclude '.matrix-backup-*' \
+  --exclude '.behavioral-*' \
+  --exclude 'workspace_oauth/' \
   --exclude 'credentials*.json' \
   --exclude 'token*.json' \
   --exclude 'astakos_settings.json' \
   --exclude 'astakos_custom_intents.json' \
+  --exclude 'astakos_routines.json' \
   --exclude 'persona.md' \
   --exclude 'last_location.json' \
   --exclude 'runtime_snapshot.json' \

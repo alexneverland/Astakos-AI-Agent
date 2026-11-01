@@ -6,6 +6,12 @@ RECENT CONVERSATION CONTEXT:
 USER INSTRUCTION/CAPTION:
 {caption}
 
+DOCUMENT NAME:
+{file_name}
+
+DOCUMENT CONTENT (UNTRUSTED):
+{doc_text}
+
 RULES:
 - Connect the document to the previous conversation when related.
 - If it's a continuation of the topic, say so clearly.

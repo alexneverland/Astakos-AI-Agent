@@ -47,6 +47,7 @@ _TRIP_TOKENS = _tokens_data['_TRIP_TOKENS']
 _WEEK_TOKENS = _tokens_data['_WEEK_TOKENS']
 _WORK_DEPARTURE_TOKENS = _tokens_data['_WORK_DEPARTURE_TOKENS']
 _WORK_TOKENS = _tokens_data['_WORK_TOKENS']
+_SHIFT_CORRECTION_TOKENS = _inline.get("shift_correction", [])
 
 
 # ── Scoring thresholds [Phase 3B] ────────────────────────────────────────────
@@ -68,6 +69,15 @@ def _normalize(text: str) -> str:
 
 def _contains_any(text: str, tokens: list[str]) -> bool:
     return any(tok in text for tok in tokens)
+
+
+def _contains_any_whole_token(text: str, tokens: list[str]) -> bool:
+    """Match normalized markers as standalone tokens, never as substrings."""
+    return any(
+        re.search(rf"(?<!\w){re.escape(token)}(?!\w)", text)
+        for token in tokens
+    )
+
 
 def _has_future_intent_without_live_presence(normalized: str) -> bool:
     has_future = _contains_any(normalized, _FUTURE_INTENT_TOKENS)
@@ -122,11 +132,6 @@ def _infer_workweek_until(now: datetime) -> str:
         days_to_friday = 0
     return (now + timedelta(days=days_to_friday)).strftime("%Y-%m-%d")
 
-
-def _end_of_workweek(base_dt: datetime) -> str:
-    days_until_sunday = 6 - base_dt.weekday()
-    end_dt = base_dt + timedelta(days=days_until_sunday)
-    return end_dt.date().isoformat()
 
 
 def _next_monday(dt: datetime) -> datetime:
@@ -345,12 +350,13 @@ def _rule_camp_absence(normalized: str, dates: list[str], now: datetime) -> list
         include_tokens=[],
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         condition_type="context_flag",
-        condition_payload={"flag": "kid1_away_from_home", "equals": True},
+        condition_payload={"flag": "kid1_unavailable_for_routine", "equals": True},
         condition_mode="suppress_when_true",
         reason="camp_absence_condition",
     )
     
-    return [d_state_home, d_state_reason] + ([cond] if cond else [])
+    d_state_scope = {**d_state_reason, "key": "kid1_absence_scope", "value": "extended"}
+    return [d_state_scope, d_state_home, d_state_reason] + ([cond] if cond else [])
 
 
 def _rule_return_home(normalized: str) -> list[dict]:
@@ -382,7 +388,8 @@ def _rule_return_home(normalized: str) -> list[dict]:
         "include_tokens": [],
         "exclude_tokens": [],
     }
-    return [d_state_home, d_state_reason]
+    d_state_scope = {**d_state_reason, "key": "kid1_absence_scope", "value": "home"}
+    return [d_state_scope, d_state_home, d_state_reason]
 
 def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     t("prompts.ext_family_outing_already_outside_")
@@ -417,6 +424,16 @@ def _rule_family_outing_in_progress(normalized: str, dates: list[str], now: date
     out.append(d_user_out)
 
     if has_child:
+        out.append({
+            "kind": "context_state_set",
+            "key": "kid1_absence_scope",
+            "value": "temporary",
+            "until_date": until,
+            "reason": "family_outing_in_progress",
+            "subject_tokens": _KID1_TOKENS,
+            "include_tokens": _OUTING_TOKENS,
+            "exclude_tokens": [],
+        })
         out.append({
             "kind": "context_state_set",
             "key": "kid1_with_user",
@@ -504,9 +521,21 @@ def _rule_return_home_from_outing(normalized: str, dates: list[str], now: dateti
       - state:kid1:outing = done (for the rest of today)
     Only applies if there is already an active outing/out-of-home context.
     """
-    has_home = _contains_any(normalized, _inline.get("home", []))
-    has_presence = _contains_any(normalized, _PRESENT_LIVE_TOKENS + _RETURN_TOKENS + _inline.get("home_presence", []))
-    if not (has_home and has_presence):
+    has_explicit_home_return = _contains_any(normalized, _HOME_RETURN_TOKENS)
+    has_legacy_home_return = (
+        _contains_any(normalized, _inline.get("home", []))
+        and _contains_any(
+            normalized,
+            _PRESENT_LIVE_TOKENS + _RETURN_TOKENS + _inline.get("home_presence", []),
+        )
+    )
+    if not (
+        has_explicit_home_return
+        or (
+            has_legacy_home_return
+            and not _has_future_intent_without_live_presence(normalized)
+        )
+    ):
         return []
 
     from memory.routine_db import get_context_state
@@ -609,12 +638,13 @@ def _rule_kid1_away_general(normalized: str, dates: list[str], now: datetime) ->
         include_tokens=[],
         exclude_tokens=_ROUTINE_EXCLUDE_TOKENS,
         condition_type="context_flag",
-        condition_payload={"flag": "kid1_away_from_home", "equals": True},
+        condition_payload={"flag": "kid1_unavailable_for_routine", "equals": True},
         condition_mode="suppress_when_true",
         reason="away_general_condition",
     )
     
-    return [d_state_home, d_state_reason] + ([cond] if cond else [])
+    d_state_scope = {**d_state_reason, "key": "kid1_absence_scope", "value": "extended"}
+    return [d_state_scope, d_state_home, d_state_reason] + ([cond] if cond else [])
 
 
 def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list[dict]:
@@ -656,39 +686,6 @@ def _rule_school_break(normalized: str, dates: list[str], now: datetime) -> list
     )
 
     return [d_state] + ([cond] if cond else [])
-
-
-def _rule_partner_work_mode(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """
-    Phase 3C.5 — partner_work_mode:
-    Facts: "Partner is working from home tomorrow", "Partner is teleworking"
-    """
-    has_partner = _contains_any(normalized, _inline.get("partner_aliases", []))
-    has_work = _contains_any(normalized, _WORK_TOKENS)
-    has_remote = _contains_any(normalized, _inline.get("home", [])) or _contains_any(normalized, _inline.get("remote_work", []))
-    
-    if not (has_partner and has_work and has_remote):
-        return []
-        
-    until = None
-    if dates:
-        until = max(dates)
-    else:
-        until = _infer_relative_until(normalized, now=now)
-        if not until:
-            until = now.strftime("%Y-%m-%d") # default today
-            
-    d_state = {
-        "kind": "context_state_set",
-        "key": "partner_work_mode",
-        "value": "remote",
-        "until_date": until,
-        "reason": "partner_remote_work",
-        "subject_tokens": _inline.get("partner_aliases", []),
-        "include_tokens": _WORK_TOKENS,
-        "exclude_tokens": [],
-    }
-    return [d_state]
 
 
 def _rule_football_season(normalized: str, dates: list[str], now: datetime) -> list[dict]:
@@ -733,6 +730,14 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     """
     has_work  = _contains_any(normalized, _WORK_TOKENS) or _contains_any(normalized, _WORK_DEPARTURE_TOKENS)
     has_shift = _contains_any(normalized, _SHIFT_PM_TOKENS) or _contains_any(normalized, _SHIFT_AM_TOKENS)
+    has_negated_shift_statement = _contains_any(
+        normalized,
+        _inline.get("negation", []),
+    )
+    has_shift_correction = _contains_any(
+        normalized,
+        _SHIFT_CORRECTION_TOKENS,
+    )
     has_next_week = _has_next_workweek_scope(normalized)
     has_this_week = _has_this_workweek_scope(normalized)
     explicit_weekday_dt = _extract_explicit_weekday_scope_dt(normalized, now)
@@ -743,6 +748,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
         or has_this_week
         or explicit_weekday_dt is not None
         or relative_day_dt is not None
+        or has_shift_correction
     )
 
     if not has_shift:
@@ -752,14 +758,10 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     shift_val = "afternoon" if _contains_any(normalized, _SHIFT_PM_TOKENS) else "morning"
 
     # 1. State Update (only if a specific week is mentioned)
-    if has_week_scope and has_work:
-        if dates:
-            try:
-                parsed_dt = datetime.strptime(dates[0], "%Y-%m-%d")
-                effective_dt = parsed_dt
-            except Exception:
-                effective_dt = now
-        elif explicit_weekday_dt is not None:
+    # A date in a persisted fact may be its recording date, not its event date.
+    # Only semantic extraction can resolve that provenance; never guess dates[0].
+    if has_week_scope and has_work and not has_negated_shift_statement and not dates:
+        if explicit_weekday_dt is not None:
             effective_dt = explicit_weekday_dt
         elif relative_day_dt is not None:
             effective_dt = relative_day_dt
@@ -769,7 +771,7 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
             effective_dt = now
 
         stop_words = set(_inline.get("stop_words", []))
-        until = _end_of_workweek(effective_dt)
+        until = _infer_workweek_until(effective_dt)
         d_state = {
             "kind": "context_state_set",
             "key": "current_shift",
@@ -851,6 +853,16 @@ def _rule_kid1_with_partner_without_user(normalized: str, dates: list[str], now:
     until = max(dates) if dates else now.strftime("%Y-%m-%d")
 
     return [
+        {
+            "kind": "context_state_set",
+            "key": "kid1_absence_scope",
+            "value": "temporary",
+            "until_date": until,
+            "reason": "partner_with_child_without_user",
+            "subject_tokens": _KID1_TOKENS,
+            "include_tokens": _OUTING_TOKENS,
+            "exclude_tokens": [],
+        },
         {
             "kind": "context_state_set",
             "key": "partner_with_user",
@@ -1106,6 +1118,14 @@ def score_candidate_directive(
     )
 
     has_activity = bool(include_tokens) and any(tok in normalized_fact for tok in include_tokens)
+    if (matched_rule_name == "llm_extracted" and kind == "context_state_set"
+            and directive_key == "current_shift"
+            and ((directive.get("context_operation") == "clear") or
+                 (directive.get("value") in {"morning", "afternoon", "night"} and until_date))):
+        # Semantic extraction already resolved the owner and work domain into
+        # this canonical key. Requiring literal name/alias matches defeats it.
+        has_subject = True
+        has_activity = True
     has_scope    = bool(until_date)
     # State = any word indicating a change of state / event in life
     has_state    = (matched_rule_name == "llm_extracted") or _contains_any(
@@ -1126,15 +1146,24 @@ def score_candidate_directive(
 
     if matched_rule_name in {"shift_logic", "child_activity_pause", "notifications_unmute", "partner_not_with_user"}:
         if matched_rule_name == "shift_logic":
-            # If explicit day or tomorrow is specified, it is NOT conservative.
-            # Only week-level mentions ("this week") get the conservative penalty.
-            has_explicit_day = _extract_explicit_weekday_scope_dt(normalized_fact, datetime.now()) is not None
-            has_relative_day = _extract_relative_day_scope_dt(normalized_fact, datetime.now()) is not None
-            if has_explicit_day or has_relative_day:
-                _append_signal(signals, "explicit_shift_schedule")
+            is_weekly_shift_state = (
+                kind == "context_state_set"
+                and directive_key == "current_shift"
+                and reason in {"shift_morning_week", "shift_afternoon_week"}
+                and bool(until_date)
+            )
+
+            if is_weekly_shift_state:
+                _append_signal(signals, "weekly_shift_state")
             else:
-                score += _P_CONSERVATIVE
-                _append_flag(ambiguity_flags, f"{matched_rule_name}_conservative")
+                # Conditions and ambiguous shift statements remain conservative.
+                has_explicit_day = _extract_explicit_weekday_scope_dt(normalized_fact, datetime.now()) is not None
+                has_relative_day = _extract_relative_day_scope_dt(normalized_fact, datetime.now()) is not None
+                if has_explicit_day or has_relative_day:
+                    _append_signal(signals, "explicit_shift_schedule")
+                else:
+                    score += _P_CONSERVATIVE
+                    _append_flag(ambiguity_flags, f"{matched_rule_name}_conservative")
         else:
             score += _P_CONSERVATIVE
             _append_flag(ambiguity_flags, f"{matched_rule_name}_conservative")
@@ -1280,32 +1309,26 @@ def _rule_user_at_work(normalized: str, dates: list[str], now) -> list[dict]:
     return [d_state]
 
 
-def _rule_quiet_hours(normalized: str, dates: list[str], now) -> list[dict]:
+def _reconciler_answer_text(content: object) -> str:
+    """Assemble only answer text without inserting bytes into structured JSON.
+
+    Scalar text and legacy string fragments remain supported. Structured blocks
+    must identify themselves as text; reasoning, tools and other metadata never
+    become an answer merely because they carry a text field.
     """
-    Quiet hours / sleep:
-    Facts: "The little one is sleeping", "Quiet now"
-    """
-    has_sleep = _contains_any(normalized, _inline.get("sleep_extra", []))
-    has_quiet = _contains_any(normalized, _inline.get("quiet", []))
-    has_child = _contains_any(normalized, _KID1_TOKENS)
-    
-    if not ((has_sleep and has_child) or has_quiet):
-        return []
-        
-    # Usually lasts a few hours, so until=today
-    until = now.strftime("%Y-%m-%d")
-            
-    d_state = {
-        "kind": "context_state_set",
-        "key": "quiet_hours",
-        "value": "true",
-        "until_date": until,
-        "reason": "quiet_hours_requested",
-        "subject_tokens": _KID1_TOKENS if has_child else [],
-        "include_tokens": _inline.get("quiet", []) + _inline.get("sleep_extra", []),
-        "exclude_tokens": [],
-    }
-    return [d_state]
+    if isinstance(content, str):
+        return content
+    blocks = [content] if isinstance(content, dict) else content
+    if not isinstance(blocks, list):
+        return ""
+    parts: list[str] = []
+    for block in blocks:
+        if isinstance(block, str):
+            parts.append(block)
+        elif (isinstance(block, dict) and block.get("type") == "text"
+                and isinstance(block.get("text"), str)):
+            parts.append(block["text"])
+    return "".join(parts)
 
 
 def _safe_json_list(raw: str) -> list[dict]:
@@ -1512,18 +1535,31 @@ def _llm_impact_to_directives(impact: dict) -> list[dict]:
 
     return directives
 
+def observed_shift_expiry(
+    value: str, until_date: str | None, previous: dict | None, *, revision: bool = False,
+) -> str | None:
+    """Retain a same-value observation's scope unless semantically revised."""
+    if not revision and previous and previous.get("value") == value:
+        existing = previous.get("expires_at")
+        if existing is None or (isinstance(existing, str) and until_date is not None
+                                and existing > until_date):
+            return existing
+    return until_date
+
+
 def _infer_llm_reconciliation_candidates(
     fact: str,
     *,
     category: str,
     reason: str,
     now: datetime,
+    shift_reference: dict | None = None,
 ) -> list[dict]:
     """
     LLM-first extraction layer.
     Returns candidate directives in the same schema as rule-based candidates.
     """
-    if reason not in {"user_stated", "agent_inferred"}:
+    if reason not in {"user_stated", "agent_inferred", "live_message_context"}:
         return []
 
     try:
@@ -1571,16 +1607,68 @@ def _infer_llm_reconciliation_candidates(
         fact=fact
     )
 
+    if reason == "live_message_context":
+        prompt += ("\nFor this live-message pass, return only an explicit owner work-shift "
+                   "schedule or cancellation (context_key=current_shift). Other live "
+                   "presence flags have a separate source-validated writer. A current "
+                   "shift report is valid even when the owner is now at home after work. "
+                   "Do not infer a schedule from the assistant's acknowledgement.\n")
+        prompt += ("For current_shift include schedule_revision (boolean): true only "
+                   "for an explicit replacement, restriction or correction of the "
+                   "schedule's scope; a repeated observation is false.\n")
+        if shift_reference is not None:
+            from core.untrusted_content import format_untrusted_tool_result
+            prompt += ("Interpret only the identified source report below. Later owner "
+                       "reports are references: if they supersede its shift, omit that "
+                       "shift rather than reinstating the old report. Use the source "
+                       "timestamp for its relative dates.\n")
+            prompt += format_untrusted_tool_result("queued shift reference", json.dumps(shift_reference, ensure_ascii=False))
+
     try:
         resp = llm.invoke([HumanMessage(content=prompt)])
-        raw = getattr(resp, "content", "") or ""
-    except Exception:
+        raw = _reconciler_answer_text(getattr(resp, "content", ""))
+    except Exception as exc:
+        if reason == "live_message_context":
+            from memory.event_log import log_event
+            log_event("routines", "live_shift_inference_failed", error_type=type(exc).__name__,
+                      debug_type="reconciler_error", debug_source="context_extractor")
         return []
 
     impacts = _safe_json_list(raw)
     out: list[dict] = []
     for impact in impacts:
-        out.extend(_llm_impact_to_directives(impact))
+        for directive in _llm_impact_to_directives(impact):
+            if reason == "live_message_context" and not (
+                directive.get("kind") == "context_state_set"
+                and directive.get("key") == "current_shift"
+            ):
+                continue
+            if directive.get("key") == "current_shift":
+                value = directive.get("value")
+                operation = impact.get("context_operation", "set")
+                clearing = (operation == "clear" and "context_value" in impact
+                            and (value is None or value == ""))
+                if operation == "clear" and not clearing:
+                    continue
+                if operation not in ("set", "clear"):
+                    continue
+                if not clearing and (not isinstance(value, str) or value not in {"morning", "afternoon", "night"}):
+                    continue
+                if not clearing or directive.get("until_date") is not None:
+                    try:
+                        expiry = datetime.strptime(directive.get("until_date"), "%Y-%m-%d").date()
+                    except (TypeError, ValueError):
+                        continue
+                    if expiry < now.date() or directive.get("until_date") != expiry.isoformat():
+                        continue
+                if clearing:
+                    directive["context_operation"] = "clear"
+                if reason == "live_message_context":
+                    revision = impact.get("schedule_revision", False)
+                    if type(revision) is not bool:
+                        continue
+                    directive["schedule_revision"] = revision
+            out.append(directive)
     return out
 
 def _candidate_fingerprint(d: dict) -> tuple:
@@ -1601,6 +1689,14 @@ def _candidate_fingerprint(d: dict) -> tuple:
 def _merge_candidate_lists(primary: list[dict], secondary: list[dict]) -> list[dict]:
     merged: list[dict] = []
     seen: set[tuple] = set()
+    semantic_shift = any(
+        item.get("kind") == "context_state_set" and item.get("key") == "current_shift"
+        for item in primary
+    )
+    if semantic_shift:
+        secondary = [item for item in secondary if not (
+            item.get("kind") == "context_state_set" and item.get("key") == "current_shift"
+        )]
 
     for item in primary + secondary:
         fp = _candidate_fingerprint(item)
@@ -1617,6 +1713,7 @@ def infer_routine_reconciliation_candidates(
     category: str,
     reason: str,
     now: datetime | None = None,
+    shift_reference: dict | None = None,
 ) -> list[dict]:
     """
     Runs all rule groups and returns raw candidate directives,
@@ -1645,6 +1742,7 @@ def infer_routine_reconciliation_candidates(
         category=category,
         reason=reason,
         now=current,
+        **({"shift_reference": shift_reference} if shift_reference is not None else {}),
     )
 
     filtered_llm = []
@@ -1669,9 +1767,7 @@ def infer_routine_reconciliation_candidates(
         ("seasonal_football",              _rule_seasonal_football,              (normalized_fact, dates, current)),
         ("football_season",                _rule_football_season,                (normalized_fact, dates, current)),
         ("camp_absence",                   _rule_camp_absence,                   (normalized_fact, dates, current)),
-        ("family_outing_in_progress",      _rule_family_outing_in_progress,      (normalized_fact, dates, current)),
         ("return_home",                    _rule_return_home,                    (normalized_fact,)),
-        ("return_home_from_outing",        _rule_return_home_from_outing,        (normalized_fact, dates, current)),
         ("kid1_away_general",        _rule_kid1_away_general,        (normalized_fact, dates, current)),
         ("school_break",                   _rule_school_break,                   (normalized_fact, dates, current)),
         ("child_activity_pause",           _rule_child_activity_pause,           (normalized_fact, dates, current)),
@@ -1679,9 +1775,7 @@ def infer_routine_reconciliation_candidates(
         ("partner_with_user",                _rule_partner_with_user,                (normalized_fact, dates, current)),
         ("partner_not_with_user",            _rule_partner_not_with_user,            (normalized_fact, dates, current)),
         ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, dates, current)),
-        ("partner_work_mode",                _rule_partner_work_mode,                (normalized_fact, dates, current)),
         ("user_at_work",                   _rule_user_at_work,                   (normalized_fact, dates, current)),
-        ("quiet_hours",                    _rule_quiet_hours,                    (normalized_fact, dates, current)),
     ]
     for rule_name, rule_fn, args in rules:
         for directive in rule_fn(*args):
@@ -1692,7 +1786,17 @@ def infer_routine_reconciliation_candidates(
     for d in llm_candidates:
         d.setdefault("rule_name", "llm_extracted")
 
-    return _merge_candidate_lists(llm_candidates, rule_candidates)
+    if reason == "live_message_context":
+        # A live shift needs a semantic decision, never a phrase-rule fallback.
+        rule_candidates = [item for item in rule_candidates if not (
+            item.get("kind") == "context_state_set" and item.get("key") == "current_shift")]
+
+    # Live outings belong to source-timed semantic context extraction. Memory
+    # summaries cannot activate them or install persistent suppression rules.
+    return [item for item in _merge_candidate_lists(llm_candidates, rule_candidates)
+            if not (item.get("kind") == "context_state_set" and item.get("key") == "state:kid1:outing")
+            and not (isinstance(item.get("condition_payload"), dict)
+                     and item["condition_payload"].get("flag") == "state:kid1:outing")]
 
 
 def infer_routine_reconciliation_directives(
@@ -1701,6 +1805,7 @@ def infer_routine_reconciliation_directives(
     category: str,
     reason: str,
     now: datetime | None = None,
+    shift_reference: dict | None = None,
 ) -> list[dict]:
     """
     Backward-compatible wrapper: returns only auto_apply directives (scored >= threshold).
@@ -1710,6 +1815,7 @@ def infer_routine_reconciliation_directives(
     normalized_fact = _normalize(fact)
     candidates = infer_routine_reconciliation_candidates(
         fact, category=category, reason=reason, now=current,
+        **({"shift_reference": shift_reference} if shift_reference is not None else {}),
     )
     scored = [
         score_candidate_directive(
@@ -1768,6 +1874,10 @@ def apply_routine_reconciliation_directives(directives: list[dict]) -> dict:
                 value = str(value) if value is not None else ""
             until_date = directive.get("until_date")
             set_context_state(key, value, until_date)
+            if key == "kid1_absence_scope" and value in {"temporary", "home"}:
+                # A newer ordinary outing/return supersedes legacy absence
+                # provenance even after this scoped decision expires.
+                set_context_state("kid1_away_reason", "", until_date)
             stats["context_states_set"] += 1
             log_event(
                 "routines", "auto_context_state_set",

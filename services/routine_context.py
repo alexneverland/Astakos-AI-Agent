@@ -1,8 +1,53 @@
 import json
 import math
 from datetime import datetime, timedelta
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from config import GPS_STORAGE_FILE, HOME_COORDS, HOME_RADIUS_M
+from services.routine_context_evidence import ContextEvidence
+
+
+def project_routine_context(
+    context: Mapping[str, Any], evidence: Mapping[str, ContextEvidence],
+) -> dict[str, Any]:
+    """Override only approved volatile dimensions; unknown never means false."""
+    from services.routine_context_evidence import VOLATILE_FLAGS
+    return {**context, **{flag: evidence.get(flag, ContextEvidence()).effective_value
+                         for flag in VOLATILE_FLAGS}}
+
+
+def build_routine_context_evidence(
+    now: datetime, *,
+    state_reader: Callable[[str], Mapping[str, Any] | None] | None = None,
+    gps_loader: Callable[[], Any] | None = None,
+    location_resolver: Callable[[float, float], bool | None] | None = None,
+) -> dict[str, ContextEvidence]:
+    """Expose channel-neutral, read-only evidence without altering routine dispatch."""
+    from services.routine_context_evidence import build_evidence_snapshot, load_gps_point
+    canonical_reader = state_reader is None
+    if state_reader is None:
+        from memory.routine_db import get_context_state
+        state_reader = get_context_state
+    if location_resolver is None:
+        from services.location_update import location_is_home
+        location_resolver = location_is_home
+    evidence = build_evidence_snapshot(
+        now=now, state_reader=state_reader,
+        gps_loader=gps_loader if gps_loader is not None else lambda: load_gps_point(GPS_STORAGE_FILE),
+        location_resolver=location_resolver,
+    )
+    if canonical_reader:
+        from memory.conversation_history import get_latest_trusted_user_rowid
+        from services.routine_duration_context import DURATION_KEY, apply_duration_evidence
+        from config import CONVERSATION_DB_FILE
+        try:
+            if state_reader(DURATION_KEY) is not None:
+                evidence = apply_duration_evidence(evidence, now=now, state_reader=state_reader,
+                    history_marker=get_latest_trusted_user_rowid(db_path=CONVERSATION_DB_FILE))
+        except Exception:
+            pass  # A failed optional proof read never changes ordinary evidence.
+    return evidence
 
 
 def _recent_gps_status(now: datetime | None = None) -> str | None:
@@ -40,9 +85,12 @@ def _recent_gps_status(now: datetime | None = None) -> str | None:
     return "home" if dist_home <= HOME_RADIUS_M else "away"
 
 def build_runtime_routine_context(now: datetime | None = None) -> dict:
+    from services.routine_duration_context import DURATION_KEY
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
     away_state = resolve_kid1_away_state(current)
+    away_reason = resolve_kid1_away_reason(current)
+    absence_scope = resolve_kid1_absence_scope(current)
 
     ctx = {}
     try:
@@ -52,6 +100,8 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
         c.execute("SELECT key, value, expires_at FROM context_state")
         for row in c.fetchall():
             k, v, exp = row[0], row[1], row[2]
+            if k == DURATION_KEY:
+                continue
             if exp and exp < today:
                 continue
             if str(v).lower() == "true":
@@ -69,10 +119,13 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
     ctx.update({
         "today": today,
         "kid1_away_from_home": away_state,
-        "kid1_away_reason": resolve_kid1_away_reason(current),
+        "kid1_away_reason": away_reason,
+        "kid1_absence_scope": absence_scope,
+        "kid1_unavailable_for_routine": kid1_unavailable_for_routine(away_state, away_reason, absence_scope),
         "kid1_with_user": resolve_context_bool("kid1_with_user", current),
         "kid1_with_partner": resolve_context_bool("kid1_with_partner", current),
         "partner_with_user": resolve_context_bool("partner_with_user", current),
+        "partner_at_work": resolve_context_bool("partner_at_work", current),
         "football_season": resolve_football_season(current),
         "school_open": resolve_school_open(current),
         "current_shift": resolve_current_shift(current),
@@ -83,6 +136,30 @@ def build_runtime_routine_context(now: datetime | None = None) -> dict:
     })
     ctx["kid1_present"] = not bool(away_state)
     return ctx
+
+
+def kid1_unavailable_for_routine(
+    away_state: bool | None, away_reason: str | None, absence_scope: str | None = None,
+) -> bool:
+    """Distinguish an explicit absence from school or a short outing."""
+    if absence_scope is not None:
+        return absence_scope == "extended"
+    return bool(away_state and away_reason in {"camp", "grandmother", "trip", "away"})
+
+
+def resolve_kid1_absence_scope(now: datetime | None = None) -> str | None:
+    """Read the canonical child-absence decision when it is still current."""
+    current = now or datetime.now()
+    from memory.routine_db import get_context_state
+
+    state_data = get_context_state("kid1_absence_scope")
+    if not state_data:
+        return None
+    expires_at = state_data.get("expires_at")
+    if expires_at and expires_at < current.strftime("%Y-%m-%d"):
+        return None
+    value = str(state_data.get("value", "")).lower()
+    return value if value in {"extended", "temporary", "home"} else None
 
 def resolve_context_bool(key: str, now: datetime | None = None) -> bool | None:
     current = now or datetime.now()
@@ -225,7 +302,12 @@ def resolve_user_out_of_home(now: datetime | None = None) -> bool:
             return stored_value
     return False
 
-def resolve_quiet_hours(now: datetime | None = None) -> bool:
+def resolve_quiet_hours(now: datetime | None = None, *, scheduled: bool = False) -> bool:
+    """Honor explicit quiet state; default window does not cancel scheduled slots.
+
+    Only bounded routine dispatch/clarification callers may opt into scheduled
+    policy. Spontaneous proactive flows retain the ordinary default window.
+    """
     current = now or datetime.now()
     today = current.strftime("%Y-%m-%d")
     from memory.routine_db import get_context_state
@@ -233,8 +315,12 @@ def resolve_quiet_hours(now: datetime | None = None) -> bool:
     if state_data:
         expires_at = state_data.get("expires_at")
         if not expires_at or expires_at >= today:
+            if scheduled and str(state_data.get("value")).lower() not in {"true", "false"}:
+                return True
             return str(state_data.get("value")).lower() == "true"
 
+    if scheduled:
+        return False
     from clients.telegram_bot import QUIET_HOURS
     h = current.hour
     start, end = QUIET_HOURS

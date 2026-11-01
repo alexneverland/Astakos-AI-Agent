@@ -155,7 +155,7 @@ def log_event(job: str, action: str, **kwargs):
         print(f"⚠️ [event_log]: {e}")
 
 
-def get_events(date_str: str = None, job: str = None, action: str = None) -> list:
+def get_events(date_str: str = None, job: str = None, action: str = None, *, strict: bool = False) -> list:
     """
     Returns events from the daily log.
     Usage: get_events("2026-05-22", job="routines", action="triggered")
@@ -167,13 +167,35 @@ def get_events(date_str: str = None, job: str = None, action: str = None) -> lis
             return []
         with open(log_file, "r", encoding="utf-8") as f:
             entries = json.load(f)
+        if strict and (not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries)):
+            raise ValueError("Invalid event log")
         if job:
             entries = [e for e in entries if e.get("job") == job]
         if action:
             entries = [e for e in entries if e.get("action") == action]
         return entries
     except Exception:
+        if strict:
+            raise
         return []
+
+
+def has_recent_reminder_delivery(now: datetime, *, grace_seconds: int = 900) -> bool:
+    """Read reminder activity independently of history; invalid logs fail closed.
+
+    Include yesterday across midnight. These existing sent records are a
+    conservative activity signal, not proof of external delivery success.
+    """
+    from datetime import timedelta, timezone
+
+    for day in (now.date(), (now - timedelta(seconds=grace_seconds)).date()):
+        for event in get_events(day.isoformat(), action="sent", strict=True):
+            if event.get("job") not in {"reminder", "reminders"}:
+                continue
+            sent_at = datetime.fromisoformat(event["timestamp"])
+            if now.astimezone(timezone.utc) - sent_at.astimezone(timezone.utc) < timedelta(seconds=grace_seconds):
+                return True
+    return False
 
 
 # ────────────────────────────────────────────────────────────────
@@ -209,15 +231,15 @@ def is_duplicate_routine(routine_id: int, cooldown_hours: float) -> bool:
     except Exception as e:
         print(f"[event_log]: is_duplicate_routine error: {e}")
         return False  # Graceful fallback — we allow sending
-def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDOWN_DEFAULT) -> bool:
-    """
-    Returns True if the same message was sent recently (within cooldown).
-    Usage: if is_duplicate_notification(msg): return
+def _notification_hash(message: str) -> str:
+    """Keep notification identity canonical across reservation and release."""
+    return hashlib.md5(message.strip().encode("utf-8")).hexdigest()[:10]
 
-    Automatically clears old entries (>1 hour).
-    """
+
+def reserve_notification(message: str, cooldown_seconds: int = DEDUP_COOLDOWN_DEFAULT) -> float | None:
+    """Atomically reserve a notification; return its timestamp or None if blocked."""
     import time
-    msg_hash = hashlib.md5(message.strip().encode("utf-8")).hexdigest()[:10]
+    msg_hash = _notification_hash(message)
     now      = time.time()
 
     with _dedup_lock:
@@ -229,10 +251,23 @@ def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDO
         if msg_hash in _dedup_cache:
             elapsed = now - _dedup_cache[msg_hash]
             if elapsed < cooldown_seconds:
-                return True  # duplicate
+                return None  # duplicate
 
         _dedup_cache[msg_hash] = now
-        return False
+        return now
+
+
+def release_notification_reservation(message: str, reserved_at: float) -> None:
+    """Release only the caller's failed reservation, preserving any newer claim."""
+    msg_hash = _notification_hash(message)
+    with _dedup_lock:
+        if _dedup_cache.get(msg_hash) == reserved_at:
+            _dedup_cache.pop(msg_hash, None)
+
+
+def is_duplicate_notification(message: str, cooldown_seconds: int = DEDUP_COOLDOWN_DEFAULT) -> bool:
+    """Reserve a notification and report whether its cooldown already blocks it."""
+    return reserve_notification(message, cooldown_seconds) is None
 
 # ────────────────────────────────────────────────────────────────
 # REPLAY TIMELINE

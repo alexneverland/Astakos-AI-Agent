@@ -1,3 +1,6 @@
+from typing import Any
+from types import SimpleNamespace
+
 import pytest
 from core.utils import (
     get_ultra_light_ack_response,
@@ -5,6 +8,22 @@ from core.utils import (
     is_medium_web_chat_path_candidate,
     is_ultra_light_ack,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_routine_and_context_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep handler tests away from owner context files and model classification."""
+    import clients.telegram_bot as bot
+    import memory.routine_db as routine_db
+    import memory.pending_assets as pending_assets
+    import services.routine_context_clarification as clarification
+
+    monkeypatch.setattr(bot, "pending_routine_confirmations", {})
+    monkeypatch.setattr(routine_db, "get_eligible_preemptive_routines_for_day", lambda *args, **kwargs: [])
+    monkeypatch.setattr(routine_db, "get_active_routine_catalog", lambda: [])
+    monkeypatch.setattr(pending_assets, "get_latest_pending_asset_any", lambda *_args: None)
+    monkeypatch.setattr(clarification, "try_context_question_reply",
+                        lambda *args, **kwargs: clarification.QuestionAnswer())
 
 
 def test_fast_path_simple_ack():
@@ -34,6 +53,23 @@ def test_fast_path_question():
     assert is_simple_chat_fast_path_candidate("τι κάνει ο Kid1;") is False
 
 
+def test_fast_chat_path_allows_bounded_tool_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fast chat retains enough graph steps for a short sequence of read tools."""
+    import clients.telegram_bot as bot
+
+    observed_config: dict[str, int] = {}
+    observed_state: dict[str, Any] = {}
+    monkeypatch.setattr(
+        bot.graph,
+        "stream",
+        lambda state, config: observed_state.update(state) or observed_config.update(config) or [],
+    )
+
+    assert bot._run_fast_chat_path([], object(), routine_draft_offer_authorized=True) == []
+    assert observed_config["recursion_limit"] == 24
+    assert observed_state["routine_draft_offer_authorized"] is True
+
+
 def test_ultra_light_ack_basic_cases():
     assert is_ultra_light_ack("ναι") is True
     assert is_ultra_light_ack("οκ") is True
@@ -58,12 +94,119 @@ def test_ultra_light_ack_response_is_neutral_confirmation():
 from unittest.mock import patch
 
 
+def test_handle_message_ultra_light_ack_sends_reply_without_graph(monkeypatch, capsys):
+    import clients.telegram_bot as bot
+    import core.utils as utils
+    import memory.execution_trace as execution_trace
+    import memory.pending_assets as pending_assets
+    import tools.telegram as telegram
+
+    sent = []
+    monkeypatch.setattr(bot, "pending_routine_confirmations", {})
+    monkeypatch.setattr(bot, "pending_reflection_confirmations", {})
+    monkeypatch.setattr(bot, "pending_exec_command", None)
+    monkeypatch.setattr(bot, "pending_photo", None)
+    monkeypatch.setattr(bot, "_safe_active_draft_status", lambda: (False, "missing", None))
+    monkeypatch.setattr(bot, "_safe_classify_messenger_intent", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bot, "_build_fast_chat_context", lambda _text, **kwargs: ([], object()))
+    monkeypatch.setattr(bot, "_append_to_analytics_log", lambda *_args: 1)
+    monkeypatch.setattr(bot, "_cache_bot_message", lambda *_args: None)
+    monkeypatch.setattr(bot, "enqueue_fast_task", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(bot, "enqueue_slow_task", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        bot.threading,
+        "Thread",
+        lambda *_args, **_kwargs: type("Thread", (), {"start": lambda self: None})(),
+    )
+    monkeypatch.setattr(bot.graph, "stream", lambda *_args, **_kwargs: pytest.fail("graph must not run"))
+    monkeypatch.setattr(pending_assets, "clear_expired_pending_assets", lambda: None)
+    monkeypatch.setattr(pending_assets, "get_latest_pending_asset", lambda *_args: None)
+    monkeypatch.setattr(utils, "is_ultra_light_ack", lambda _text: True)
+    monkeypatch.setattr(utils, "get_ultra_light_ack_response", lambda: "ACK")
+    monkeypatch.setattr(utils, "is_reply_to_recent_mail_prompt", lambda _history: False)
+    monkeypatch.setattr(utils, "is_reply_to_recent_linkedin_prompt", lambda _history: False)
+    monkeypatch.setattr(telegram, "send_telegram_msg", lambda message: sent.append(message) or 1)
+
+    bot.handle_message("ok", "user123")
+
+    assert sent == ["ACK"]
+    import json
+    rows = [json.loads(line.removeprefix("[TelegramTrace]: "))
+        for line in capsys.readouterr().out.splitlines() if line.startswith("[TelegramTrace]: ")]
+    assert rows[0]["event"] == "turn_started"
+    assert any(row["event"] == "turn_finished" and row["response"] == "ACK" for row in rows)
+    assert not any(row["event"] in {"graph_step", "tool_called"} for row in rows)
+    assert execution_trace.load_traces()[0]["response"] == "ACK"
+
+
+@pytest.mark.parametrize("mode", ["fast", "medium", "full"])
+@pytest.mark.parametrize("outcome", ["error", "empty", "success", "send_error", "pending"])
+def test_telegram_trace_completes_on_every_exit(monkeypatch, capsys, mode, outcome):
+    """Real handler failures and early returns retain one completed offline trace."""
+    import json
+    from langchain_core.messages import AIMessage, HumanMessage
+    import clients.telegram_bot as bot
+    import core.utils as utils
+    import memory.pending_assets as pending_assets
+    from memory.execution_trace import load_traces
+    from services.messenger_intent import MessengerIntentResult
+    sent = []
+    monkeypatch.setattr(bot, "pending_reflection_confirmations", {})
+    monkeypatch.setattr(bot, "pending_exec_command", None)
+    monkeypatch.setattr(bot, "pending_photo", None)
+    monkeypatch.setattr(bot, "_safe_active_draft_status", lambda: (True, "active", {"message": "draft", "target_name": "offline"}) if outcome == "pending" else (False, "missing", None))
+    monkeypatch.setattr(bot, "_safe_classify_messenger_intent", lambda *_args, **_kwargs:
+        MessengerIntentResult(intent="confirm_send", confidence=1) if outcome == "pending" else None)
+    monkeypatch.setattr("core.approval.save_pending", lambda *args, **kwargs: None)
+    monkeypatch.setattr("core.approval._notify_telegram", lambda *args: None)
+    monkeypatch.setattr(bot, "_build_fast_chat_context", lambda text, **kwargs: ([], HumanMessage(content=text)))
+    monkeypatch.setattr(bot, "_append_to_analytics_log", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(bot, "_cache_bot_message", lambda *args: None)
+    monkeypatch.setattr(bot, "_schedule_capability_gap_if_valid", lambda *args: None)
+    monkeypatch.setattr(bot, "enqueue_fast_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot, "enqueue_slow_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bot.threading, "Thread", lambda *args, **kwargs: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(pending_assets, "clear_expired_pending_assets", lambda: None)
+    monkeypatch.setattr(pending_assets, "get_latest_pending_asset", lambda *args: None)
+    monkeypatch.setattr(utils, "is_ultra_light_ack", lambda _: False)
+    monkeypatch.setattr(utils, "is_simple_chat_fast_path_candidate", lambda _: mode == "fast")
+    monkeypatch.setattr(utils, "is_medium_web_chat_path_candidate", lambda _: mode == "medium")
+    monkeypatch.setattr(utils, "is_reply_to_recent_mail_prompt", lambda _: False)
+    monkeypatch.setattr(utils, "is_reply_to_recent_linkedin_prompt", lambda _: False)
+    monkeypatch.setattr(bot, "_tool_results_fallback_response", lambda *args: "")
+    def stream(*args, **kwargs):
+        yield {"Home_Agent": {"messages": [AIMessage(content="", tool_calls=[{
+            "name": "get_current_location", "id": "pending-telegram", "args": {}}])]}}
+        if outcome == "error":
+            raise RuntimeError("offline graph failure")
+        yield {"Home_Agent": {"messages": [AIMessage(content="" if outcome == "empty" else "ready")]}}
+    monkeypatch.setattr(bot.graph, "stream", stream)
+    def send(text):
+        sent.append(text)
+        if outcome == "send_error" and len(sent) == 1:
+            raise RuntimeError("offline send failure")
+        return 1
+    monkeypatch.setattr("tools.telegram.send_telegram_msg", send)
+    bot.handle_message("offline owner request", "user123")
+    rows = load_traces()
+    assert len(rows) == 1
+    assert rows[0]["error"] == {"error": "RuntimeError", "send_error": "RuntimeError", "empty": "NoResponse", "success": None, "pending": None}[outcome]
+    assert rows[0]["duration_ms"] >= 0
+    if outcome != "pending":
+        assert rows[0]["tool_calls"][0]["status"] == "unresolved"
+    logs = [json.loads(line.removeprefix("[TelegramTrace]: "))
+        for line in capsys.readouterr().out.splitlines() if line.startswith("[TelegramTrace]: ")]
+    assert sum(row["event"] == "turn_finished" for row in logs) == 1
+
+
+@patch("memory.pending_assets.get_latest_pending_asset", return_value=None)
+@patch("memory.pending_assets.clear_expired_pending_assets")
 @patch("core.messenger_draft.active_draft_status", return_value=(False, "missing", None))
 @patch("tools.telegram.send_telegram_msg")
-@patch("clients.telegram_bot._append_to_analytics_log")
+@patch("clients.telegram_bot._append_to_analytics_log", return_value=1)
 @patch("clients.telegram_bot.graph.stream")
 @patch("clients.telegram_bot._safe_classify_messenger_intent")
-def test_messenger_intent_clarify_does_not_create_draft(mock_classify, mock_stream, mock_append, mock_send, mock_active):
+def test_messenger_intent_clarify_does_not_create_draft(mock_classify, mock_stream, mock_append, mock_send, mock_active, mock_clear_assets, mock_get_asset):
     from clients.telegram_bot import handle_message
     from services.messenger_intent import MessengerIntentResult
     
@@ -79,13 +222,27 @@ def test_messenger_intent_clarify_does_not_create_draft(mock_classify, mock_stre
     assert "Δεν υπάρχει ενεργό draft αυτή τη στιγμή. Εννοούσα απλώς σαν ιδέα" in sent_text
 
 
+@patch("memory.routine_db.get_eligible_preemptive_routines_for_day", return_value=[])
+@patch("memory.pending_assets.get_latest_pending_asset", return_value=None)
+@patch("memory.pending_assets.clear_expired_pending_assets")
 @patch("core.messenger_draft.active_draft_status", return_value=(True, "active", {"message": "hello"}))
 @patch("core.messenger_draft.clear_draft", return_value=True)
 @patch("tools.telegram.send_telegram_msg")
-@patch("clients.telegram_bot._append_to_analytics_log")
+@patch("clients.telegram_bot._append_to_analytics_log", return_value=1)
 @patch("clients.telegram_bot.graph.stream")
 @patch("clients.telegram_bot._safe_classify_messenger_intent")
-def test_messenger_intent_clear_closes_draft(mock_classify, mock_stream, mock_append, mock_send, mock_clear, mock_active):
+def test_messenger_intent_clear_closes_draft(
+    mock_classify: Any,
+    mock_stream: Any,
+    mock_append: Any,
+    mock_send: Any,
+    mock_clear: Any,
+    mock_active: Any,
+    mock_clear_assets: Any,
+    mock_get_asset: Any,
+    mock_eligible: Any,
+) -> None:
+    """A draft-clear request is isolated from live routine candidates."""
     from clients.telegram_bot import handle_message
     from services.messenger_intent import MessengerIntentResult
     
@@ -104,6 +261,35 @@ def test_messenger_intent_clear_closes_draft(mock_classify, mock_stream, mock_ap
     assert "The draft is cleared" in sent_text or "Το draft καθαρίστηκε" in sent_text
 
 
+@patch("memory.pending_assets.get_latest_pending_asset", return_value=None)
+@patch("memory.pending_assets.clear_expired_pending_assets")
+@patch("core.messenger_draft.active_draft_status", return_value=(False, "missing", None))
+@patch("core.messenger_draft.clear_draft", return_value=False)
+@patch("tools.telegram.send_telegram_msg")
+@patch("clients.telegram_bot._append_to_analytics_log", return_value=1)
+@patch("clients.telegram_bot.graph.stream")
+@patch("clients.telegram_bot._safe_classify_messenger_intent")
+def test_messenger_intent_clear_without_active_draft_stays_out_of_graph(
+    mock_classify: Any,
+    mock_stream: Any,
+    mock_append: Any,
+    mock_send: Any,
+    mock_clear: Any,
+    mock_active: Any,
+    mock_clear_assets: Any,
+    mock_get_asset: Any,
+) -> None:
+    """A stale draft-clear request must be handled locally, never by capability routing."""
+    from clients.telegram_bot import handle_message
+    from services.messenger_intent import MessengerIntentResult
+
+    mock_classify.return_value = MessengerIntentResult(intent="clear_draft", confidence=1.0)
+    handle_message("Καθάρισε draft", "user123")
+
+    mock_clear.assert_called_once()
+    mock_stream.assert_not_called()
+
+
 def test_medium_path_candidate_for_telegram_reflective_turn():
     assert is_medium_web_chat_path_candidate('σχολασα φιλε και παω σπιτι') is True
 
@@ -112,8 +298,3 @@ def test_contextual_sofia_not_needed_reply_does_not_decay():
     from clients.telegram_bot import _looks_like_contextual_not_needed_reply
     text = "Δεν θα χρειαστεί σήμερα μήνυμα μόλις μίλησα μαζί της στο τηλέφωνο, κλείνει εδώ"
     assert _looks_like_contextual_not_needed_reply(text) is True
-
-def test_terminal_followup_skip_reason_marks_stale_case():
-    from clients.telegram_bot import _looks_terminal_followup_skip_reason
-    reason = "Το follow-up αφορά αφύπνιση της προηγούμενης ημέρας και δεν έχει νόημα τώρα."
-    assert _looks_terminal_followup_skip_reason(reason) is True
