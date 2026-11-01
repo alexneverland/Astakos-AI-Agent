@@ -31,7 +31,7 @@ pypdf==6.21.4
 PyGithub==2.9.1
 pytest==9.1.1
 python-multipart==0.0.32
-python-dotenv==1.2.2
+python-dotenv==1.2.4
 python-slugify==8.0.4
 python_docx==1.2.0
 reportlab==5.1.0
