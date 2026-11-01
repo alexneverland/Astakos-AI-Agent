@@ -76,4 +76,3 @@ jobs:
             --entrypoint /bin/sh \
             astakos-release-smoke:latest \
             -lc "printf '{}' > /tmp/fake-vertex.json && cd /opt/astakos && python -c 'import api.server; print(\"release-smoke-ok\")'"
-
