@@ -1,14 +1,20 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Module:  Action Approval — CRITICAL tool gate
-# If tool is CRITICAL → saves as pending, sends Telegram message
+# If tool is CRITICAL → saves as pending, requests external approval
 # If SAFE/WARNING → lets the graph continue normally
 # ================================================================
 
 import os
 import json
+import tempfile
 from datetime import datetime, timedelta
+from typing import Any, Sequence
+from filelock import FileLock
+from langchain_core.messages import BaseMessage
+from langchain_core.messages.tool import ToolCall
 from core.tool_risk import get_risk as _get_risk
+from core.capability_draft import has_capability_draft_authorization
 
 def _effective_risk(tc: dict) -> str:
     """
@@ -51,6 +57,12 @@ def _effective_risk(tc: dict) -> str:
         if action in {"search", "check_emails", "check", "read", "read_full", "read_thread"}:
             return "SAFE"
         return "CRITICAL"
+    if name == "github_manager":
+        action = str(tc.get("args", {}).get("action", "")).lower()
+        if action in {"list_repos", "read_file"}:
+            return "SAFE"
+        # Unknown actions fail closed because this tool can publish changes.
+        return "CRITICAL"
     if name == "google_tasks_tool":
         action = str(tc.get("args", {}).get("action", "list")).lower()
         if action == "delete":
@@ -78,7 +90,175 @@ def _effective_risk(tc: dict) -> str:
         if fname in _CORE:
             return "CRITICAL"
         return "WARNING"
+    if name == "register_tool":
+        args = tc.get("args", {})
+        if not isinstance(args, dict):
+            return "CRITICAL"
+        is_dry = args.get("dry_run", False)
+        # Convert string representations to boolean if needed
+        if isinstance(is_dry, str):
+            is_dry = is_dry.lower() in ["true", "1", "yes", "y", "nai"]
+        if is_dry:
+            return "WARNING"
+        return "CRITICAL"
+
     return _get_risk(name)
+
+
+def _is_accepted_routine_messenger_draft_creation(
+    tool_call: ToolCall,
+    prior_messages: Sequence[BaseMessage],
+    *,
+    routine_draft_offer_authorized: bool | None = None,
+) -> bool:
+    """Return whether a trusted routine acceptance authorizes a draft write."""
+    if tool_call.get("name") != "relay_local_payload":
+        return False
+    from services.messenger_intent import has_accepted_routine_draft_offer
+    return has_accepted_routine_draft_offer(
+        prior_messages,
+        state_authorized=routine_draft_offer_authorized,
+    )
+
+
+def _is_trusted_active_messenger_draft_edit(
+    tool_call: ToolCall,
+    prior_messages: Sequence[BaseMessage],
+    *,
+    context_isolated: bool = False,
+) -> bool:
+    """Return whether a clean direct message safely revises the active draft."""
+    if tool_call.get("name") != "relay_local_payload":
+        return False
+    if not context_isolated:
+        return False
+
+    from core.messenger_draft import active_draft_status
+    from core.untrusted_content import external_content_source_names, is_direct_user_message
+    from services.messenger_intent import is_contextually_grounded_active_draft_edit
+    from tools.web import _messenger_targets_match
+
+    args = tool_call.get("args", {})
+    if not isinstance(args, dict):
+        return False
+    active, _, draft = active_draft_status()
+    if not active or not isinstance(draft, dict):
+        return False
+
+    if not _messenger_targets_match(
+        str(draft.get("target_name", "")),
+        str(args.get("target_entity", "")),
+    ):
+        return False
+
+    existing_image = os.path.normcase(os.path.normpath(str(draft.get("image_path", "")).strip()))
+    requested_image = os.path.normcase(os.path.normpath(str(args.get("image_path", "")).strip()))
+    if requested_image != existing_image:
+        return False
+
+    for message in reversed(prior_messages):
+        if is_direct_user_message(message):
+            if external_content_source_names(getattr(message, "additional_kwargs", {})):
+                return False
+            return is_contextually_grounded_active_draft_edit(
+                str(getattr(message, "content", "")),
+                prior_messages,
+            )
+    return False
+
+def _is_explicit_messenger_draft_creation(
+    tool_call: ToolCall,
+    prior_messages: Sequence[BaseMessage],
+    *,
+    routine_draft_offer_authorized: bool | None = None,
+    active_draft_edit_context_isolated: bool = False,
+) -> bool:
+    """Return whether a user explicitly requested the reversible Messenger draft write.
+
+    This only exempts ``relay_local_payload`` from the external-context
+    escalation. A trusted active-draft edit is also permitted after an
+    incidental read because the user must still review the draft before the
+    separate CRITICAL send path can run.
+    """
+    if tool_call.get("name") != "relay_local_payload":
+        return False
+
+    from core.untrusted_content import (
+        external_content_source_names,
+        is_direct_user_message,
+    )
+    from services.messenger_intent import is_explicit_draft_creation_request
+
+    if _is_accepted_routine_messenger_draft_creation(
+        tool_call,
+        prior_messages,
+        routine_draft_offer_authorized=routine_draft_offer_authorized,
+    ):
+        return True
+
+    if _is_trusted_active_messenger_draft_edit(
+        tool_call,
+        prior_messages,
+        context_isolated=active_draft_edit_context_isolated,
+    ):
+        return True
+
+    for message in reversed(prior_messages):
+        if is_direct_user_message(message):
+            if external_content_source_names(
+                getattr(message, "additional_kwargs", {}),
+            ):
+                return False
+            return is_explicit_draft_creation_request(
+                str(getattr(message, "content", "")),
+            )
+    return False
+
+
+def _is_direct_user_meal_log(
+    tool_call: ToolCall,
+    prior_messages: Sequence[BaseMessage],
+) -> bool:
+    """Allow a direct trusted meal log to bypass stale provenance only."""
+    if tool_call.get("name") != "log_meal":
+        return False
+
+    from core.untrusted_content import external_content_source_names, is_direct_user_message
+    from services.food_intent import is_meal_report
+
+    meal_name = str((tool_call.get("args") or {}).get("meal_name", "")).strip()
+    if not meal_name:
+        return False
+
+    for message in reversed(prior_messages):
+        if not is_direct_user_message(message):
+            continue
+        if external_content_source_names(getattr(message, "additional_kwargs", {})):
+            return False
+        return is_meal_report(str(getattr(message, "content", "")))
+    return False
+
+def _is_direct_user_reminder_request(
+    tool_call: ToolCall, prior_messages: Sequence[BaseMessage],
+) -> bool:
+    """Exempt grounded creation from old provenance, never same-turn blocks."""
+    if tool_call.get("name") != "set_local_reminder":
+        return False
+    from core.untrusted_content import external_content_source_names, is_direct_user_message
+    from services.reminder_intent import is_grounded_reminder_request
+
+    human_messages = [m for m in prior_messages if getattr(m, "type", "") == "human"]
+    if not human_messages or not is_direct_user_message(human_messages[-1]):
+        return False
+    latest = human_messages[-1]
+    if external_content_source_names(getattr(latest, "additional_kwargs", {})):
+        return False
+    context = [m.content for m in human_messages[:-1][-6:]
+        if is_direct_user_message(m)
+        and not external_content_source_names(getattr(m, "additional_kwargs", {}))
+        and isinstance(m.content, str)]
+    return is_grounded_reminder_request(latest.content, tool_call.get("args", {}), context)
+
 
 def is_critical(tc: dict) -> bool:
     return _effective_risk(tc) == "CRITICAL"
@@ -93,22 +273,79 @@ PENDING_FILE = os.path.join(
 # Pending actions older than this are considered expired and are automatically removed.
 PENDING_TTL_SECONDS: int = 3600  # 60 minutes
 
+# CRITICAL tools that always require a separate Telegram approval inside an
+# approved plan.  The plan approval covers ordinary steps; it must not silently
+# cross an external, destructive, permission, or project-write boundary.
+#
+# Action-aware tools are included here only after _effective_risk() has already
+# classified the concrete action as CRITICAL.  For example, reading mail or a
+# repository remains smooth, while sending mail or pushing repository changes
+# needs a new approval.
+PLAN_PER_ACTION_APPROVAL_TOOLS: frozenset[str] = frozenset({
+    "run_terminal_command",              # arbitrary OS commands
+    "write_custom_tool",                 # generates and tests dynamic skill
+    "register_tool",                     # permanent tool registry changes
+    "write_project_file",                # full project-file overwrite
+    "grant_project_access",              # permission change
+    "mail_manager",                      # only send/reply/delete are CRITICAL
+    "post_to_linkedin",                  # external publication
+    "process_and_clear_linkedin_post",   # external publication/clearing
+    "execute_local_pipeline",            # sends an active Messenger draft
+    "edit_project_file",                 # only core-file edits are CRITICAL
+    "drive_manager",                     # only delete/share/move are CRITICAL
+    "github_manager",                    # only create/update/push are CRITICAL
+})
+
+
+def requires_plan_per_action_approval(tool_call: dict) -> bool:
+    """Return whether this concrete call crosses a plan approval boundary.
+
+    The explicit risk check makes this safe to reuse outside the current
+    ``critical_calls`` path: read-only actions of action-aware tools do not
+    become approval boundaries merely because their tool name is listed.
+    """
+    return (
+        _effective_risk(tool_call) == "CRITICAL"
+        and tool_call["name"] in PLAN_PER_ACTION_APPROVAL_TOOLS
+    )
+
 # ────────────────────────────────────────────────────────────────
 # Pending approval store
 # ────────────────────────────────────────────────────────────────
 
-def save_pending(tool_name: str, tool_args: dict, tool_call_id: str, channel: str = "telegram"):
-    """Saves CRITICAL tool call for later."""
-    pending = _load_pending()
-    pending[tool_call_id] = {
-        "tool_name":   tool_name,
-        "tool_args":   tool_args,
-        "tool_call_id": tool_call_id,
-        "created_at":  datetime.now().isoformat(timespec="seconds"),
-        "status":      "pending",
-        "channel":     channel,
-    }
-    _save_pending(pending)
+def save_pending(
+    tool_name: str,
+    tool_args: dict,
+    tool_call_id: str,
+    channel: str = "telegram",
+    delivery_target_channel: str | None = None,
+    continuation_context: dict | None = None,
+):
+    """Saves CRITICAL tool call for later, binding Messenger to its draft."""
+    if tool_name == "execute_local_pipeline" and not (tool_args.get("target_name") or tool_args.get("message")):
+        from core.messenger_draft import load_draft
+        draft = load_draft() or {}
+        tool_args = {**tool_args, "expected_draft_revision": tool_args.get("expected_draft_revision") or draft.get("revision") or "missing"}
+    with _pending_lock():
+        pending = _load_pending_raw()
+        _expire_stale_pending_unlocked(pending)
+        pending[tool_call_id] = {
+            "tool_name": tool_name,
+            "tool_args": tool_args,
+            "tool_call_id": tool_call_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "status": "pending",
+            "channel": channel,
+        }
+        if delivery_target_channel == "matrix":
+            pending[tool_call_id]["delivery_target_channel"] = "matrix"
+            pending[tool_call_id]["delivery_status"] = "queued"
+        if tool_name == "run_terminal_command" and continuation_context is not None:
+            from services.approved_terminal_continuation import normalize_terminal_context
+            context = normalize_terminal_context(continuation_context)
+            if context is not None:
+                pending[tool_call_id]["continuation_context"] = context
+        _save_pending_unlocked(pending)
 
 
 def get_pending(tool_call_id: str) -> dict | None:
@@ -117,30 +354,126 @@ def get_pending(tool_call_id: str) -> dict | None:
 
 def resolve_pending(tool_call_id: str, approved: bool):
     """Marks as approved/rejected."""
-    pending = _load_pending()
-    if tool_call_id in pending:
-        pending[tool_call_id]["status"] = "approved" if approved else "rejected"
-        pending[tool_call_id]["resolved_at"] = datetime.now().isoformat(timespec="seconds")
-        _save_pending(pending)
+    with _pending_lock():
+        pending = _load_pending_raw()
+        _expire_stale_pending_unlocked(pending)
+        if tool_call_id in pending:
+            pending[tool_call_id]["status"] = "approved" if approved else "rejected"
+            pending[tool_call_id]["resolved_at"] = datetime.now().isoformat(timespec="seconds")
+            _save_pending_unlocked(pending)
 
 
 def pop_pending(tool_call_id: str) -> dict | None:
     """Reads and removes from the pending store."""
-    pending = _load_pending()
-    item = pending.pop(tool_call_id, None)
-    if item:
-        _save_pending(pending)
-    return item
+    with _pending_lock():
+        pending = _load_pending_raw()
+        _expire_stale_pending_unlocked(pending)
+        item = pending.pop(tool_call_id, None)
+        if item:
+            _save_pending_unlocked(pending)
+        return item
 
 
 def list_pending() -> list[dict]:
     return [v for v in _load_pending().values() if v["status"] == "pending"]
 
 
-def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
+def list_queued_matrix_approvals() -> list[dict]:
+    """Return undelivered Matrix approvals created by another process."""
+    return [
+        dict(item)
+        for item in list_pending()
+        if item.get("delivery_target_channel") == "matrix"
+        and item.get("delivery_status") == "queued"
+        and not item.get("external_message_id")
+    ]
+
+
+def record_pending_delivery(
+    tool_call_id: str,
+    *,
+    delivery_channel: str,
+    external_message_id: str,
+) -> dict:
+    """Attach one external approval-message id to a pending tool call."""
+    normalized_channel = str(delivery_channel or "").strip().lower()
+    if normalized_channel not in {"telegram", "matrix"}:
+        raise ValueError("delivery_channel must be telegram or matrix")
+    normalized_message_id = str(external_message_id or "").strip()
+    if not normalized_message_id:
+        raise ValueError("external_message_id is required")
+
+    with _pending_lock():
+        pending = _load_pending_raw()
+        _expire_stale_pending_unlocked(pending)
+        item = pending.get(tool_call_id)
+        if not item or item.get("status") != "pending":
+            raise KeyError("pending approval was not found")
+
+        for existing_id, existing in pending.items():
+            if existing_id == tool_call_id or existing.get("status") != "pending":
+                continue
+            if (
+                existing.get("delivery_channel") == normalized_channel
+                and str(existing.get("external_message_id") or "") == normalized_message_id
+            ):
+                raise ValueError("external approval message is already mapped")
+
+        item["delivery_channel"] = normalized_channel
+        item["external_message_id"] = normalized_message_id
+        item["delivery_status"] = "sent"
+        _save_pending_unlocked(pending)
+        return dict(item)
+
+
+def find_pending_by_delivery(
+    *,
+    delivery_channel: str,
+    external_message_id: str,
+) -> dict | None:
+    """Resolve an actionable external approval message to its pending call."""
+    normalized_channel = str(delivery_channel or "").strip().lower()
+    normalized_message_id = str(external_message_id or "").strip()
+    if normalized_channel not in {"telegram", "matrix"} or not normalized_message_id:
+        return None
+
+    for tool_call_id, item in _load_pending().items():
+        if item.get("status") != "pending":
+            continue
+        if (
+            item.get("delivery_channel") == normalized_channel
+            and str(item.get("external_message_id") or "") == normalized_message_id
+        ):
+            return {**item, "tool_call_id": tool_call_id}
+    return None
+
+
+def list_recorded_matrix_reminder_outcomes() -> list[dict]:
+    """Read completed reminder receipts awaiting history; never return executions."""
+    with _pending_lock():
+        return [dict(item) for item in _load_pending_raw().values()
+            if item.get("status") == "executed"
+            and item.get("retain_reminder_outcome") is True
+            and item.get("tool_name") == "set_local_reminder"
+            and item.get("channel") == "matrix"]
+
+
+def complete_matrix_reminder_outcome(tool_call_id: str) -> None:
+    """Remove only a completed reminder receipt after canonical history succeeds."""
+    with _pending_lock():
+        pending = _load_pending_raw()
+        item = pending.get(tool_call_id)
+        if item and item.get("status") == "executed" and item.get("retain_reminder_outcome") is True:
+            del pending[tool_call_id]
+            _save_pending_unlocked(pending)
+
+
+def execute_approved_pending(tool_call_id: str, tools: list, *, retain_reminder_outcome: bool = False) -> dict:
     """
     Executes a pending action that has been approved by the UI/Telegram.
-    The pending action is removed only after a successful tool.invoke().
+    Matrix reminder feedback retains a completed receipt until history succeeds.
+    A durable pre-invoke claim prevents replay after concurrent approval or an
+    interruption with an uncertain result. Other tools keep their existing path.
     """
     item = get_pending(tool_call_id)
     if not item:
@@ -170,8 +503,27 @@ def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
         }
 
     invoke_args = dict(tool_args)
+    if (tool_name == "execute_local_pipeline" and not (tool_args.get("target_name") or tool_args.get("message"))
+            and not tool_args.get("expected_draft_revision")):
+        return {"ok": False, "status": "draft_unbound", "tool": tool_name,
+                "error": "Request a new approval bound to the current draft."}
     if tool_name == "run_terminal_command":
         invoke_args["already_approved"] = True
+
+    retain = (retain_reminder_outcome and tool_name == "set_local_reminder"
+              and item.get("channel") == "matrix")
+    claim_execution = retain or tool_name == "execute_local_pipeline"
+    if claim_execution:
+        with _pending_lock():
+            pending = _load_pending_raw()
+            _expire_stale_pending_unlocked(pending)
+            current = pending.get(tool_call_id)
+            if not current or current.get("status") != "pending" or current != item:
+                return {"ok": False, "status": "not_pending", "tool": tool_name}
+            current.update(status="executing")
+            if retain:
+                current["retain_reminder_outcome"] = True
+            _save_pending_unlocked(pending)
 
     try:
         result = tool.invoke(invoke_args)
@@ -183,12 +535,26 @@ def execute_approved_pending(tool_call_id: str, tools: list) -> dict:
             "error": str(e),
         }
 
-    pop_pending(tool_call_id)
+    if retain:
+        with _pending_lock():
+            pending = _load_pending_raw()
+            receipt = pending.get(tool_call_id)
+            if not receipt or receipt.get("status") != "executing":
+                raise RuntimeError("Reminder execution receipt was lost")
+            receipt.update(status="executed", execution_result=result,
+                executed_at=datetime.now().isoformat(timespec="seconds"))
+            _save_pending_unlocked(pending)
+    else:
+        pop_pending(tool_call_id)
     return {
         "ok": True,
         "status": "executed",
         "tool": tool_name,
         "result": result,
+        "retain_reminder_outcome": retain,
+        "reminder_task": invoke_args.get("task", "") if tool_name == "set_local_reminder" else "",
+        "continuation_context": item.get("continuation_context"),
+        "channel": item.get("channel", "telegram"),
     }
 
 
@@ -209,7 +575,16 @@ def expire_stale_pending() -> list:
     Returns a list of the tool_call_ids that expired.
     Called automatically on every _load_pending().
     """
-    pending = _load_pending_raw()
+    with _pending_lock():
+        pending = _load_pending_raw()
+        expired_ids = _expire_stale_pending_unlocked(pending)
+        if expired_ids:
+            _save_pending_unlocked(pending)
+        return expired_ids
+
+
+def _expire_stale_pending_unlocked(pending: dict) -> list[str]:
+    """Mark expired calls while the caller holds the pending-file lock."""
     now = datetime.now()
     expired_ids = []
     for call_id, item in list(pending.items()):
@@ -226,20 +601,42 @@ def expire_stale_pending() -> list:
             item["expired_at"] = now.isoformat(timespec="seconds")
             expired_ids.append(call_id)
             print(f"\033[93m[Approval]: \u23f0 Expired stale pending: {item['tool_name']} (age={int(age)}s)\033[0m")
-    if expired_ids:
-        _save_pending(pending)
     return expired_ids
 
 
 def _load_pending() -> dict:
     """Loads only active (non-expired, non-resolved) pending entries."""
-    expire_stale_pending()
-    return _load_pending_raw()
+    with _pending_lock():
+        pending = _load_pending_raw()
+        if _expire_stale_pending_unlocked(pending):
+            _save_pending_unlocked(pending)
+        return pending
 
 
 def _save_pending(data: dict):
-    with open(PENDING_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Persist pending state atomically under the shared process lock."""
+    with _pending_lock():
+        _save_pending_unlocked(data)
+
+
+def _pending_lock() -> FileLock:
+    """Coordinate pending-state writers in the Web and external processes."""
+    return FileLock(f"{PENDING_FILE}.lock", timeout=10)
+
+
+def _save_pending_unlocked(data: dict) -> None:
+    """Replace the JSON file atomically while the caller holds its lock."""
+    parent = os.path.dirname(os.path.abspath(PENDING_FILE))
+    fd, temporary_path = tempfile.mkstemp(prefix=".approval-", suffix=".tmp", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary_path, PENDING_FILE)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -251,24 +648,165 @@ def approval_check_node(state):
     Runs before the ToolNode.
     - SAFE / WARNING → state["approval_status"] = "ok" → continues to tools
     - BLOCKED        → immediately cut off by safe executor, sets "blocked"
-    - CRITICAL       → saves pending, sends Telegram, sets "pending"
+    - CRITICAL       → sends through the selected channel, then stays pending
+                       only if delivery was confirmed
     """
     from langchain_core.messages import AIMessage, ToolMessage
     from core.i18n import t
+    from core.messaging_channel import resolve_external_channel
 
     last_msg = state["messages"][-1]
     tool_calls = getattr(last_msg, "tool_calls", [])
+    prior_messages = state["messages"][:-1]
+    routine_draft_offer_authorized = state.get("routine_draft_offer_authorized")
+    if routine_draft_offer_authorized is not None:
+        routine_draft_offer_authorized = routine_draft_offer_authorized is True
+    active_draft_edit_context_isolated = state.get("active_draft_edit_context_isolated") is True
 
     if not tool_calls:
         return {"approval_status": "ok"}
 
-    blocked_calls = [tc for tc in tool_calls if _effective_risk(tc) == "BLOCKED"]
-    if blocked_calls:
+    if state.get("bug_diagnosis_read_only") is True:
+        from core.capability_draft import BUG_DIAGNOSIS_READ_TOOLS
+        forbidden = [tc for tc in tool_calls if tc["name"] not in BUG_DIAGNOSIS_READ_TOOLS]
+        if forbidden:
+            return {
+                "approval_status": "blocked",
+                "messages": [ToolMessage(
+                    content=t("core.approval.bug_diagnosis_tool_blocked", name=tc["name"]),
+                    tool_call_id=tc["id"],
+                    name=tc["name"],
+                ) for tc in forbidden] + [AIMessage(content=t(
+                    "core.approval.bug_diagnosis_interrupted",
+                    name=forbidden[0]["name"],
+                    bug_offer_prefix=t("core.approval.bug_proposal_prefix"),
+                ))],
+            }
+
+    blocked_entries = [
+        (tc, "core.approval.blocked", "rejected by safe executor")
+        for tc in tool_calls
+        if _effective_risk(tc) == "BLOCKED"
+    ]
+    blocked_call_ids = {tc["id"] for tc, _, _ in blocked_entries}
+
+    from core.untrusted_content import (
+        active_external_content_tool_names,
+        has_untrusted_result_in_active_history,
+        has_untrusted_result_since_latest_user_message,
+        is_direct_user_message,
+        is_read_only_external_followup_tool,
+        is_untrusted_external_tool_result,
+    )
+
+    def is_authorized_draft_after_required_skill_read(tc: ToolCall) -> bool:
+        """Allow only the guarded draft write required by the canonical skill flow."""
+        if tc["name"] != "write_custom_tool":
+            return False
+        if not has_capability_draft_authorization(state):
+            return False
+
+        messages = state["messages"]
+        fresh_sources: set[str] = set()
+        fresh_skill_names: set[str] = set()
+        for index in range(len(messages) - 1, -1, -1):
+            message = messages[index]
+            if is_direct_user_message(message):
+                break
+            if (
+                getattr(message, "type", "") == "tool"
+                and is_untrusted_external_tool_result(message, messages)
+            ):
+                source_name = str(getattr(message, "name", ""))
+                fresh_sources.add(source_name)
+                if source_name != "read_agent_skill":
+                    continue
+
+                result_call_id = str(getattr(message, "tool_call_id", ""))
+                for prior_message in reversed(messages[:index]):
+                    matching_call = next(
+                        (
+                            call
+                            for call in (getattr(prior_message, "tool_calls", []) or [])
+                            if str(call.get("id", "")) == result_call_id
+                            and call.get("name") == "read_agent_skill"
+                        ),
+                        None,
+                    )
+                    if matching_call is None:
+                        continue
+                    skill_name = str(
+                        (matching_call.get("args") or {}).get("skill_name", "")
+                    ).strip()
+                    if skill_name:
+                        fresh_skill_names.add(skill_name)
+                    break
+        return (
+            fresh_sources == {"read_agent_skill"}
+            and fresh_skill_names == {"astakos-skill-authoring"}
+        )
+
+    if has_untrusted_result_since_latest_user_message(state["messages"]):
+        for tc in tool_calls:
+            if (
+                not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
+                and not is_authorized_draft_after_required_skill_read(tc)
+                and not _is_accepted_routine_messenger_draft_creation(
+                    tc,
+                    prior_messages,
+                    routine_draft_offer_authorized=routine_draft_offer_authorized,
+                )
+                and not _is_trusted_active_messenger_draft_edit(
+                    tc,
+                    prior_messages,
+                    context_isolated=active_draft_edit_context_isolated,
+                )
+                and tc["id"] not in blocked_call_ids
+            ):
+                blocked_entries.append((
+                    tc,
+                    "core.approval.external_content_action_blocked",
+                    "follows untrusted external tool content in the same user turn",
+                ))
+                blocked_call_ids.add(tc["id"])
+
+    external_content_is_active = has_untrusted_result_in_active_history(state["messages"])
+    external_context_approval_ids = {
+        tc["id"]
+        for tc in tool_calls
+        if (
+            external_content_is_active
+            and not is_read_only_external_followup_tool(tc["name"], tc.get("args"))
+            and not _is_explicit_messenger_draft_creation(
+                tc,
+                prior_messages,
+                routine_draft_offer_authorized=routine_draft_offer_authorized,
+                active_draft_edit_context_isolated=active_draft_edit_context_isolated,
+            )
+            and not _is_direct_user_meal_log(tc, prior_messages)
+            and tc["id"] not in blocked_call_ids
+            and not _is_direct_user_reminder_request(tc, prior_messages)
+        )
+    }
+
+    # ── Draft Authorization Gate ──────────────────────────────────────
+    # write_custom_tool requires explicit newest-message authorization.
+    # If lacking, we block it exactly like a BLOCKED tool.
+    for tc in tool_calls:
+        if tc["name"] == "write_custom_tool" and tc["id"] not in blocked_call_ids:
+            if not has_capability_draft_authorization(state):
+                blocked_entries.append((
+                    tc,
+                    "core.approval.unauthorized_draft_error",
+                    "lacks explicit draft authorization",
+                ))
+
+    if blocked_entries:
         tool_messages = []
-        for tc in blocked_calls:
-            print(f"\033[91m[Approval]: 🛡️ BLOCKED — {tc['name']} rejected by safe executor\033[0m")
+        for tc, message_key, reason in blocked_entries:
+            print(f"\033[91m[Approval]: 🛡️ BLOCKED — {tc['name']} {reason}\033[0m")
             tool_messages.append(ToolMessage(
-                content=t("core.approval.blocked", name=tc["name"]),
+                content=t(message_key, name=tc["name"]),
                 tool_call_id=tc["id"],
                 name=tc["name"],
             ))
@@ -278,15 +816,26 @@ def approval_check_node(state):
             "messages": tool_messages,
         }
 
-    critical_calls = [tc for tc in tool_calls if is_critical(tc)]
+    critical_calls = [
+        tc for tc in tool_calls
+        if is_critical(tc) or tc["id"] in external_context_approval_ids
+    ]
 
     # ── Plan mode bypass ───────────────────────────────────────────
-    # If we are executing a step of an approved plan, CRITICAL tools are executed
-    # without extra Telegram confirmation — the user already approved the plan.
-    # Excluded: run_terminal_command (always requires explicit approval).
+    # An approved plan carries ordinary CRITICAL steps, but external,
+    # destructive, permission, and project-write boundaries still need a
+    # separate Telegram confirmation. External-content escalation is never
+    # bypassed by a plan.
     if critical_calls and state.get("plan_active"):
-        bypassed = [tc for tc in critical_calls if tc["name"] != "run_terminal_command"]
-        still_critical = [tc for tc in critical_calls if tc["name"] == "run_terminal_command"]
+        bypassed = [
+            tc for tc in critical_calls
+            if (
+                not requires_plan_per_action_approval(tc)
+                and tc["id"] not in external_context_approval_ids
+            )
+        ]
+        bypassed_ids = {tc["id"] for tc in bypassed}
+        still_critical = [tc for tc in critical_calls if tc["id"] not in bypassed_ids]
         if bypassed:
             print(f"\033[93m[Approval]: 📋 Plan mode — bypassing CRITICAL approval for: "
                   f"{[tc['name'] for tc in bypassed]}\033[0m")
@@ -300,7 +849,7 @@ def approval_check_node(state):
             for tc in tool_calls:
                 if _effective_risk(tc) == "NOTIFY":
                     print(f"\033[96m[Approval]: 📣 NOTIFY tool: {tc['name']}\033[0m")
-                    _notify_telegram_notify(tc)
+                    _notify_selected_notify(tc)
 
         # WARNING: executes + logs only in the console, without Telegram
         elif "WARNING" in risk_levels:
@@ -312,25 +861,143 @@ def approval_check_node(state):
 
     # There are CRITICAL calls — we save them and request approval
     tool_messages = []
+    delivery_failed = False
     current_channel = state.get("channel", "telegram")
+    selected_external_channel = resolve_external_channel()
     for tc in critical_calls:
-        save_pending(tc["name"], tc.get("args", {}), tc["id"], channel=current_channel)
+        pending_args = dict(tc.get("args", {}))
+        if tc["name"] in {
+            "save_to_memory",
+            "manage_list",
+            "save_goal_tool",
+            "update_goal_milestones_tool",
+            "update_goal_status_tool",
+            "update_goal_progress_tool",
+            "learn_routine",
+            "recipe_expert",
+            "set_local_reminder",
+        } and tc["id"] in external_context_approval_ids:
+            import json
+
+            pending_args["external_content_sources_json"] = json.dumps(
+                sorted(active_external_content_tool_names(state["messages"])),
+            )
+        queue_for_matrix = selected_external_channel == "matrix" and current_channel == "web"
+        continuation_context = None
+        if tc["name"] == "run_terminal_command":
+            from services.approved_terminal_continuation import capture_terminal_context
+            continuation_context = capture_terminal_context(state)
+        save_pending(
+            tc["name"], pending_args, tc["id"], channel=current_channel,
+            delivery_target_channel="matrix" if queue_for_matrix else None,
+            continuation_context=continuation_context,
+        )
         print(f"\033[91m[Approval]: 🚨 CRITICAL — {tc['name']} blocked, awaiting approval\033[0m")
 
-        # We send a Telegram notification
-        _notify_telegram(tc)
+        # Deliver through exactly one configured external channel.
+        delivery_channel = "queued" if queue_for_matrix else _notify_selected_approval(tc)
+
+        if delivery_channel is None:
+            pop_pending(tc["id"])
+            delivery_failed = True
+            content = t(
+                "core.approval.delivery_failed",
+                name=tc["name"],
+                channel="Element" if resolve_external_channel() == "matrix" else "Telegram",
+            )
+        elif delivery_channel == "queued":
+            content = t("core.approval.queued", name=tc["name"], channel="Element")
+        else:
+            content = t(
+                "core.approval.waiting",
+                name=tc["name"],
+                channel="Element" if delivery_channel == "matrix" else "Telegram",
+            )
 
         # We return a ToolMessage so that the graph does not get stuck
         tool_messages.append(ToolMessage(
-            content=t("core.approval.waiting", name=tc["name"]),
+            content=content,
             tool_call_id=tc["id"],
             name=tc["name"],
         ))
 
-    return {
-        "approval_status": "pending",
+    result = {
+        "approval_status": "blocked" if delivery_failed else "pending",
         "messages": tool_messages,
     }
+    result.update(_prepare_draft_with_deferred_goal(
+        state, tool_calls, critical_calls, tool_messages,
+    ))
+    return result
+
+
+def _prepare_draft_with_deferred_goal(
+    state: dict[str, Any],
+    calls: list[ToolCall],
+    critical_calls: list[ToolCall],
+    pending_messages: list[BaseMessage],
+) -> dict[str, Any]:
+    """Preserve only a separately authorized local draft beside a deferred goal.
+
+    Reach this after the complete batch passed all blocking gates. Never execute
+    other noncritical siblings, sends or the pending milestone. Recheck the draft
+    through the same approval policy, then reuse the native ToolNode and receipt
+    consumer. Both original call IDs retain their separate terminal results.
+    """
+    if (
+        len(calls) != 2
+        or len({call["id"] for call in calls}) != 2
+        or {call["name"] for call in calls} != {"relay_local_payload", "update_goal_milestones_tool"}
+        or len(critical_calls) != 1
+        or critical_calls[0]["name"] != "update_goal_milestones_tool"
+    ):
+        return {}
+    draft_call = next(call for call in calls if call["name"] == "relay_local_payload")
+    isolated = {
+        **state,
+        "messages": [
+            *state["messages"][:-1],
+            state["messages"][-1].model_copy(update={"tool_calls": [draft_call]}),
+        ],
+    }
+    if approval_check_node(isolated).get("approval_status") != "ok":
+        return {}
+    from langgraph.prebuilt import ToolNode
+    from langchain_core.messages import AIMessage
+    from tools.web import relay_local_payload
+    from core.utils import clean_message
+    draft_results = ToolNode([relay_local_payload], handle_tool_errors=True).invoke(isolated)["messages"]
+    terminal_results = [*pending_messages, *draft_results]
+    receipt_state = {**state, "messages": [*state["messages"], *terminal_results]}
+    consumed = consume_successful_routine_draft_authorization(receipt_state)
+    # Display actual local preparation/error and pending approval separately;
+    # don't ask the model to repeat the deferred goal or imply it was persisted.
+    content = "\n\n".join(
+        clean_message(message.content) for message in [*draft_results, *pending_messages]
+    )
+    return {**consumed, "messages": [*terminal_results, AIMessage(content=content)]}
+
+
+def consume_successful_routine_draft_authorization(state: dict) -> dict:
+    """Consume a routine-draft authorization only after its draft write succeeds."""
+    if state.get("routine_draft_offer_authorized") is not True:
+        return {}
+
+    from core.utils import clean_message, looks_like_terminal_messenger_draft_result
+
+    for message in reversed(state.get("messages", [])):
+        message_type = getattr(message, "type", "")
+        if message_type == "tool":
+            if getattr(message, "name", "") != "relay_local_payload":
+                continue
+            if looks_like_terminal_messenger_draft_result(
+                clean_message(getattr(message, "content", "")),
+            ):
+                return {"routine_draft_offer_authorized": False}
+            continue
+        if message_type == "ai" and getattr(message, "tool_calls", None):
+            break
+    return {}
 
 
 def _args_preview(args: dict) -> str:
@@ -358,6 +1025,66 @@ def _notify_telegram_notify(tool_call: dict):
         print(f"\033[93m[Approval]: Telegram notify error: {e}\033[0m")
 
 
+def _notify_selected_notify(tool_call: dict) -> None:
+    """Deliver a non-blocking tool notice through only the selected channel."""
+    from core.messaging_channel import resolve_external_channel
+
+    if resolve_external_channel() == "telegram":
+        _notify_telegram_notify(tool_call)
+        return
+
+    from services.external_delivery import external_delivery_router
+
+    tool_name = str(tool_call["name"])
+    args_preview = _args_preview(tool_call.get("args", {}))
+    try:
+        external_delivery_router.send_text(f"📣 {tool_name}\n{args_preview}")
+    except Exception as exc:
+        print(
+            "\033[93m[Approval]: Selected external notify delivery failed "
+            f"({type(exc).__name__})\033[0m"
+        )
+
+
+def _notify_selected_approval(tool_call: dict) -> str | None:
+    """Deliver one approval through the selected external channel only."""
+    from core.messaging_channel import resolve_external_channel
+
+    channel = resolve_external_channel()
+    if channel == "telegram":
+        _notify_telegram(tool_call)
+        return channel
+
+    from services.external_delivery import (
+        external_delivery_router,
+    )
+    try:
+        external_delivery_router.send_approval(build_approval_delivery_request(tool_call))
+    except Exception as exc:
+        print(
+            "\033[91m[Approval]: Selected external approval delivery failed "
+            f"({type(exc).__name__})\033[0m"
+        )
+        return None
+    return channel
+
+
+def build_approval_delivery_request(tool_call: dict):
+    """Render the canonical Matrix prompt for direct or queued delivery."""
+    from core.i18n import t
+    from services.external_delivery import ApprovalDeliveryRequest
+
+    tool_name = str(tool_call["name"])
+    args_preview = _args_preview(tool_call.get("args", {}))
+    prompt = t("core.approval.req_approval", tool_name=tool_name, args_prev=args_preview)
+    if tool_name == "register_tool":
+        prompt += t("core.approval.register_tool_hint")
+    return ApprovalDeliveryRequest(
+        call_id=str(tool_call["id"]), tool_name=tool_name,
+        args_preview=args_preview, prompt=prompt,
+    )
+
+
 def _notify_telegram(tool_call: dict):
     """Sends a Telegram inline keyboard for CRITICAL approval."""
     try:
@@ -370,6 +1097,9 @@ def _notify_telegram(tool_call: dict):
 
         from core.i18n import t
         text = t("core.approval.req_approval", tool_name=tool_name, args_prev=args_prev)
+        if tool_name == "register_tool":
+            text += t("core.approval.register_tool_hint")
+
         keyboard = {
             "inline_keyboard": [[
                 {"text": t("clients.telegram_bot.btn_yes"), "callback_data": f"approve:{call_id}"},

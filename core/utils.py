@@ -1,10 +1,12 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 from core.i18n import t
+from services.turn_timing import trace_stage
 import re
 import json
 import os
@@ -16,6 +18,52 @@ from typing_extensions import TypedDict, NotRequired
 from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 
+
+_embedding_setup_notifications: set[str] = set()
+_embedding_setup_notifications_lock = threading.Lock()
+WEB_SEARCH_UNVERIFIED_LINKS_MARKER = (
+    "[WEB_TOOL_ERROR][duckduckgo_search][reason=unverified_live_links]"
+)
+_TRANSPORT_METADATA_PREFIX_RE = re.compile(
+    r"^(?:\[\d{2}:\d{2}\]\s*|"
+    r"\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+/\s+\w+\]\s*)+",
+)
+
+
+def strip_transport_metadata(text: str) -> str:
+    """Remove only Astakos-added leading timestamp metadata."""
+    return _TRANSPORT_METADATA_PREFIX_RE.sub("", str(text or "")).strip()
+
+
+def _embedding_memory_status_notice(error: Exception, channel: str) -> str:
+    """Return one user-facing semantic-memory configuration notice per process."""
+    from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+    if not isinstance(error, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+        return ""
+    notification_key = f"{channel or 'telegram'}:{error.provider}:{error}"
+    with _embedding_setup_notifications_lock:
+        if notification_key in _embedding_setup_notifications:
+            return ""
+        _embedding_setup_notifications.add(notification_key)
+    status = (
+        "SEMANTIC MEMORY AUTHENTICATION REQUIRED"
+        if isinstance(error, ProviderAuthError)
+        else "SEMANTIC MEMORY SETUP REQUIRED"
+    )
+    guidance = (
+        "semantic-memory provider credentials need verification"
+        if isinstance(error, ProviderAuthError)
+        else "semantic memory needs setup"
+    )
+    return (
+        f"\n[SYSTEM STATUS — {status}]\n"
+        f"Semantic-memory retrieval is unavailable: {error}\n"
+        f"Tell the user concisely that {guidance}. "
+        "Do not claim a semantic-memory search succeeded; continue answering "
+        "the current request normally.\n"
+    )
+
 # ────────────────────────────────────────────────────────────────
 # 1. STATE & TYPES
 # ────────────────────────────────────────────────────────────────
@@ -25,6 +73,7 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     next_agent: NotRequired[str]
     current_agent: NotRequired[str]
+    trace_phase_timings: NotRequired[dict[str, int]]
     approval_status: NotRequired[str]   # "ok" | "pending" | "blocked"
     plan_active: NotRequired[bool]                  # True if a plan is running
     plan_awaiting_confirmation: NotRequired[bool]   # True if waiting for "yes/no"
@@ -34,7 +83,20 @@ class AgentState(TypedDict):
     plan_goal: NotRequired[str]                     # the initial goalof_thought
     plan_step_failed: NotRequired[bool]             # True if the last step showed failure
     replan_skipped_steps: NotRequired[list]         # indices of skipped steps (replan)
-    channel: NotRequired[str]                       # "telegram" | "web" | "terminal"
+    channel: NotRequired[str]                       # "telegram" | "matrix" | "web" | "terminal"
+    routine_draft_offer_authorized: NotRequired[bool]
+    # Set only by the Telegram routine-confirmation flow for the current graph run.
+    active_draft_edit_context_isolated: NotRequired[bool]
+    # Set only when an active Messenger draft revision is invoked without
+    # externally derived prompt context or read tools.
+    messenger_draft_write_guard: NotRequired[dict]
+    # Captured by graph entry before routing/model work; never supplied by a tool.
+    messenger_draft_preparation_authorized: NotRequired[bool]
+    # Set by canonical Chat/Web binding decisions, not model tool arguments.
+    bug_diagnosis_read_only: NotRequired[bool]
+    # Set by the Supervisor only for the current accepted bug-investigation turn.
+    bug_followup_routed: NotRequired[bool]
+    # Prevent automatic planning from overriding a classified bug follow-up.
 
 # ────────────────────────────────────────────────────────────────
 # 2. MESSAGE HELPERS (Mastro-Shield & Smart Parser)
@@ -326,6 +388,15 @@ def looks_like_terminal_messenger_draft_result(text: str) -> bool:
     return content.startswith(t("prompts.ext_draft_2")) or content.startswith(t("prompts.ext_draft_6"))
 
 
+def looks_like_messenger_draft_ready_reply(text: str) -> bool:
+    """Return whether an assistant reply is the standard saved-draft display."""
+    content = clean_message(text).strip()
+    return (
+        t("core.utils.draft_ready").strip() in content
+        and t("prompts.ext_draft_ask_send").strip() in content
+    )
+
+
 def build_messenger_draft_ready_reply(tool_results: list[str]) -> str:
     draft_message = ""
     for raw in tool_results:
@@ -441,13 +512,22 @@ def sanitize_history_for_gemini(messages: list) -> list:
     so that information is preserved without violating the strict structure of the API.
     """
     from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+    from core.untrusted_content import (
+        format_untrusted_tool_result,
+        is_untrusted_external_tool_result,
+    )
 
     sanitized = []
     for msg in messages:
         if msg.type == "tool":
             # Convert the tool's output into a simple System/Human context
             # so that the next Agent does not get confused
-            sanitized.append(HumanMessage(content=t("core.utils.tool_result", name=msg.name, content=clean_message(msg.content))))
+            content = clean_message(msg.content)
+            if is_untrusted_external_tool_result(msg, messages):
+                content = format_untrusted_tool_result(msg.name, content)
+            else:
+                content = t("core.utils.tool_result", name=msg.name, content=content)
+            sanitized.append(HumanMessage(content=content))
         
         elif msg.type == "ai" and hasattr(msg, "tool_calls") and msg.tool_calls:
             # If the AI made a tool_call, we only keep its reasoning (if it exists)
@@ -466,7 +546,22 @@ def filter_messages(messages: list, k: int = 40) -> list:
     if not messages:
         return []
 
-    safe_list = list(messages[-k:])
+    all_messages = list(messages)
+    start_index = max(0, len(all_messages) - k)
+    safe_list = all_messages[start_index:]
+
+    # Preserve the AI tool-call that supplies action arguments for a ToolMessage
+    # at the cutoff. Action-aware untrusted-source classification must not lose
+    # that pairing merely because history is bounded.
+    if safe_list and getattr(safe_list[0], "type", "") == "tool":
+        first_tool_call_id = str(getattr(safe_list[0], "tool_call_id", ""))
+        for previous in reversed(all_messages[:start_index]):
+            if any(
+                str(call.get("id", "")) == first_tool_call_id
+                for call in (getattr(previous, "tool_calls", None) or [])
+            ):
+                safe_list.insert(0, previous)
+                break
     cleaned_list = []
 
     # First pass: basic cleaning
@@ -589,7 +684,15 @@ SKIP_SEMANTIC_KEYWORDS = (
 # 5. THE BRAIN (Build Prompt)
 # ────────────────────────────────────────────────────────────────
 
-def build_prompt(state_messages, agent_role="", channel: str | None = None) -> str:
+@trace_stage("prompt_build")
+def build_prompt(
+    state_messages,
+    agent_role="",
+    channel: str | None = None,
+    *,
+    include_persisted_context: bool = True,
+    include_behavioral_context: bool = False,
+) -> str:
     """The main Prompt synthesis engine."""
     from config import WORKING_MEMORY_FILE, BASE_DIR
     from memory.working_memory import get_capability_context
@@ -599,12 +702,39 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
     identity = identity.replace("{BASE_DIR}", BASE_DIR)
 
     # clean_message already did its job correctly here, we leave it as is.
-    last_msg = clean_message(state_messages[-1].content) if state_messages else ""
-    is_vision = "[VISUAL ANALYSIS]" in last_msg or t("prompts.ext_str_116") in last_msg or "[CURRENT_PHOTO_PATH]" in last_msg
-    has_current_photo = "[CURRENT_PHOTO_PATH]" in last_msg
+    latest_message = state_messages[-1] if state_messages else None
+    last_msg = clean_message(latest_message.content) if latest_message else ""
+    latest_is_tool_output = getattr(latest_message, "type", "") == "tool"
+    memory_query = last_msg
+    if latest_is_tool_output:
+        latest_human_message = next(
+            (
+                message
+                for message in reversed(state_messages)
+                if getattr(message, "type", "") == "human"
+            ),
+            None,
+        )
+        memory_query = (
+            clean_message(getattr(latest_human_message, "content", ""))
+            if latest_human_message
+            else ""
+        )
+    has_photo_marker = any(
+        marker in memory_query
+        for marker in ("[USER_UPLOADED_PHOTO]", "[PHOTO PATH]", "[CURRENT_PHOTO_PATH]")
+    )
+    is_vision = (
+        "[VISUAL ANALYSIS]" in memory_query
+        or t("prompts.ext_str_116") in memory_query
+        or "[CURRENT_PHOTO_PATH]" in memory_query
+        or (has_photo_marker and "[ANALYSIS]" in memory_query)
+    )
+    has_current_photo = "[CURRENT_PHOTO_PATH]" in memory_query
     
     memory_context_str = ""
-    clean_text = last_msg.lower()
+    behavioral_recent_context = ""
+    clean_text = memory_query.lower()
     
     from core.nl_config import UTILS_IGNORE_WORDS
     ignore_words = UTILS_IGNORE_WORDS
@@ -616,25 +746,42 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
     semantic_k = k_value if len(clean_text) > 10 and not is_routine_command and not has_skip_keyword else 0
     recent_limit = 6 if channel and not has_current_photo else 0
 
-    if semantic_k > 0 or recent_limit > 0:
+    if (
+        include_persisted_context
+        and memory_query
+        and (semantic_k > 0 or recent_limit > 0)
+    ):
         try:
             from memory.context_builder import build_memory_context
 
             context = build_memory_context(
-                last_msg,
+                memory_query,
                 channel=channel or "telegram",
                 recent_limit=recent_limit,
                 semantic_k=semantic_k,
                 write_debug=True,
             )
             rendered_context = context.render()
+            if include_behavioral_context:
+                behavioral_recent_context = "\n".join(context.recent_lines)
             if rendered_context:
                 memory_context_str = "\n🧠 ═══ UNIFIED MEMORY CONTEXT ═══\n"
                 memory_context_str += rendered_context + "\n"
                 memory_context_str += "⚠️ Do not say 'according to my memory', just act based on it.\n"
+            status_notice = _embedding_memory_status_notice(
+                context.semantic_error,
+                channel or "telegram",
+            ) if context.semantic_error else ""
+            if status_notice:
+                memory_context_str += status_notice
         except Exception as e:
-            print(f"\033[91m⚠️ Memory Context Error: {e}\033[0m")
-    elif has_skip_keyword:
+            status_notice = _embedding_memory_status_notice(e, channel or "telegram")
+            if status_notice:
+                memory_context_str = status_notice
+                print(f"\033[93m[MemoryContext]: semantic memory configuration required: {e}\033[0m")
+            else:
+                print(f"\033[91m⚠️ Memory Context Error: {e}\033[0m")
+    elif include_persisted_context and has_skip_keyword:
         print("\033[93m[Mastro-Radar]: ⚡ Skipping Semantic Search due to Skip Keyword! (Live Data Mode)\033[0m")
 
     prompt = f"{identity}\n"
@@ -648,11 +795,12 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
     if is_vision:
         prompt += (
             "🚨 REALITY RULE (CRITICAL):\n"
-            "Right now you have a VISUAL ANALYSIS in front of you. This is the CURRENT reality.\n"
-            "If past memories conflict with what you see, ignore the history.\n\n"
+            "Right now you have a VISUAL ANALYSIS in front of you. This is the CURRENT reality of the referenced visual asset or document.\n"
+            "If past memories conflict with what you see in the image, trust the visual content of the image over historical assumptions.\n"
+            "TEMPORAL REALITY GUARD: The scene, people, actions, or weather depicted in the photo represent the moment the photograph was captured, NOT necessarily the user's live physical surroundings or activities right now. Do NOT assume that events depicted in the photo are happening today or currently taking place unless the user explicitly stated so in their message.\n\n"
         )
 
-    session_hint = load_last_session_hint()
+    session_hint = load_last_session_hint() if include_persisted_context else ""
     if session_hint:
         prompt += f"[CONTINUED FROM PREVIOUS SESSION]\n{session_hint}\n\n"
 
@@ -670,28 +818,41 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
     elif len(clean_text) > 15 and not is_routine_command:
         should_inject_goals = True
 
-    if should_inject_goals:
+    if include_persisted_context and should_inject_goals:
         try:
             from memory.vector_store import get_active_goals
             active_goals = get_active_goals()
             if active_goals:
+                from services.goal_followup_timing import goal_temporal_brief
+
                 prompt += "═══ GOALS IN PROGRESS ═══\n"
                 for g in active_goals:
+                    from core.untrusted_content import format_untrusted_persisted_content
+
                     status_icon = "🎯" if g["status"] == "active" else "⏸"
                     prog_str = f" | Progress: {g.get('progress', 0)}%" if g.get('progress') else ""
-                    prompt += " " + status_icon + " [" + g['project'] + "] " + g['description'] + " (since " + g['date'] + ")" + prog_str + "\n"
+                    goal_text = "[" + g['project'] + "] " + g['description']
+                    goal_text = format_untrusted_persisted_content(
+                        goal_text,
+                        g.get("metadata"),
+                    )
+                    prompt += " " + status_icon + " " + goal_text + goal_temporal_brief(g) + prog_str + "\n"
                     if g.get('milestones'):
-                        prompt += f"    Milestones: {g['milestones']}\n"
+                        milestones = format_untrusted_persisted_content(
+                            str(g['milestones']),
+                            g.get("metadata"),
+                        )
+                        prompt += f"    Milestones: {milestones}\n"
                 prompt += "💡 If the conversation is about one of these, mention the continuation naturally.\n"
                 prompt += "══════════════════════════\n\n"
         except Exception as _e:
             print(f"⚠️ [Goals Context Error]: {_e}")
 
-    cap_context = get_capability_context()
+    cap_context = get_capability_context() if include_persisted_context else ""
     if cap_context:
         prompt += f"[SELF-AWARENESS]\n{cap_context}\n\n"
 
-    if os.path.exists(WORKING_MEMORY_FILE):
+    if include_persisted_context and os.path.exists(WORKING_MEMORY_FILE):
         try:
             with open(WORKING_MEMORY_FILE, "r", encoding="utf-8") as f:
                 work_mem = json.load(f)
@@ -701,14 +862,34 @@ def build_prompt(state_messages, agent_role="", channel: str | None = None) -> s
                     prompt += "══════════════════════════════════\n\n"
         except: pass
 
+    draft_verification_rule = t("core.approval.draft_verification_rule")
+
     prompt += (
         "MEMORY RULE: If asked for missing info, call 'search_memory' once. "
         "If you already have memory results in context, answer from it and DO NOT call search_memory again in the same turn.\n"
         "PHOTO RULE: If a photo is requested, call 'retrieve_photo' and include [SEND_PHOTO: path] in the response.\n"
-        "FILE RULE: When creating a file with create_file_tool, ALWAYS include [CREATED_FILE: path] as-is in your response. DO NOT replace it with the path as text.\n\n"
+        "DOCUMENT RULE: If an archived document is requested, call 'retrieve_document' and include [CREATED_FILE: path] in the response.\n"
+        "FILE RULE: When creating a file with create_file_tool, ALWAYS include [CREATED_FILE: path] as-is in your response. DO NOT replace it with the path as text.\n"
+        f"{draft_verification_rule}\n\n"
     )
 
     prompt += memory_context_str
+
+    if include_persisted_context and include_behavioral_context:
+        from services.behavioral_conversation_reply import prepare_behavioral_reply_context
+
+        prompt += prepare_behavioral_reply_context(
+            state_messages, channel=channel, shared_recent=behavioral_recent_context,
+        )
+
+    gap_instruction = t("core.approval.capability_gap_instruction")
+    proposal_prefix = t("core.approval.capability_proposal_prefix")
+    draft_markers = t("core.approval.draft_markers")
+    if isinstance(gap_instruction, str) and isinstance(proposal_prefix, str) and isinstance(draft_markers, list) and draft_markers:
+        prompt += gap_instruction.format(
+            proposal_prefix=proposal_prefix,
+            draft_command=draft_markers[0]
+        ) + "\n\n"
 
     return prompt
 
@@ -856,6 +1037,11 @@ def looks_like_web_tool_error(text: str) -> bool:
             return True
     return False
 
+
+def is_unverified_search_fallback(text: str) -> bool:
+    """Return whether a search result contains links but no verified evidence."""
+    return WEB_SEARCH_UNVERIFIED_LINKS_MARKER in str(text or "")
+
 def collect_recent_tool_messages_since_last_user(messages: list) -> list:
     recent_tools = []
     for msg in reversed(messages):
@@ -869,6 +1055,7 @@ def filter_recent_web_tool_results(messages: list) -> list:
     recent_tools = collect_recent_tool_messages_since_last_user(messages)
     web_tools = {
         'duckduckgo_search',
+        'research_web',
         'browse_url',
         'search_google_places',
         'get_news',
@@ -889,10 +1076,52 @@ def filter_recent_web_tool_results(messages: list) -> list:
     return results
 
 def build_web_failure_reply(user_text: str, tool_results: list) -> str:
+    """Render current-turn failures without exposing untrusted diagnostics."""
+    for _, result_text in tool_results:
+        if is_unverified_search_fallback(result_text):
+            _, separator, visible_text = result_text.partition("\n")
+            if separator and visible_text.strip():
+                return visible_text.strip()
+
+    from core.capability_lookup import _looks_like_specific_web_target
+
+    failed_page_reads = [
+        text for name, text in tool_results
+        if name == "browse_url" and looks_like_web_tool_error(text)
+    ]
+    if failed_page_reads and _looks_like_specific_web_target(user_text):
+        reply = t("core.utils.web_link_failure_reply")
+        for result_text in reversed(failed_page_reads):
+            # Parse the tool protocol only, never infer a cause from page/error prose.
+            failure = re.match(r"^\[WEB_TOOL_ERROR\]\[browse_url\]\[reason=([a-z_]+)\]", result_text)
+            if failure and failure.group(1) in {"timeout", "cloudflare", "generic"}:
+                return reply + " " + t(f"core.utils.web_failure_reasons.{failure.group(1)}")
+        return reply
+
     qty_intents = list(UTILS_QTY_INTENTS)
     is_qty = any(w in user_text.lower() for w in qty_intents)
     kind = t("prompts.ext_str_115") if is_qty else t("prompts.ext_str_243")
     return t("core.utils.web_failure_reply", kind=kind)
+
+
+def build_unverified_search_boundary_reply(messages: list) -> str | None:
+    """Build a terminal reply when search returned links without evidence."""
+    recent_results = filter_recent_web_tool_results(messages)
+    fallback_results = [
+        (name, text)
+        for name, text in recent_results
+        if is_unverified_search_fallback(text)
+    ]
+    if not fallback_results:
+        return None
+
+    successful_results = [
+        text
+        for _, text in recent_results
+        if text and not looks_like_web_tool_error(text)
+    ]
+    successful_results.append(build_web_failure_reply("", fallback_results))
+    return "\n\n".join(part for part in successful_results if part)
 
 def parse_linkedin_draft_result(text: str) -> dict | None:
     content = clean_message(text).strip()
@@ -976,4 +1205,273 @@ def build_linkedin_draft_ready_reply(tool_results: list[str]) -> str:
     ])
 
     return "\n".join(lines)
+
+def extract_pdf_preview(file_path: str, max_chars: int = 8000) -> str:
+    """
+    Safely extracts a bounded text preview from a PDF file.
+    Bounds accumulated preview text (does not prevent resource exhaustion from a single malicious compressed PDF page).
+    """
+    import pypdf
+    from core.i18n import t
+
+    try:
+        reader = pypdf.PdfReader(file_path)
+
+        if reader.is_encrypted and not reader.decrypt(""):
+            return t("api.server.pdf_encrypted")
+
+        total = len(reader.pages)
+        if total == 0:
+            return t("api.server.pdf_empty_or_scanned")
+
+        final_text = ""
+        extracted = 0
+
+        for i in range(total):
+            extracted += 1
+            page_text = reader.pages[i].extract_text() or ""
+
+            if page_text:
+                if final_text:
+                    page_text = "\n" + page_text
+
+                budget = max_chars - len(final_text)
+                if len(page_text) > budget:
+                    final_text += page_text[:budget]
+                    break
+                else:
+                    final_text += page_text
+
+            if len(final_text) >= max_chars:
+                break
+
+        if not final_text.strip():
+            return t("api.server.pdf_empty_or_scanned")
+
+        meta = t("api.server.pdf_page_meta", extracted=extracted, total=total)
+        meta_str = "\n" + meta
+
+        if len(final_text) + len(meta_str) > max_chars:
+            available = max_chars - len(meta_str)
+            if available > 0:
+                final_text = final_text[:available].rstrip() + meta_str
+            else:
+                final_text = meta[:max_chars]
+        else:
+            final_text = final_text.rstrip() + meta_str
+
+        return final_text
+    except Exception:
+        import logging
+        logging.warning("Failed to extract PDF %s", file_path, exc_info=True)
+        return t("api.server.pdf_unreadable_generic")
+
+
+def extract_docx_preview(file_path: str, max_chars: int) -> str:
+    """
+    Safely extracts a bounded text preview from a DOCX file.
+    Bounds aggregate preview text (does not prevent resource exhaustion from a single malicious compressed XML stream).
+    """
+    if max_chars <= 0:
+        return ""
+
+    import os
+    import zipfile
+    from core.i18n import t
+    import logging
+
+    try:
+        file_size = os.path.getsize(file_path)
+        if file_size > 20 * 1024 * 1024:
+            return t("api.server.docx_oversized_uncompressed")
+    except OSError:
+        return t("api.server.docx_unreadable_generic")
+
+    try:
+        with zipfile.ZipFile(file_path, 'r') as z:
+            info_list = z.infolist()
+            if len(info_list) > 2000:
+                return t("api.server.docx_oversized_uncompressed")
+            total_size = sum(info.file_size for info in info_list)
+            if total_size > 50_000_000:
+                return t("api.server.docx_oversized_uncompressed")
+    except zipfile.BadZipFile:
+        return t("api.server.docx_corrupt")
+    except Exception:
+        logging.warning("Failed to preflight DOCX %s", file_path, exc_info=True)
+        return t("api.server.docx_unreadable_generic")
+
+    try:
+        from docx import Document as DocxDoc
+        doc = DocxDoc(file_path)
+
+        clipped_marker = t("api.server.docx_preview_clipped")
+        if max_chars > len(clipped_marker):
+            budget = max_chars - len(clipped_marker)
+            use_marker = True
+        else:
+            budget = max_chars
+            use_marker = False
+
+        fragments = []
+        current_len = 0
+        clipped = False
+
+        def append_fragment(fragment: str) -> bool:
+            nonlocal current_len, clipped
+            normalized = str(fragment or "").strip()
+            if not normalized:
+                return True
+            space_needed = len(normalized) if not fragments else 1 + len(normalized)
+            if current_len + space_needed <= budget:
+                fragments.append(normalized)
+                current_len += space_needed
+                return True
+            allowed = budget - current_len - (1 if fragments else 0)
+            if allowed > 0:
+                fragments.append(normalized[:allowed])
+                current_len += allowed + (1 if len(fragments) > 1 else 0)
+            clipped = True
+            return False
+
+        for p in doc.paragraphs:
+            if not append_fragment(p.text):
+                break
+
+        if not clipped:
+            for table in doc.tables:
+                for row in table.rows:
+                    row_text = " | ".join(
+                        cell.text.strip() for cell in row.cells if cell.text.strip()
+                    )
+                    if not append_fragment(row_text):
+                        break
+                if clipped:
+                    break
+
+        final_text = "\n".join(fragments)
+        if not final_text.strip():
+            return t("api.server.docx_empty_or_scanned")
+
+        if clipped and use_marker:
+            return final_text + clipped_marker
+        else:
+            return final_text
+
+    except Exception:
+        logging.warning("Failed to parse DOCX %s", file_path, exc_info=True)
+        return t("api.server.docx_unreadable_generic")
+
+def extract_text_preview(file_path: str, max_chars: int) -> str:
+    """
+    Safely extracts a bounded text preview from a plain-text file.
+    Bounds the extracted text preview (does not prevent all upstream upload memory exhaustion).
+    """
+    if max_chars <= 0:
+        return ""
+
+    from core.i18n import t
+    import logging
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(max_chars + 1)
+
+        if not content:
+            return t("api.server.text_empty")
+
+        if len(content) > max_chars:
+            clipped_marker = t("api.server.text_preview_clipped")
+
+            if max_chars > len(clipped_marker):
+                budget = max_chars - len(clipped_marker)
+                return content[:budget] + clipped_marker
+            else:
+                return content[:max_chars]
+        else:
+            return content
+    except Exception:
+        logging.warning("Failed to extract text %s", file_path, exc_info=True)
+        return t("api.server.text_unreadable_generic")
+
+def extract_xlsx_preview(file_path: str, *, max_chars: int) -> str:
+    """
+    Safely extracts a bounded text preview from an Excel file (.xlsx/.xls).
+    Enforces file size, zip member, row, column, and character limits.
+    """
+    import os
+    import zipfile
+    import pandas as pd
+    from core.i18n import t
+
+    # 1. Enforce 20MB guard for both .xlsx and .xls
+    try:
+        file_size = os.path.getsize(file_path)
+        if file_size > 20 * 1024 * 1024:
+            return t("api.server.xlsx_oversized_uncompressed")
+    except OSError:
+        return t("api.server.xlsx_unreadable_generic")
+
+    is_xlsx = str(file_path).lower().endswith(".xlsx")
+
+    # 2. ZIP Preflight for .xlsx only
+    if is_xlsx:
+        try:
+            with zipfile.ZipFile(file_path, 'r') as z:
+                info_list = z.infolist()
+                if len(info_list) > 2000:
+                    return t("api.server.xlsx_oversized_uncompressed")
+                total_size = sum(info.file_size for info in info_list)
+                if total_size > 50_000_000:
+                    return t("api.server.xlsx_oversized_uncompressed")
+        except zipfile.BadZipFile:
+            return t("api.server.xlsx_corrupt")
+        except Exception:
+            return t("api.server.xlsx_unreadable_generic")
+
+    # 3. Pandas Parsing
+    try:
+        preview_parts = []
+        chars_used = 0
+
+        with pd.ExcelFile(file_path) as xls:
+            sheet_names = xls.sheet_names
+            sheets_clipped = len(sheet_names) > 5
+
+            clip_msg = "\n" + t("api.server.xlsx_preview_clipped")
+            clip_len = len(clip_msg)
+
+            for sheet in sheet_names[:5]:
+                try:
+                    header_df = pd.read_excel(xls, sheet_name=sheet, nrows=0)
+                    if len(header_df.columns) == 0:
+                        raise ValueError("Empty")
+                    selected_positions = list(range(min(20, len(header_df.columns))))
+                    df = pd.read_excel(xls, sheet_name=sheet, nrows=5, usecols=selected_positions)
+                    sheet_str = f"--- {sheet} ---\n" + df.to_string(max_colwidth=50, index=False) + "\n"
+                except Exception:
+                    sheet_str = f"--- {sheet} ---\n[{t('api.server.xlsx_sheet_unreadable')}]\n"
+
+                if sheets_clipped or chars_used + len(sheet_str) > max_chars:
+                    budget = max(0, max_chars - chars_used - clip_len)
+                    if len(sheet_str) > budget:
+                        preview_parts.append(sheet_str[:budget])
+                        chars_used += budget
+                        sheets_clipped = True
+                        break
+                    else:
+                        preview_parts.append(sheet_str)
+                        chars_used += len(sheet_str)
+                else:
+                    preview_parts.append(sheet_str)
+                    chars_used += len(sheet_str)
+
+        if sheets_clipped:
+            budget = max_chars - chars_used
+            if budget > 0:
+                preview_parts.append(clip_msg[:budget])
+
+        return "".join(preview_parts)
+    except Exception:
+        return t("api.server.xlsx_unreadable_generic")
 

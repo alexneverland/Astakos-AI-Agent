@@ -26,6 +26,18 @@ def test_context_flag_suppress_when_true():
     assert result["allowed"] is False
 
 
+def test_manual_away_condition_keeps_its_literal_meaning():
+    """Only the old reconciler-generated absence rule receives compatibility handling."""
+    routine = {
+        "condition_type": "context_flag",
+        "condition_payload": {"flag": "kid1_away_from_home", "equals": True},
+        "condition_mode": "suppress_when_true",
+        "source_memory_ref": "manual",
+    }
+    context = {"kid1_away_from_home": True, "kid1_unavailable_for_routine": False}
+    assert evaluate_routine_condition(routine, context)["allowed"] is False
+
+
 def test_shift_mode_blocks_other_shift():
     routine = {
         "condition_type": "shift_mode",

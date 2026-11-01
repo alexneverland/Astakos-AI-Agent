@@ -15,7 +15,8 @@ except Exception:
     pass
 
 WATCH_DIRS = ["clients", "core", "tools", "memory", "services"]
-SHUTDOWN_TIMEOUT_SECONDS = 20
+# 35s poll + two bounded notifications + 30s queue drain + session summary.
+SHUTDOWN_TIMEOUT_SECONDS = 150
 LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_telegram.lock")
 
 # ────────────────────────────────────────────────────────────────
@@ -68,10 +69,18 @@ def run():
                 cwd="C:\\astakos_v2",
                 creationflags=creationflags,
             )
+            return process
 
         start()
         dirs = [d for d in WATCH_DIRS if os.path.exists(d)]
-        for changes in watch(*dirs):
+        for changes in watch(*dirs, rust_timeout=1000, yield_on_timeout=True):
+            from services.daily_backup_runtime import checkpoint
+            # Backup owns the stopped child; do not stop it again in start().
+            def resume():
+                nonlocal process
+                process = None
+                return start()
+            process = checkpoint("telegram", process, resume)
             py_changes = [c for c in changes if str(c[1]).endswith(".py") or str(c[1]).endswith("prompts.md")]
             if py_changes:
                 for _, path in py_changes:

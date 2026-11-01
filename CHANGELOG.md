@@ -5,6 +5,430 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- Update the supported LangGraph range to 1.2.19 through the 1.2 series while
+  retaining the current LangChain Core pin and revision-bound tool approvals.
+
+### Security
+
+- Upgrade ReportLab to 5.1.0 with upstream restricted-evaluation security fixes.
+  PDF generation retains the default rejection of untrusted image URLs without
+  enabling permissive host or evaluation settings.
+
+### Added
+
+- End-to-end latency spans for Web, Matrix and Telegram text turns, named
+  pre-graph and graph stages, provider/model calls, application retry attempts
+  and backoffs. The debug panel shows overlapping intervals without double
+  counting and distinguishes uncovered time from provider call duration.
+
+### Fixed
+
+- Messenger preparation uses primary-agent tool selection for mixed owner
+  requests, with native provenance/freshness checks and separate send approval.
+  Removed the broad post-generation preparation classifier and its cache;
+  ordinary chat no longer pays for that helper call.
+
+- Optional Messenger preparation recovery no longer runs during unrelated
+  tool-only steps, reuses identical guarded evidence and has a local request
+  budget. Web input is queued for mirroring before context inference; mirror
+  diagnostics distinguish queue age from delivery duration.
+
+- Messenger preparation and pending-draft decisions read structured provider
+  answer text instead of stringifying content blocks. Mixed requests still
+  require native draft persistence, and sending retains revision-bound approval.
+
+- Work-shift reconciliation assembles only provider answer text losslessly before
+  parsing, preserving weekly endpoints and fragmented JSON strings. Reasoning and
+  tool metadata cannot supply state updates. Explicit single-day schedules retain
+  their own date.
+
+- Dated routine feedback retains delayed conversational references when an owner
+  answers a behavioral question after briefings or from another channel. Habitual
+  answers do not establish today's execution; an explicit correction can retract
+  an exact mistaken completion with history/revision checks, preserving delivery
+  proof and routine settings. Exact replies to completed reminder receipts use
+  a correction-only path bound to the original channel and occurrence date.
+
+### Removed
+
+- Retired the standalone bulk memory cleaners that mixed history backfill with
+  deletion or replaced structured profile categories using LLM output. Memory
+  cleanup now follows the reviewed cold-copy procedure in `docs/memory-maintenance.md`;
+  independent audit-log rotation remains available with preview by default.
+
+### Added
+
+- Owner-operated Chroma cleanup now has an exact-ID maintenance API with
+  collection/provenance checks, a durable pre-delete audit intent and verified
+  completion; structured profile facts and unselected memories stay unchanged.
+
+- Matrix, Web and Telegram terminal execution logs mirror the shared trace recorder with correlated
+  graph steps, tool calls/results, phase timings, unresolved calls and final replies
+  or failures. Previews retain credential redaction and size limits.
+
+- Canonical named GPS places alongside configured home/work, with fresh-point
+  saving and radius matching. Matrix turns record agent/tool/result/timing/error
+  evidence through the shared Web trace store, with concurrent process-safe writes
+  and credential redaction.
+
+- Opt-in OwnTracks HTTP GPS intake over private Tailscale HTTPS, with a dedicated
+  generated credential/device binding, bounded durable queue and source-time
+  freshness/order checks. The selected external worker reuses location reminders
+  and owner whereabouts context; Element sharing renewal is no longer required
+  when OwnTracks is configured. Includes private provisioning and setup instructions.
+
+### Fixed
+
+- Live owner reports now reach the semantic dated work-shift reconciler instead
+  of relying only on legacy rules. Repeated same-shift observations preserve an
+  existing weekly expiry; source/state guards protect newer schedule decisions.
+- Child activity conditions no longer treat the partner's presence as exclusive
+  when fresh evidence also places the child with the owner. Clarification tracks
+  both co-presence flags; other activity and schedule restrictions remain active.
+
+- Recover missed Messenger preparation in mixed conversational requests through
+  a bounded semantic recheck and native draft-write receipt. Preparation cannot
+  batch an old draft send; subsequent sends retain revision-bound approval.
+- Separate historical pre-question context inference from current-message
+  extraction and record its bounded uncertainty/validation outcomes without
+  extending presence expiry or inventing work-location evidence.
+
+- Messenger draft preparation now requires a native write result before showing
+  a saved message, and conversational send requests reach the existing external
+  approval path. Tool-free routine notifications offer preparation rather than
+  inventing drafts. Contextual retirement can clear an unwanted expired draft
+  without erasing newer owner work or marking a routine skipped.
+
+- Follow-up completion and postponement share one bounded model evaluation per
+  owner exchange instead of serial calls per record. Manual deferral reports a
+  no-change result when a matched record is already sent or no longer pending.
+
+- Routine feedback sees adjacent assistant commentary when interpreting a reply,
+  distinguishes corrections from cancellation, and supplies an explicit no-change
+  result to prevent unsupported claims that a routine was skipped or completed.
+
+- Conversational follow-ups understand completion updates without repeated title
+  words, using bounded owner context. Structured decisions take precedence over
+  explanation wording; automatic retries preserve expiry instead of carrying old
+  events into later evenings, while explicit owner postponements can renew timing.
+
+- Web can prepare a local Messenger draft when the owner accepts an offer without
+  repeating the recipient. Routine context inference can use an applicable daily
+  schedule to bound a confirmed ongoing episode, with schedule/source invalidation
+  and unchanged observation freshness and external-send approval gates.
+  Contextual draft preparation requires a semantic request decision; delayed graph
+  writes cannot overwrite a newer draft or persist after a newer owner turn.
+
+- Compound owner reports can update an existing goal's milestones while preparing
+  a local Messenger draft through Chat/Web. Web also exposes the existing
+  milestone updater for ordinary turns. Scores retain prior results without
+  resetting completion percentage, status or the original goal description;
+  active draft edits and external send/provenance guards remain isolated.
+  An independently authorized local draft is preserved when earlier external
+  context defers the accompanying goal update for approval, with separate actual
+  preparation and pending-approval results.
+
+- A single owner report can atomically record completed activities alongside
+  explicit cancellations for today, so recording one outcome does not discard
+  the other and leave a cancelled routine eligible for a context question.
+  Batches retain identity/date, freshness, rollback and completion protection;
+  pause, deferral, acknowledgement, drafts and external permissions stay separate.
+
+- Early explicitly scheduled routines and their required context questions no
+  longer stall behind the default quiet-hour window. Current explicit quiet
+  requests, mute/pause, context and final dispatch guards still apply; spontaneous
+  proactive messages and optional routine context notes retain their quiet-hour
+  policy, including checks after note generation.
+
+- Routine feedback can atomically record multiple clearly reported completions,
+  retaining prior receipts and truthful acknowledgements. Bounded owner-day
+  references distinguish earlier participation from a later activity or plan;
+  canonical semantic context owns child outing state instead of legacy memory
+  outing rules. Ambiguous identities, future intentions and unsafe batch actions
+  remain blocked.
+
+- Routine context clarification can reuse semantically grounded, explicit
+  current-day durations beyond the momentary two-hour presence window. Separate
+  expiring evidence preserves source timestamps, invalidates on owner-history or
+  canonical-state changes, and keeps normal questions for ambiguous situations.
+
+- Behavioral reply and initiative selectors consider a broader bounded topic
+  pool and avoid equivalent pending/recent follow-up questions through shared
+  read-only topic context. Initiative skips are reconsidered when background
+  evidence changes. Prior identity references expose dated support for semantic
+  reuse; historical observations and delivery safety limits remain intact.
+
+- Temporary semantic routine skips retain bounded reassessment during the
+  preparation window instead of consuming the entire day. Wording distinguishes
+  the reminder time from the scheduled activity; generated context notes reuse
+  canonical guarded delivery without a second wording model.
+
+- Web and Telegram graph traces complete and persist on exceptions and empty
+  responses, including Telegram photo failures and pending approval intercepts.
+  Telegram retains streamed tool evidence before a graph failure; closed terminal
+  streams cannot abort a turn through the trace console sink.
+
+- Execution trace previews redact private-key and passphrase fields and PEM key
+  blocks. Text redaction avoids polynomial regex backtracking on long input.
+
+- Interrupted OwnTracks uploads are rejected without an unhandled traceback or
+  accepting partial location data; subsequent authenticated uploads remain usable.
+
+- Newer same-value GPS observations no longer discard grounded relationship
+  updates from an ordinary owner report; newer conflicting state remains protected.
+
+- Scheduled and Telegram-entry location reminders remain pending when external
+  delivery is not confirmed. Location-reminder SQLite connections close explicitly,
+  preventing Windows file locks after processing.
+
+- A new local reminder grounded in the owner's current request no longer requires
+  approval solely because unrelated external content remains in older history.
+  Ambiguous requests, failed validation and fresh external results retain their
+  safety gates.
+- Matrix confirmations after reminder approval include the actual tool result
+  and task, preserve returned errors, and persist the outcome with its original
+  external-source provenance.
+- Matrix-origin approved reminders retain completed results until history writes
+  succeed, with startup/periodic history recovery and protection against repeating
+  an interrupted execution.
+
+## [v2.8.0] — 2026-10-09
+
+Headline: **Matrix/Element conversation, context-aware routines, behavioral
+conversation, native file tools and guided fresh-install configuration.**
+
+### Added
+
+- Guided Wizard location/backup/optional integration settings, validation and masked-secret preservation; pinned native Office installer and Docker provisioning.
+- Element/Matrix as the selected external messaging app, with shared Web/Telegram/Matrix history, encrypted owner-room delivery, explicit trusted devices and exact-Reply approval.
+- Reddit, YouTube and LinkedIn research evidence, multi-result web research, clickable source links and supported recent-date filtering.
+- Photo conversation and document lifecycle improvements, with channel-aware file delivery and unified native PDF/TXT/CSV versus Office CLI workflows.
+- Behavioral conversation from trusted recurring observations: specific entity/action patterns, ordinary reply comments, guarded spontaneous openers, preferences and Debug diagnostics.
+- Source-timed daily context inference and general semantic reassessment of related registered flags, including owner whereabouts and family co-presence.
+- Dated routine delivery/feedback, acknowledgement versus completion, historical occurrence identity, separate refusal/silence pressure and optional relevant notes for blocked routines.
+- Partial conversational goal updates with activity/provenance, and follow-ups grounded in recent relevant context.
+- Selective midnight Astakos data backup, separate encrypted Matrix backup, guarded pause/resume, verified Drive upload and scoped retention. Windows scheduling and recovery evidence remain deployment-specific.
+
+### Changed
+
+- One active external transport controls external approvals, reminders and routine delivery; changing transport preserves shared history.
+- Routine selection includes snapshot-consistent schedules, conditions and bounded dated engagement. Ambiguous variants and catalogue changes cannot silently reuse a stale selection.
+- Context clarification retains additional facts and unrelated requests; preparation replies do not complete an activity, and completed occurrences avoid redundant questions.
+- Behavioral identity resolution uses bounded trusted references and specific actions without rewriting historical observations.
+- Read-only bug diagnosis is distinct from an approved repair; approved terminal results continue through the normal conversational flow.
+- Vendored agent workflows and Office CLI were updated; existing upstream licenses and attribution remain separate from first-party MIT licensing.
+
+### Fixed
+
+- Wizard readiness and execution verify the native Office artifact's pinned size/SHA-256; invalid local binaries cannot hide a verified Linux fallback. Explicitly cleared optional non-secret settings no longer retain stale values.
+- Fresh/legacy dated feedback activation during canonical startup, atomic rollback and history preservation; release updates no longer replace registered context flags or remove runtime JSON/Matrix crypto/media/backups.
+- Stale, unsaved or ungrounded reports replacing newer context; same-second latest saved reports now pass the ordinary grounded path while preserving history/version guards.
+- Morning/afternoon routine mix-ups after expired preparation engagement, and selector compatibility when injecting routine evidence.
+- Family-presence, work-shift expiry, bedtime/absence and GPS-freshness edge cases; location does not establish companion presence.
+- Follow-up continuity, supplied-link research failures, redundant research work, proactive timing/quiet checks and fact provenance/deduplication.
+- Graceful external shutdown and backup supervisor recovery, including headless Windows Scheduler handle failures.
+
+### Security
+
+- Updated `pypdf` to 6.19.0 for the available PDF parsing runtime/memory exhaustion fixes.
+- ChromaDB remains embedded/local; its unpatched server API advisories remain open. Do not expose a Chroma HTTP server.
+
+### Upgrade notes
+
+- Use the v2.8.0 release assets and image for these changes; a repository merge alone does not update the release image.
+- Normal routine startup provisions dated feedback storage transactionally for fresh/legacy installations, preserving routines, history and baselines without reset or backfill.
+- Release Docker runtime persistence uses named data/workspace volumes and a separate credentials mount. Selective data backups exclude credentials, `.env`, code and unindexed outputs; Matrix/Element recovery is separate.
+- Recorded backup capture, upload and isolated extraction do not prove full application or replacement-host/client recovery. Preserve the documented recovery limits.
+- No historical behavioral backfill, live routine-ledger correction or owner credential change is included. Docker now includes the native Office tool and ICU; optional services still require owner configuration.
+
+## [v2.7.0] — 2026-09-11
+
+Headline: **Astakos adds hands-free Jarvis-style conversations, provider-aware voice and image generation, and safer access to approved local projects.**
+
+### Added
+
+- Jarvis-style Live Voice in the Web UI, with a configurable wake name, standby listening, and continuous conversation after wake-up.
+- Dedicated transcription and speech-synthesis paths for Vertex AI, Gemini API, and OpenAI. Voice can use a provider independently from chat, including when Anthropic powers chat.
+- Provider-routed image generation for supported Google and OpenAI configurations.
+- Bounded, permission-aware tools that list recent project files and read approved source files while blocking known credential, environment, database, and private-key paths.
+- Behavioral-pattern progress in the runtime dashboard, plus a Workspace reconnect control for expired or incomplete Google authorization.
+
+### Changed
+
+- The Setup Wizard now resolves chat, embeddings, and voice credentials independently and preserves valid shared credentials when providers change.
+- Telegram photo follow-ups keep visual analysis as bounded, untrusted context instead of exposing raw provider metadata in the conversation.
+- Capability proposals and development routing distinguish a new standalone request from an unapproved continuation of a proposed tool.
+- Messenger drafts can be created and revised through natural conversation while external delivery remains a separately approved action.
+
+### Fixed
+
+- Kept long-running WebM microphone recordings structurally decodable and prevented Live Voice from listening over or interrupting Astakos playback.
+- Kept no-speech turns and text-to-speech HTTP failures from ending Live Voice, while surfacing provider authentication and quota errors to the user.
+- Corrected Telegram voice reply behavior, locale resolution, and provider-specific transcription handling.
+- Restored natural Messenger draft creation, replacement, routine-offer follow-ups, and approved send flows.
+- Reduced SQLite/semantic-memory lock contention and corrected behavioral observation retention, reminder/routine approvals, and local goal deletion.
+- Updated `pypdf` to 6.16.1 for its September 2026 security fixes.
+- Excluded local Chromium profiles, debug recordings, and isolated pytest directories from Docker build contexts.
+
+### Security
+
+- Project-reading tools enforce approved roots, bounded output, and sensitive-path exclusions.
+- ChromaDB remains embedded and local in the supported Astakos deployment. Do not expose a Chroma HTTP server; upstream `chromadb` 1.5.9 advisories remain open without a patched PyPI release as of this release date.
+
+### Upgrade notes
+
+1. Back up `.env`, `credentials/`, SQLite databases, `chroma_db/`, uploads, and custom prompts before updating.
+2. Existing chat configuration continues to work. Leave **Voice Provider** on **Auto** to reuse Vertex, Gemini, or OpenAI chat credentials; Anthropic chat users must choose one of those providers explicitly for voice.
+3. Vertex voice synthesis uses Google Cloud Text-to-Speech. Enable that API for the configured project and service account.
+4. Release Docker users can pull the new image and restart:
+
+   ```bash
+   docker compose -f docker-compose.release.yml pull
+   docker compose -f docker-compose.release.yml up -d
+   ```
+
+## [v2.6.1] — 2026-08-27
+
+**Released: 2026-08-27**
+
+### Fixed
+
+- Docker release deployments now store Google Workspace OAuth tokens in a dedicated writable volume while keeping the host `credentials/` directory read-only.
+- Clarified that embeddings and Google Workspace are configured independently; voice and image generation use the active chat provider's supported capabilities.
+
+## [v2.6.0] — 2026-08-26
+
+**Released: 2026-08-26**
+
+Headline: **Astakos now supports provider-portable chat and media, independently configured semantic-memory embeddings, and separately authorized Google Workspace integrations for a new installation.**
+
+### Added
+
+- A typed AI provider adapter shared across chat, voice transcription, text generation, vision, and image generation. Astakos now supports Vertex AI, Gemini API, OpenAI, and Anthropic through one capability-aware boundary.
+- Independent embeddings configuration for semantic memory: automatic matching for compatible chat providers, explicit Vertex/Gemini/OpenAI selection, and optional locally prepared Multilingual E5 embeddings.
+- Safe, separate vector collections for each embeddings backend and model, preventing incompatible vectors from being mixed when a user changes provider.
+- First-run Setup Wizard diagnostics for chat, embeddings, semantic memory, Vertex credentials, and Google Workspace readiness.
+- Guided Google Workspace OAuth connection for Gmail, Drive, Calendar, Tasks, Google Fit, and Daily Backup, independent of Vertex service-account credentials.
+- Clear beginner documentation for provider choices, Local E5, Workspace OAuth, and provider-switch behavior.
+
+### Changed
+
+- Audio, reflection, story text, receipt/photo vision, and image generation now use the active provider adapter instead of provider-specific call paths.
+- Semantic-memory storage preserves structured facts and photo archives when embeddings are unavailable, so the assistant remains useful in a degraded configuration.
+- Drive and daily backup default to the authenticated user's My Drive when no custom folder is configured.
+- The Setup Wizard now keeps existing secrets when fields are unchanged, masks sensitive values, and reports configuration status without exposing credentials.
+
+### Fixed
+
+- Hardened API, WebSocket logs, generated assets, Telegram approval callbacks, custom-tool creation, and local command classification against unauthorized or unsafe actions.
+- Restored reliable semantic retrieval after a Chroma handle refresh and retained recent context when embeddings are unavailable.
+- Improved live family/context extraction, weekly shift handling, routine lifecycle decisions, and Messenger draft revision handling.
+- Preserved valid Google Workspace token scopes during refresh and made missing, malformed, revoked, or incomplete authorization states actionable.
+- Made image handling resilient across provider image formats and prevented vision work from blocking the Web API event loop.
+
+### Upgrade notes
+
+1. Back up `.env`, `credentials/`, SQLite databases, `chroma_db/`, uploads, and custom prompts before updating.
+2. Existing Gemini, OpenAI, or Vertex users can keep `EMBEDDINGS_PROVIDER=auto`. Anthropic users must select a separate embeddings provider if they want semantic memory.
+3. Changing an embeddings provider or model starts a separate semantic collection. Existing vectors are retained but are not searched automatically by the new backend.
+4. Google Workspace integrations now use personal OAuth files: keep `credentials/client_secrets.json` for consent and allow the Setup Wizard to create `credentials/token.json`. Reconnect from the Wizard if an integration requests it.
+5. Docker release users can pull the new image and restart:
+
+   ```bash
+   docker compose -f docker-compose.release.yml pull
+   docker compose -f docker-compose.release.yml up -d
+   ```
+
+## [v2.5.0] — 2026-08-14
+
+**Released: 2026-08-14**
+
+### Added
+
+- An isolated behavioral-observation layer that records only validated, trusted user reports as confirmed events or non-actionable candidates.
+- Debug visibility for repeated behavioral-pattern candidates. These observations do not create routines, reminders, memory writes, or notifications automatically.
+- A temporary vacation pause for routine notifications, with visible pause status and preserved reminders and follow-ups.
+
+### Changed
+
+- The behavioral observer now starts from a clean observation epoch, preventing historical conversation backfill after installation or upgrade.
+- The Beginner Setup Guide now distinguishes the source-build Docker path from the ready-to-run release image with automatic updates.
+
+### Fixed
+
+- Georgian voice translation supports both Greek-to-Georgian and Georgian-to-Greek voice flows.
+- Meal history is recorded automatically from direct user reports so recipe suggestions can avoid recently eaten meals.
+- Explicit website searches, navigation ETA fallback, and Messenger draft handling are more reliable while external-content safeguards remain in place.
+
+## [v2.4.1] — 2026-08-04
+
+**Released: 2026-08-04**
+
+### Added
+
+- Setup Wizard support for validating and importing a portable `astakos_routines.json` declaration during first-run setup.
+
+### Fixed
+
+- Hardened handling of untrusted external and persisted content before it can influence state-changing tools or background memory pipelines.
+- Preserved external-content provenance across supported conversation, memory, routine, reminder, list, goal, recipe, and asset paths.
+- Restored the strict Messenger routine-draft lifecycle across Telegram and Web, including atomic pending-offer consumption.
+
+## [v2.4.0] — 2026-07-27
+
+**Released: 2026-07-27**
+
+### Added
+
+- Guarded capability-gap draft flow with explicit authorization before applying new native tools.
+- Dynamic binding of registered tools to their declared agent.
+- Native world-time capability with city aliases, IANA timezone support, and Athens-relative difference.
+
+### Changed
+
+- Tech_Agent now uses native bounded research/diagnostic tools instead of raw terminal/code execution for factual hardware research.
+
+### Fixed
+
+- Web document and pasted-text uploads no longer fail from the local llm shadowing path.
+- Tool registration preserves valid source list syntax and rolls back failed registrations.
+- Conversation history preserves same-second message ordering.
+- Shutdown/vector-store handling and tool-boundary guards are more reliable.
+
+## [v2.3.1] — 2026-07-24
+
+**Released: 2026-07-24**
+
+### Fixed
+
+- Release metadata now matches the installed version, preventing false update notices after installation.
+
+## [v2.3.0] — 2026-07-24
+
+**Released: 2026-07-24**
+
+### Added
+
+- Location reminders can now use the current live GPS point as an anchor and fire after the user leaves that place.
+
+### Changed
+
+- Restored Gemini 3.5 Flash as the fast model for the Gemini and Vertex paths.
+
+### Fixed
+
+- Mail reply evaluation can now read the relevant email thread before assessing a draft response.
+- Stale confirmations no longer execute an older pending plan.
+- Routine SQLite connections are refreshed safely to reduce intermittent database-lock failures.
+- A future statement about returning home no longer clears the active outing state; explicit return-home phrases still do.
+- A Messenger send request without an active draft now returns the canonical inactive-draft response instead of retrying into a new draft flow.
+- Ultra-light Telegram acknowledgements no longer fail before replying.
+- Correcting a reminder now updates the existing reminder instead of adding a duplicate; same-task reminders at different times remain supported.
+
 ## [v2.0.0] — 2026-07-15
 
 **Released: 2026-07-15**

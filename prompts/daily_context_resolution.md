@@ -1,0 +1,47 @@
+This is a read-only semantic resolution of unknown routine context before asking
+the owner. Do NOT treat the last conversational line as a new state report now.
+Use the daily source identities and their actual event times. Infer only allowed
+flags that follow clearly from a recent completed/current event combined with
+an explicit applicable plan, not an intention, habit or old location observation.
+An old plan alone is insufficient. Include all relevant contrary later reports;
+omit flags if they leave any uncertainty. Never select an earlier event to avoid
+a newer contradiction. The event is the latest relevant actual transition, not a
+later acknowledgement, draft request or unrelated message that would renew its age.
+
+Return ONLY an object with exactly these fields:
+{"flags": {}, "event_rowid": null, "support_rowids": []}
+For a grounded resolution, flags maps allowed identifiers to booleans,
+event_rowid identifies the actual recent owner event, and support_rowids lists
+its source plus the explicit daily-plan/other relevant source IDs. No actions,
+routine completion, messages, tool use, invented source IDs or new permissions.
+
+Explicit-duration alternative: a current-day statement about an ongoing situation
+can remain applicable beyond the two-hour observation limit when the owner gives
+a duration or a clear day-scoped commitment. Assess this semantically, across all
+people and all later sources. Return the same three fields plus exactly
+"duration_source_rowids": [IDs of explicit duration sources] and "valid_until":
+an offset-aware ISO end time supported by those sources, no later than next local
+midnight. Do not invent shift end hours from morning/afternoon labels. A mere
+arrival, old presence, habit, or intention does not qualify. A plan alone cannot
+prove execution: connect it with an actual completed/current transition.
+Both people working does not alone establish separate workplaces; remote work
+or a shared workplace may mean they are together. Infer separation only when the
+sources support it. Later contrary or ambiguous reports require omitting the
+flag, even if a plan previously covered today. Prefer the ordinary three-field
+form for recent momentary evidence, and the empty form whenever uncertain.
+This alternative records a separate expiring proof; it must never pretend the
+old event happened now or refresh its original presence timestamp.
+
+The daily_schedule reference supplies applicable canonical plans with exact times.
+When today's owner reports establish an ongoing episode, use its applicable
+scheduled ending as a duration bound rather than requiring the owner to repeat
+an already stored end time. A day-scoped work statement can supply duration
+support, combined with actual departure/arrival and corroborating context. The
+schedule alone never proves execution, ongoing presence, or separate workplaces.
+Do not treat every later scheduled activity as an ending: choose only a clearly
+relevant transition for the same person and episode. If its meaning, applicability
+or co-presence is uncertain, keep the ordinary clarification path. Shared work,
+remote work and later contrary reports remain authoritative.
+For this variant include the five duration fields plus schedule_routine_id, the
+integer ID of that ending. valid_until must equal its exact slot_at. Never invent
+hours from a shift label or use an absent, blocked or externally sourced routine.

@@ -2,7 +2,8 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 """
@@ -18,10 +19,13 @@ import os
 import sys
 import time
 import json
+import logging
 import requests
 import re
 import threading
 import queue
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING
 from datetime import datetime
 from time import perf_counter
 from zoneinfo import ZoneInfo
@@ -31,12 +35,28 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, PHOTOS_DIR, PHOTOS_INDEX_FILE, NLP_CONFIG
 import config
 import core.i18n
 from core.i18n import t
+from core.voice_delivery import build_voice_delivery_context
+from core.messaging_channel import resolve_external_channel
+
+if TYPE_CHECKING:
+    from memory.execution_trace import ExecutionTrace
+
+
+logger = logging.getLogger(__name__)
+UNAUTHORIZED_CALLBACK_ALERT_TEXT = "⛔ Unauthorized"
+
+GEORGIAN_QUICK_PHRASES_ALIASES = frozenset({
+    "/georgian_phrases", "/g_phrases",
+})
+GEORGIAN_COMMAND_ALIASES = frozenset({
+    "/georgian", "/geo", "/g",
+}) | GEORGIAN_QUICK_PHRASES_ALIASES
 
 def _normalize_gr(text: str) -> str:
     """Removes accents from Greek text for accent-insensitive comparison."""
@@ -55,6 +75,18 @@ def _partner_match_terms() -> list[str]:
         }
         if term
     ]
+
+
+def _is_partner_messenger_routine(event_name: str) -> bool:
+    """Return whether a routine event concerns composing or sending a partner Messenger message."""
+    event_l = _normalize_gr(event_name)
+    return (
+        t("clients.telegram_bot.bot_msg_2e67ed") in event_l
+        or any(term in event_l for term in _partner_match_terms())
+        or "messenger" in event_l
+        or t("clients.telegram_bot.bot_msg_500d81") in event_l
+    )
+
 
 def _safe_classify_messenger_intent(text: str, *, has_active_draft: bool):
     """Lazy/fail-soft import so tests that stub `services` don't crash telegram_bot import."""
@@ -93,6 +125,7 @@ from services.context_extractor import extract_and_update_context_flags
 from memory.event_log import log_event, is_duplicate_notification, is_duplicate_routine
 from core.exceptions import SchedulerCrashError, PendingTimeoutError, DBWriteError
 from core.brain import llm, safe_llm_invoke
+from services.turn_timing import trace_turn
 from core.graph import graph
 from core.agents import clean_message, filter_messages
 from memory.vector_store import memory
@@ -106,26 +139,44 @@ from memory.session_memory import (
     _maybe_trigger_auto_session_summary,
 )
 from tools.telegram import send_telegram_msg, send_telegram_voice, send_telegram_msg_full
+from clients.telegram_delivery import TelegramExternalTransport
+from services.external_delivery import external_delivery_router
 from services.gemini import safe_gemini_call
 from services.embeddings import embeddings
 from memory.pending_followups import (
     ensure_pending_followups_table,
-    maybe_create_followup_from_exchange,
-    maybe_resolve_followups_from_user_message,
-    looks_like_followup_resolution_update,
-    extract_followup_candidate_with_llm,
-    create_pending_followup_from_candidate,
-    get_recently_resolved_followups,
-    candidate_is_distinct_from_recently_resolved,
+    find_pending_followups,
+    process_followup_exchange,
     get_due_pending_followups,
     mark_followup_sent,
     expire_old_followups,
     has_recent_sent_followup,
     has_recent_sent_followup_for_arc,
     build_followup_arc_key,
-    record_followup_outcome,
 )
 from core.event_bus import bus
+
+def _register_telegram_external_transport() -> None:
+    """Bind the canonical router to this process's existing Telegram senders."""
+    external_delivery_router.register(
+        "telegram",
+        TelegramExternalTransport(
+            send_message=lambda text, silent: (
+                send_telegram_msg(text, disable_notification=True)
+                if silent
+                else send_telegram_msg(text)
+            ),
+            send_full_message=lambda text, silent: (
+                send_telegram_msg_full(text, disable_notification=True)
+                if silent
+                else send_telegram_msg_full(text)
+            ),
+        ),
+    )
+
+
+_register_telegram_external_transport()
+
 # ────────────────────────────────────────────────────────────────
 # GLOBALS
 # ────────────────────────────────────────────────────────────────
@@ -178,8 +229,18 @@ def _cache_bot_message(message_id: int | None, text: str) -> None:
             oldest = sorted(_bot_message_cache.keys())[0]
             del _bot_message_cache[oldest]
 last_interaction_time = time.time()
-# Pending routine confirmations: {routine_id: {"event": ..., "sent_at": ...}}
+# Pending routine confirmations: {routine_id: {"event": ..., "sent_at": ..., "draft_offer": bool}}
 pending_routine_confirmations = {}
+# Explicit injection only; the live dated rollout waits for scheduler readiness.
+_persisted_routine_feedback_handler = None
+# Explicitly installed only after the dated dispatch/adapter rollout gates.
+_dated_routine_feedback_tick = None
+# Explicit inactive dependencies; draft/deferred coordination still gates rollout.
+_dated_single_routine_sender = None
+_dated_deferred_routine_sender = None
+_dated_batch_routine_sender = None
+_dated_pending_expiry_handler = None
+_dated_feedback_runtime = None
 pending_exec_command = None
 # Pending reflection confirmations (ask-tier, 50-75% confidence): {reflection_id: {full reflection dict}}
 pending_reflection_confirmations = {}
@@ -195,6 +256,16 @@ pending_partner_until = 0.0   # ka→el mode (Sophia writes Georgian)
 voice_mode_enabled = False
 # Scheduler reference (set in __main__, used by /status command)
 astakos_scheduler = None
+_external_background_runtime_lock = threading.Lock()
+_external_background_runtime_channel: str | None = None
+_external_scheduler_thread: threading.Thread | None = None
+_external_missed_check_thread: threading.Thread | None = None
+_external_worker_stop_event: threading.Event | None = None
+
+
+def _current_external_runtime_channel() -> str:
+    """Return the active scheduler channel, or the validated configured default."""
+    return _external_background_runtime_channel or resolve_external_channel()
 # ── Rate Limiting ─────────────────────────────────────────────
 QUIET_HOURS          = (0, 8)    # 00:00 → 08:00 without proactive
 MAX_PROACTIVE_PER_HOUR = 3       # max proactive messages/hour
@@ -237,10 +308,12 @@ def _seconds_since_user_activity() -> float:
 
 def should_skip_proactive_for_recent_activity(
     max_age_seconds: int = PROACTIVE_RECENT_ACTIVITY_GRACE_SECONDS,
+    *, quiet: bool = False,
 ) -> bool:
     elapsed = _seconds_since_user_activity()
     if elapsed < max_age_seconds:
-        print(f"⏸️ [Proactive]: Recent user activity ({int(elapsed)}s ago) — skipped.")
+        if not quiet:
+            print(f"⏸️ [Proactive]: Recent user activity ({int(elapsed)}s ago) — skipped.")
         log_event("proactive", "skipped", reason="recent_activity", elapsed_s=int(elapsed))
         return True
     return False
@@ -290,39 +363,32 @@ def enqueue_fast_task(func, *args):
 def enqueue_slow_task(func, *args):
     slow_queue.put((func, args))
 
-def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
-    seed_facts = run_memory_sifter_fast(user_text, ai_text, handling_agent, channel)
+def _enqueue_slow_memory_sifter(
+    user_text: str,
+    ai_text: str,
+    handling_agent: str,
+    channel: str,
+    external_content_sources: set[str] | None = None,
+    trusted_user_only: bool = False,
+) -> None:
+    """Queue memory sifting, optionally using only trusted user-originated text."""
+    if external_content_sources:
+        print("[MemorySifterSlow]: external-derived exchange - skip automatic memory write")
+        return
+    safe_ai_text = "" if trusted_user_only else ai_text
+    seed_facts = run_memory_sifter_fast(user_text, safe_ai_text, handling_agent, channel)
     enqueue_slow_task(
         run_memory_sifter_slow,
         user_text,
-        ai_text,
+        safe_ai_text,
         handling_agent,
         channel,
         seed_facts,
+        not trusted_user_only,
     )
 
 def _enqueue_followup_pipeline(user_text, ai_text, agent_name, channel):
-    resolved_count = maybe_resolve_followups_from_user_message(user_text)
-    if resolved_count > 0 and looks_like_followup_resolution_update(user_text):
-        candidate = extract_followup_candidate_with_llm(user_text, ai_text, agent_name)
-        if not candidate or not candidate.get("should_follow_up"):
-            print(f"[FollowUp]: create-skip after resolution update ({resolved_count} resolved)")
-            return
-
-        recent_resolved = get_recently_resolved_followups(limit=5, within_seconds=180)
-        if not candidate_is_distinct_from_recently_resolved(candidate, recent_resolved):
-            print(f"[FollowUp]: create-skip redundant arc after resolution update ({resolved_count} resolved)")
-            return
-
-        create_pending_followup_from_candidate(
-            candidate=candidate,
-            source_channel=channel,
-            source_agent=agent_name,
-            source_user_text=user_text,
-            source_ai_text=ai_text,
-        )
-        return
-    maybe_create_followup_from_exchange(
+    process_followup_exchange(
         user_text=user_text,
         ai_text=ai_text,
         agent_name=agent_name,
@@ -341,6 +407,7 @@ def _build_followup_state_snapshot() -> dict:
         "family_at_home",
         "kid1_away_from_home",
         "kid1_away_reason",
+        "kid1_absence_scope",
         "kid1_with_user",
         "kid1_with_partner",
         "quiet_hours",
@@ -415,42 +482,6 @@ def _normalize_followup_signal_text(text: str) -> str:
     return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
 
-def _should_force_light_outing_followup(item: dict) -> bool:
-    from datetime import datetime
-    from memory.pending_followups import _coerce_local_dt, _local_now
-
-    metadata = item.get("metadata") or {}
-    if int(item.get("times_sent") or 0) > 0:
-        return False
-    if int(metadata.get("defer_count") or 0) > 0:
-        return False
-
-    if str(item.get("topic") or "").strip().lower() != "outing":
-        return False
-
-    text = _normalize_followup_signal_text(item.get("source_user_text") or "")
-    if not text:
-        return False
-
-    markers = (
-        t("clients.telegram_bot.bot_msg_572193"),
-        t("clients.telegram_bot.bot_msg_069ca1"),
-    )
-    if not any(marker in text for marker in markers):
-        return False
-
-    due_at_raw = str(item.get("followup_after_ts") or "").strip()
-    if not due_at_raw:
-        return False
-
-    try:
-        due_at = _coerce_local_dt(datetime.fromisoformat(due_at_raw.replace(" ", "T")))
-    except Exception:
-        return False
-
-    elapsed_since_due = (_local_now() - due_at).total_seconds() / 60.0
-    return 0 <= elapsed_since_due <= 60
-
 
 def _build_followup_decision_with_llm(item: dict, recent_context: str, state_snapshot: dict) -> dict:
     from services.gemini import safe_gemini_call
@@ -467,6 +498,7 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
     last_decision = str(item.get("last_decision") or "").strip()
     decision_reason = str(item.get("decision_reason") or "").strip()
     outcome_score = float(item.get("outcome_score") or 0.0)
+    topic = str(item.get("topic") or "").strip().lower()
 
     history_block = (
         f"- defer_count: {defer_count}\n"
@@ -508,6 +540,9 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
         message = clean_message(payload.get("message", "")).strip()
         reason = str(payload.get("reason", "")).strip()
         skip_action = str(payload.get("skip_action") or "none").strip().lower()
+        context_evidence = clean_message(
+            str(payload.get("context_evidence") or "")
+        ).strip()
         if skip_action not in {"resolve", "defer", "none"}:
             skip_action = "none"
 
@@ -521,6 +556,32 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
             "skip",
         }:
             stage = "skip" if decision == "skip" else "decision_pending"
+
+        if topic == "departure":
+            evidence_norm = _normalize_followup_signal_text(context_evidence)
+            recent_context_norm = _normalize_followup_signal_text(recent_context)
+
+            has_location_evidence = (
+                _has_fresh_work_departure_evidence(item, state_snapshot)
+                or _has_fresh_outing_departure_evidence(item)
+            )
+            has_context_evidence = (
+                len(evidence_norm) >= 5
+                and evidence_norm in recent_context_norm
+            )
+
+            if (
+                decision != "send"
+                or not message
+                or (not has_location_evidence and not has_context_evidence)
+            ):
+                return {
+                    "decision": "skip",
+                    "skip_action": "resolve",
+                    "stage": "skip",
+                    "message": "",
+                    "reason": "departure_missing_verified_recent_context",
+                }
 
         if decision == "send" and not message:
             message = _build_safe_followup_fallback(item, stage)
@@ -537,10 +598,14 @@ def _build_followup_decision_with_llm(item: dict, recent_context: str, state_sna
         print(f"[FollowUpDecision Error]: {exc}")
         return {
             "decision": "skip",
-            "skip_action": "defer",
+            "skip_action": "resolve" if topic == "departure" else "defer",
             "stage": "skip",
             "message": "",
-            "reason": "llm_decision_failed_safe_defer",
+            "reason": (
+                "departure_decision_failed_resolved"
+                if topic == "departure"
+                else "llm_decision_failed_safe_defer"
+            ),
         }
 
 def _followup_log_label(item: dict) -> str:
@@ -561,92 +626,37 @@ def _short_followup_reason(reason: str, limit: int = 220) -> str:
         return text
     return text[: limit - 3].rstrip() + "..."
 
-def _followup_skip_means_defer(reason: str) -> bool:
-    text = _normalize_followup_signal_text(reason)
-    markers = (
-        t("clients.telegram_bot.bot_msg_395694"),
-        t("clients.telegram_bot.bot_msg_28b202"),
-        t("clients.telegram_bot.bot_msg_117791"),
-        t("clients.telegram_bot.bot_msg_082854"),
-        t("clients.telegram_bot.bot_msg_437093"),
-        t("clients.telegram_bot.bot_msg_4f17de"),
-        t("clients.telegram_bot.bot_msg_a77d19"),
-        t("clients.telegram_bot.bot_msg_251e4d"),
-        "before",
-        "not yet",
-        "later",
-        "tonight",
-    )
-    return any(marker in text for marker in markers)
-
-def _followup_skip_means_resolved(reason: str) -> bool:
-    text = _normalize_followup_signal_text(reason)
-    markers = (
-        t("clients.telegram_bot.bot_msg_39b4e9"),
-        t("clients.telegram_bot.bot_msg_48da5a"),
-        t("clients.telegram_bot.bot_msg_12e8b7"),
-        t("clients.telegram_bot.bot_msg_77d021"),
-        t("clients.telegram_bot.bot_msg_451cec"),
-        t("clients.telegram_bot.bot_msg_6e8d10"),
-        t("clients.telegram_bot.bot_msg_770c84"),
-        t("clients.telegram_bot.bot_msg_1b3dde"),
-        t("clients.telegram_bot.bot_msg_ef62c0"),
-        t("clients.telegram_bot.bot_msg_7755d1"),
-        t("clients.telegram_bot.bot_msg_9f7078"),
-        "already completed",
-        "already discussed",
-        "no further follow-up",
-        t("clients.telegram_bot.bot_msg_1bbc61"),
-        t("clients.telegram_bot.bot_msg_aaa6cf"),
-        t("clients.telegram_bot.bot_msg_b1aca8"),
-    )
-    return any(marker in text for marker in markers)
-
-def _looks_terminal_followup_skip_reason(reason: str) -> bool:
-    text = _normalize_gr(reason or "")
-    markers = [
-        t("clients.telegram_bot.bot_msg_cdf440"),
-        t("clients.telegram_bot.bot_msg_055f83"),
-        t("clients.telegram_bot.bot_msg_f6a7ce"),
-        t("clients.telegram_bot.bot_msg_12a43d"),
-        t("clients.telegram_bot.bot_msg_a0f7e2"),
-        t("clients.telegram_bot.bot_msg_3ee579"),
-        t("clients.telegram_bot.bot_msg_27ae12"),
-        t("clients.telegram_bot.bot_msg_062ecf"),
-    ]
-    return any(m in text for m in markers)
-
 def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
-    from datetime import datetime
-    from memory.pending_followups import defer_followup, resolve_followup, _set_followup_decision, normalize_followup_delay
+    from memory.pending_followups import defer_followup, resolve_followup, _set_followup_decision
 
     reason = str(decision.get("reason") or "").strip()
     skip_action = str(decision.get("skip_action") or "none").strip().lower()
     topic = str(item.get("topic") or "").strip().lower()
     metadata = item.get("metadata") or {}
+    if topic == "departure":
+        resolution_reason = reason or "departure_not_contextually_valid"
+        resolve_followup(item["id"], f"resolved_by_skip:{resolution_reason}")
+        _set_followup_decision(item["id"], "resolved", resolution_reason)
+        return "resolved"
 
-    target_window = str(metadata.get("target_window") or "").strip()
     raw_delay = int(metadata.get("delay_minutes_raw") or metadata.get("delay_minutes_final") or 60)
 
-    if skip_action == "defer" or _followup_skip_means_defer(reason):
-        delay_minutes = normalize_followup_delay(
-            topic=topic,
-            suggested_minutes=raw_delay,
-            source_user_text=str(item.get("source_user_text") or ""),
-            target_window=target_window,
-            now=datetime.now(),
-        )
-        defer_followup(
+    if skip_action == "defer":
+        # A due item's next check is a short retry, not a new occurrence of
+        # its original calendar window. Only an owner postponement renews TTL.
+        outcome = defer_followup(
             item["id"],
-            delay_minutes=delay_minutes,
+            delay_minutes=max(15, min(raw_delay, 60)),
             reason=f"deferred:skip:{reason or 'too_early'}",
-            target_window=target_window,
             topic=topic,
+            automatic=True,
         )
+        if outcome != "deferred":
+            return outcome
         _set_followup_decision(item["id"], "deferred", reason or "too_early")
         return "deferred"
 
-    if skip_action == "resolve" or _followup_skip_means_resolved(reason) or _looks_terminal_followup_skip_reason(reason):
+    if skip_action == "resolve":
         resolve_followup(item["id"], f"resolved_by_skip:{reason or 'stale_followup_no_longer_relevant'}")
         _set_followup_decision(item["id"], "resolved", reason or "stale_followup_no_longer_relevant")
         return "resolved"
@@ -654,11 +664,75 @@ def _apply_followup_skip_outcome(item: dict, decision: dict) -> str:
     _set_followup_decision(item["id"], "skip", reason or "skip_without_state_change")
     return "kept_pending"
 
+_FOLLOWUP_GLOBAL_COOLDOWN_MINUTES = 30
+_DEPARTURE_FOLLOWUP_GLOBAL_COOLDOWN_MINUTES = 5
+_FOLLOWUP_ARC_COOLDOWN_MINUTES = 240
+
+
+def _is_live_location_departure_followup(item: dict) -> bool:
+    """Return true only for the internal live-location departure event."""
+    return (
+        str(item.get("topic") or "").strip().lower() == "departure"
+        and str(item.get("subject") or "").strip() == "stable_location_departure"
+        and str(item.get("source_agent") or "").strip() == "Location_Event"
+    )
+
+_LIVE_LOCATION_DEPARTURE_EVIDENCE_MAX_AGE_MINUTES = 10
+
+
+def _has_fresh_live_location_departure(item: dict) -> bool:
+    """Return true only for a fresh internal live-location departure event."""
+    if not _is_live_location_departure_followup(item):
+        return False
+
+    due_at_raw = str(item.get("followup_after_ts") or "").strip()
+    if not due_at_raw:
+        return False
+
+    try:
+        from memory.pending_followups import _coerce_local_dt, _local_now
+
+        due_at = _coerce_local_dt(
+            datetime.fromisoformat(due_at_raw.replace(" ", "T"))
+        )
+    except (TypeError, ValueError):
+        return False
+
+    age_minutes = (_local_now() - due_at).total_seconds() / 60.0
+    return 0 <= age_minutes <= _LIVE_LOCATION_DEPARTURE_EVIDENCE_MAX_AGE_MINUTES
+
+
+def _has_fresh_work_departure_evidence(
+    item: dict,
+    state_snapshot: dict,
+) -> bool:
+    """Accept a fresh location departure only while work state is active."""
+    if not _has_fresh_live_location_departure(item):
+        return False
+
+    user_at_work = state_snapshot.get("user_at_work") or {}
+    return str(user_at_work.get("value") or "").strip().lower() == "true"
+
+
+def _has_fresh_outing_departure_evidence(item: dict) -> bool:
+    """Accept fresh GPS departure only for an active conversational outing."""
+    if not _has_fresh_live_location_departure(item):
+        return False
+
+    return any(
+        str(followup.get("topic") or "").strip().lower() == "outing"
+        for followup in find_pending_followups(limit=10, active_only=True)
+    )
+
+
 def job_check_pending_followups():
     from memory.pending_followups import _local_now
     try:
         now_iso = _local_now().isoformat(timespec="seconds")
         expire_old_followups(now_iso)
+
+        if is_proactive_muted() or is_quiet_hours():
+            return
 
         due = get_due_pending_followups(now_iso)
         if not due:
@@ -667,7 +741,12 @@ def job_check_pending_followups():
         recent_context = _load_recent_proactive_context(limit=10)
 
         for item in due[:3]:
-            if has_recent_sent_followup(within_minutes=90):
+            global_cooldown_minutes = (
+                _DEPARTURE_FOLLOWUP_GLOBAL_COOLDOWN_MINUTES
+                if _is_live_location_departure_followup(item)
+                else _FOLLOWUP_GLOBAL_COOLDOWN_MINUTES
+            )
+            if has_recent_sent_followup(within_minutes=global_cooldown_minutes):
                 print(f"[FollowUp]: skip #{item['id']} ({_followup_log_label(item)}) recent global followup")
                 continue
 
@@ -675,7 +754,10 @@ def job_check_pending_followups():
                 item.get("topic", ""),
                 item.get("subject", ""),
             )
-            if has_recent_sent_followup_for_arc(arc_key, within_minutes=240):
+            if has_recent_sent_followup_for_arc(
+                arc_key,
+                within_minutes=_FOLLOWUP_ARC_COOLDOWN_MINUTES,
+            ):
                 print(f"[FollowUp]: skip #{item['id']} ({_followup_log_label(item)}) recent arc followup")
                 continue
 
@@ -699,27 +781,6 @@ def job_check_pending_followups():
             )
 
             if decision.get("decision") != "send":
-                if _should_force_light_outing_followup(item):
-                    msg = _build_safe_followup_fallback(item, "light_outing_checkin")
-                    message_id = _send_and_record_assistant(msg, agent="FollowUp_Agent")
-                    if not message_id:
-                        print(f"[FollowUp]: send-failed #{item['id']} forced light outing")
-                        continue
-                    mark_followup_sent(
-                        item["id"],
-                        "followup_sent:light_outing_checkin",
-                    )
-                    record_followup_outcome(
-                        item["id"],
-                        +0.1,
-                        "followup_sent:light_outing_checkin",
-                    )
-                    print(
-                        f"[FollowUp]: forced-light-send #{item['id']} "
-                        f"({_followup_log_label(item)})"
-                    )
-                    continue
-
                 skip_action = _apply_followup_skip_outcome(item, decision)
 
                 print(
@@ -743,7 +804,6 @@ def job_check_pending_followups():
                 item["id"],
                 f"followup_sent:{decision.get('stage')}",
             )
-            record_followup_outcome(item["id"], +0.2, f"followup_sent:{decision.get('stage')}")
             print(
                 f"[FollowUp]: sent #{item['id']} "
                 f"stage={decision.get('stage')} "
@@ -756,8 +816,14 @@ def job_check_pending_followups():
 import time as _time
 
 _OVERRIDE_FILE = os.path.join(os.path.dirname(__file__), "..", "scheduler_state.json")
-_override_state = {"pause_reminders": False, "mute_proactive": False, "sleep_until": None}
+_override_state = {
+    "pause_reminders": False,
+    "mute_proactive": False,
+    "sleep_until": None,
+    "routine_pause_until": None,
+}
 _override_lock  = threading.Lock()
+_vacation_pause_logged_until: float | None = None
 
 def _load_override_state():
     global _override_state
@@ -775,11 +841,17 @@ def _save_override_state():
     except Exception:
         pass
 
-def fast_queue_worker():
+def fast_queue_worker(stop_event: threading.Event | None = None) -> None:
     """Executes fast background tasks (e.g., UI updates, deterministic memory)."""
+    stop_event = stop_event or shutdown_event
     print("\033[90m[System]: Telegram Fast Queue Worker Started!\033[0m")
-    while not shutdown_event.is_set():
+    while not stop_event.is_set():
         try:
+            from services.routine_context_clarification_scheduler import drain_context_answer_dispatch
+            try:
+                drain_context_answer_dispatch()
+            except Exception as exc:
+                print(f"[RoutineContext]: dispatch wakeup deferred ({type(exc).__name__})")
             task_func, args = fast_queue.get(timeout=2)
             try:
                 print(f"\033[90m[FastQueue]: {task_func.__name__}\033[0m")
@@ -791,14 +863,16 @@ def fast_queue_worker():
         except queue.Empty:
             continue
 
-def slow_queue_worker():
+def slow_queue_worker(stop_event: threading.Event | None = None) -> None:
     """Performs slow background tasks (e.g., LLM memory sifting)."""
+    stop_event = stop_event or shutdown_event
     print("\033[90m[System]: Telegram Slow Queue Worker Started!\033[0m")
-    while not shutdown_event.is_set():
+    while not stop_event.is_set():
         try:
             task_func, args = slow_queue.get(timeout=2)
             try:
-                print(f"\033[90m[SlowQueue]: {task_func.__name__}\033[0m")
+                if not getattr(task_func, "quiet_queue_log", False):
+                    print(f"\033[90m[SlowQueue]: {task_func.__name__}\033[0m")
                 task_func(*args)
             except Exception as e:
                 print(f"\033[91m[Slow Queue Error in {task_func.__name__}]: {e}\033[0m")
@@ -820,6 +894,51 @@ def is_proactive_muted() -> bool:
         return bool(_override_state.get("mute_proactive"))
 
 
+def _active_routine_pause_until() -> float | None:
+    """Return the active routine-only pause deadline, if one remains."""
+    with _override_lock:
+        until = _override_state.get("routine_pause_until")
+        try:
+            deadline = float(until)
+        except (TypeError, ValueError):
+            return None
+        return deadline if _time.time() < deadline else None
+
+
+def is_routines_paused() -> bool:
+    """Return whether the user has temporarily paused routine notifications only."""
+    return _active_routine_pause_until() is not None
+
+
+def _log_vacation_routine_skip(pause_until: float) -> None:
+    """Log one scheduler skip per active vacation pause window."""
+    global _vacation_pause_logged_until
+    if _vacation_pause_logged_until == pause_until:
+        return
+    _vacation_pause_logged_until = pause_until
+    print("[job_check_routines]: Vacation routine pause active — skipped")
+
+
+def _reset_vacation_pause_skip_log() -> None:
+    """Allow the next vacation pause window to log its first scheduler skip."""
+    global _vacation_pause_logged_until
+    _vacation_pause_logged_until = None
+
+
+def _clear_pending_routine_confirmations_for_vacation() -> None:
+    """Reactivate and clear pending routine prompts for a vacation pause."""
+    from memory.routine_db import expire_routine_confirmation, remove_pending_confirmation
+
+    for routine_id in list(pending_routine_confirmations):
+        try:
+            expire_routine_confirmation(routine_id)
+            remove_pending_confirmation(routine_id)
+        except Exception as exc:
+            print(f"[VacationPause]: could not reactivate pending routine #{routine_id}: {exc}")
+            continue
+        pending_routine_confirmations.pop(routine_id, None)
+
+
 # ────────────────────────────────────────────────────────────────
 # DOCUMENT HANDLER (NEW)
 # ────────────────────────────────────────────────────────────────
@@ -828,28 +947,88 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
     """Downloads documents (PDF, Excel etc.) from Telegram to the correct folder."""
     try:
         from config import BASE_DIR
+        import uuid
+        from core.i18n import t
+
         file_id = doc_obj["file_id"]
         # If it doesn't have a name, we give it a random one
-        file_name = doc_obj.get("file_name", f"doc_{int(time.time())}.pdf")
+        raw_file_name = doc_obj.get("file_name", f"doc_{int(time.time())}.pdf")
+        file_name = os.path.basename(raw_file_name)
+        file_ext = os.path.splitext(file_name)[1].lower()
+
+        from services.document_input import (
+            SUPPORTED_DOCUMENT_EXTENSIONS,
+            extract_document_preview,
+        )
+
+        if file_ext not in SUPPORTED_DOCUMENT_EXTENSIONS:
+            send_telegram_msg(t("api.server.invalid_file_type", file_ext=file_ext))
+            return
 
         # Documents go to telegram_uploads (as in the Web UI)
         target_dir = os.path.join(BASE_DIR, "telegram_uploads")
         os.makedirs(target_dir, exist_ok=True)
-        local_path = os.path.join(target_dir, file_name)
+
+        safe_uuid = uuid.uuid4().hex
+        local_path = os.path.join(target_dir, f"tg_{safe_uuid}{file_ext}")
+        part_path = f"{local_path}.part"
 
         # Get file path from Telegram API
-        file_resp = requests.get(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile",
-            params={"file_id": file_id}, timeout=10
-        ).json()
-        file_path_remote = file_resp["result"]["file_path"]
+        try:
+            file_resp = requests.get(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getFile",
+                params={"file_id": file_id}, timeout=10
+            )
+            file_resp.raise_for_status()
+            file_data = file_resp.json()
+            if not file_data.get("ok") or "result" not in file_data or "file_path" not in file_data["result"]:
+                print(f"Telegram API getFile invalid response: {file_data}")
+                send_telegram_msg(t("api.server.document_download_failed"))
+                return
+            file_path_remote = file_data["result"]["file_path"]
+        except Exception as e:
+            print(f"Telegram getFile error: {e}")
+            send_telegram_msg(t("api.server.document_download_failed"))
+            return
 
         # Download
         file_url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path_remote}"
-        doc_data = requests.get(file_url, timeout=30).content
+        MAX_TG_DOC_BYTES = 20 * 1024 * 1024
 
-        with open(local_path, "wb") as f:
-            f.write(doc_data)
+        class OversizedFileError(Exception):
+            pass
+
+        with requests.get(file_url, stream=True, timeout=30) as r:
+            r.raise_for_status()
+
+            content_length = r.headers.get("Content-Length")
+            if content_length and content_length.isdigit():
+                if int(content_length) > MAX_TG_DOC_BYTES:
+                    send_telegram_msg(t("api.server.file_too_large"))
+                    return
+
+            downloaded = 0
+            try:
+                with open(part_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            downloaded += len(chunk)
+                            if downloaded > MAX_TG_DOC_BYTES:
+                                raise OversizedFileError()
+                            f.write(chunk)
+                os.replace(part_path, local_path)
+            except OversizedFileError:
+                if os.path.exists(part_path):
+                    os.unlink(part_path)
+                send_telegram_msg(t("api.server.file_too_large"))
+                return
+            except Exception as dl_err:
+                if os.path.exists(part_path):
+                    os.unlink(part_path)
+                print(f"Telegram document download error: {dl_err}")
+                send_telegram_msg(t("api.server.document_download_failed"))
+                return
+
         print(f"\033[94m[Document]: Saved in Telegram: {local_path}\033[0m")
 
         # We send a message to the user that we received it
@@ -858,62 +1037,67 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
         file_ext = os.path.splitext(file_name)[1].lower()
         doc_text = ""
         try:
-            if file_ext in (".txt", ".csv", ".json", ".md"):
-                with open(local_path, "r", encoding="utf-8", errors="ignore") as df:
-                    doc_text = df.read()[:8000]
-            elif file_ext == ".pdf":
-                import pypdf
-                reader = pypdf.PdfReader(local_path)
-                doc_text = "\n".join(p.extract_text() or "" for p in reader.pages)[:8000]
-            elif file_ext in (".docx",):
-                from docx import Document as DocxDoc
-                doc_text = "\n".join(p.text for p in DocxDoc(local_path).paragraphs)[:8000]
-            elif file_ext in (".xlsx", ".xls"):
-                import pandas as pd
-                df_data = pd.read_excel(local_path)
-                doc_text = df_data.to_string(index=False)[:8000]
-            else:
-                doc_text = f"Unsupported document type: {file_ext}"
+            doc_text = extract_document_preview(local_path, max_chars=8000)
         except Exception as read_err:
-            doc_text = f"[Could not read content: {read_err}]"
+            from services.document_input import DocumentPreviewError
 
-        from memory.conversation_history import build_asset_context_text
-        conversation_context = build_asset_context_text("telegram")
+            if isinstance(read_err, DocumentPreviewError):
+                send_telegram_msg(f"⚠️ {read_err}")
+                return
+            send_telegram_msg(t("api.server.document_download_failed"))
+            return
 
-        sum_prompt = core.i18n.load_prompt("telegram_bot_document_analysis.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, 
-            conversation_context=conversation_context or t("clients.telegram_bot.bot_msg_98937a"),
-            caption=caption or t("clients.telegram_bot.bot_msg_05a606"),
-            file_name=file_name,
-            doc_text=doc_text
+        from core.untrusted_content import (
+            USER_PROVIDED_ASSET_SOURCE,
+            external_content_history_metadata,
+            format_untrusted_tool_result,
         )
-        from langchain_core.messages import HumanMessage as _HM
-        sum_resp = safe_llm_invoke(llm, [_HM(content=sum_prompt)])
-        detailed_analysis = clean_message(sum_resp.content).strip() if sum_resp and sum_resp.content else t("clients.telegram_bot.bot_msg_33d466")
+        from services.document_analysis import summarize_document_text
+
+        detailed_analysis = summarize_document_text(
+            document_text=doc_text,
+            file_name=file_name,
+            caption=caption,
+            channel="telegram",
+            language=config.RESPONSE_LANGUAGE,
+            user_name=config.USER_NAME,
+            missing_context=t("clients.telegram_bot.bot_msg_98937a"),
+            missing_caption=t("clients.telegram_bot.bot_msg_05a606"),
+            empty_reply=t("clients.telegram_bot.bot_msg_33d466"),
+            llm_model=llm,
+            llm_invoke=safe_llm_invoke,
+        )
         memory_analysis = detailed_analysis[:500]
+
+        from services.pending_asset_confirmation import build_asset_archive_prompt
 
         chat_ai_msg = (
             f"📄 **Document:** `{file_name}`\n\n"
-            f"{detailed_analysis}\n\n"
-            "**Should I save it to memory permanently?**\n"
-            "Answer only with: yes or no."
+            f"{detailed_analysis}"
+            f"{build_asset_archive_prompt('document')}"
         )
         
         send_telegram_msg(chat_ai_msg)
 
-        user_log_msg = f"[USER_UPLOADED_FILE]: {file_name}\n[FILE PATH]: {local_path}\n[VISUAL ANALYSIS]: {memory_analysis}\n[USER_CAPTION]: {caption or ''}\n[CONTENT_SOURCE]: uploaded_document"
+        user_log_msg = (
+            f"[USER_UPLOADED_FILE]: {file_name}\n[FILE PATH]: {local_path}\n"
+            f"[VISUAL ANALYSIS]: {format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, memory_analysis)}\n"
+            f"[USER_CAPTION]: {caption or ''}\n[CONTENT_SOURCE]: uploaded_document"
+        )
+        asset_metadata = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
         
         # Record in history
         try:
             from memory.conversation_history import append_message
             now = datetime.now()
-            append_message("user", user_log_msg, "telegram", agent=None, timestamp=now)
-            append_message("assistant", chat_ai_msg, "telegram", agent="Chat_Agent", timestamp=now)
-            enqueue_fast_task(log_exchange, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
-            enqueue_fast_task(update_working_memory, user_log_msg, chat_ai_msg)
-            enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
-            enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
-            enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, chat_ai_msg, "Chat_Agent", "telegram")
-            enqueue_slow_task(extract_and_update_context_flags, caption or user_log_msg, chat_ai_msg)
+            append_message("user", user_log_msg, "telegram", agent=None, metadata=asset_metadata, timestamp=now)
+            append_message("assistant", chat_ai_msg, "telegram", agent="Chat_Agent", metadata=asset_metadata, timestamp=now)
+            print("[Security]: upload-derived reply - use trusted user text only for background state")
+            enqueue_fast_task(log_exchange, caption or "", "", "Chat_Agent", "telegram")
+            enqueue_fast_task(update_working_memory, caption or "", "", [USER_PROVIDED_ASSET_SOURCE])
+            enqueue_fast_task(_enqueue_slow_memory_sifter, caption or "", "", "Chat_Agent", "telegram", {USER_PROVIDED_ASSET_SOURCE}, True)
+            enqueue_slow_task(_enqueue_followup_pipeline, caption or "", "", "Chat_Agent", "telegram")
+            enqueue_slow_task(extract_and_update_context_flags, caption or "", "")
         except Exception as e:
             print(f"[Document/History]: {e}")
 
@@ -926,18 +1110,20 @@ def handle_document(doc_obj: dict, caption: str, chat_id: str):
                 filename=file_name,
                 analysis=memory_analysis,
                 caption=caption or "",
+                external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
             )
         except Exception as e:
             print(f"[PendingAssets]: Telegram document upload error: {e}")
 
     except Exception as e:
         print(f"\033[91m[Document Error]: {e}\033[0m")
-        send_telegram_msg(f"❌ Document download error: {str(e)}")
+        send_telegram_msg(t("api.server.document_download_failed"))
 # ────────────────────────────────────────────────────────────────
 # VOICE HANDLER (CONSOLIDATED)
 # ────────────────────────────────────────────────────────────────
-def handle_voice(voice_obj: dict, chat_id: str):
-    """Receives audio, converts it to text, and responds vocally."""
+def handle_voice(voice_obj: dict, chat_id: str, *, reply_event_id: str | None = None,
+                 inbound_message_id: str | None = None) -> None:
+    """Transcribe audio and preserve its authenticated reply scope for the turn."""
     from config import TELEGRAM_TOKEN
     from services.gemini import safe_gemini_call
     from tools.telegram import send_telegram_msg
@@ -962,21 +1148,50 @@ def handle_voice(voice_obj: dict, chat_id: str):
 
         print(f"\033[96m[Voice]: Analyzing audio...\033[0m")
 
-        import base64 as _b64
-        import vertexai
-        from vertexai.generative_models import GenerativeModel, Part
-        from core.brain import FAST_MODEL
-        vertexai.init(project=config.PROJECT_ID, location=os.getenv("LOCATION", "global"))
-        stt_model = GenerativeModel(FAST_MODEL)
-        prompt = t("clients.telegram_bot.bot_msg_32a4bf")
-        audio_part = Part.from_data(data=audio_data, mime_type="audio/ogg")
-        stt_response = stt_model.generate_content([prompt, audio_part])
-        ai_reply = stt_response.text.strip() if stt_response and stt_response.text else t("clients.telegram_bot.bot_msg_dacaa2")
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            VoiceProviderSetupRequired,
+        )
+        from services.voice_input import transcribe_voice_audio
+
+        try:
+            transcribed_text = transcribe_voice_audio(
+                audio_data,
+                mime_type="audio/ogg",
+            )
+        except VoiceProviderSetupRequired as exc:
+            print(f"\033[93m[Voice Setup]: {exc}\033[0m")
+            send_telegram_msg(f"⚠️ {exc}")
+            return
+        except CapabilityNotSupportedError as exc:
+            print(f"\033[93m[Voice Capability]: {exc}\033[0m")
+            send_telegram_msg(
+                "⚠️ Voice transcription is not supported by the active AI provider. "
+                "Please send a text message or configure a provider with voice support."
+            )
+            return
+        except ProviderAuthError as exc:
+            print(f"\033[91m[Voice Auth Error]: {exc}\033[0m")
+            send_telegram_msg("⚠️ Voice transcription authentication failed. Please verify your provider credentials.")
+            return
+        except RateLimitError as exc:
+            print(f"\033[93m[Voice Rate Limit]: {exc}\033[0m")
+            send_telegram_msg("⚠️ Voice transcription quota or rate limit exceeded. Please retry shortly.")
+            return
+
+        if not transcribed_text or transcribed_text.strip() in ("[SILENCE]", "[ΣΙΩΠΗ]"):
+            ai_reply = t("clients.telegram_bot.bot_msg_dacaa2")
+        else:
+            ai_reply = transcribed_text.strip()
 
         print(f"\033[92m[Voice AI]: {ai_reply}\033[0m")
-        # We send the flag [VOICE] + [VOICE_INPUT] so that handle_message knows to reply with audio
-        # and the Lobster that the message came from voice (to reply more briefly and colloquially)
-        handle_message(f"[VOICE]: [VOICE_INPUT] {ai_reply}", chat_id)
+        if _handle_transcribed_voice(ai_reply):
+            return
+        handle_message(ai_reply, chat_id, voice_input=True,
+                       **({"reply_event_id": reply_event_id} if reply_event_id is not None else {}),
+                       **({"inbound_message_id": inbound_message_id} if inbound_message_id is not None else {}))
 
     except Exception as e:
         print(f"\033[91m[Voice Error]: {e}\033[0m")
@@ -985,6 +1200,19 @@ def handle_voice(voice_obj: dict, chat_id: str):
     finally:
         if local_path and os.path.exists(local_path):
             os.remove(local_path)
+
+
+def _handle_transcribed_voice(transcript: str) -> bool:
+    """Translate one voice transcript when a Georgian one-shot mode is active."""
+    if _consume_pending_georgian():
+        _send_georgian_translation(transcript)
+        return True
+    if _consume_pending_partner():
+        _send_georgian_translation(transcript, force_src="ka")
+        return True
+    return False
+
+
 def send_telegram_document(file_path, chat_id=None):
     if not chat_id: chat_id = TELEGRAM_CHAT_ID
     try:
@@ -997,17 +1225,11 @@ def send_telegram_document(file_path, chat_id=None):
 def handle_end_session(chat_id: str):
     """Closes the session, saves the summary and clears the working memory."""
     try:
-        from memory.session_memory import _run_session_summary
-        from config import WORKING_MEMORY_FILE
+        from services.session_end import finalize_session
         
         send_telegram_msg(t("clients.telegram_bot.bot_msg_139ed4"))
         
-        # 1. We run the main summary (as in server.py)
-        _run_session_summary(channel="telegram")
-        
-        # 2. Clear the Post-it (Working Memory)
-        with open(WORKING_MEMORY_FILE, "w", encoding="utf-8") as f:
-            f.write(t("clients.telegram_bot.bot_msg_4cd007"))
+        finalize_session(channel="telegram")
             
         print("\033[92m[Telegram]: Session closed and archived successfully.\033[0m")
         send_telegram_msg(t("clients.telegram_bot.bot_msg_bfe08b"))
@@ -1015,6 +1237,36 @@ def handle_end_session(chat_id: str):
     except Exception as e:
         print(f"\033[91m[End Session Error]: {e}\033[0m")
         send_telegram_msg(f"❌ Something went wrong on close: {str(e)}")       
+
+
+def archive_telegram_runtime(
+    runtime: object,
+    *,
+    send_message: Callable[[str], object],
+    drain_timeout: float = 30,
+) -> bool:
+    """Notify the owner while the shared runtime drains and archives safely."""
+    from services.external_runtime_shutdown import drain_and_archive_external_runtime
+
+    try:
+        send_message(t("clients.telegram_bot.bot_msg_139ed4"))
+    except Exception as exc:
+        print(f"[Telegram]: Archive-start notification warning: {exc}")
+    success = drain_and_archive_external_runtime(
+        runtime,
+        channel="telegram",
+        drain_timeout=drain_timeout,
+    )
+    try:
+        send_message(t(
+            "clients.telegram_bot.bot_msg_bfe08b"
+            if success else "clients.matrix_bot.session_archive_failed"
+        ))
+    except Exception as exc:
+        print(f"[Telegram]: Archive-result notification warning: {exc}")
+    return success
+
+
 # ────────────────────────────────────────────────────────────────
 # PHOTO HANDLER
 # ────────────────────────────────────────────────────────────────
@@ -1023,7 +1275,8 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
     """
     [MASTRO-PARITY]: Analyzes a photo via Vision LLM.
     - With caption: processes immediately using the caption as the prompt.
-    - Without caption: saves the analysis as pending and waits for the next message (30s).
+    - Without caption: comments immediately using a localized natural prompt.
+    - Keeps the latest photo briefly for /nutrition or /receipt.
     """
     global pending_photo
     try:
@@ -1048,16 +1301,44 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         print(f"\033[92m[Photo]: Downloaded: {filename}\033[0m")
 
         # 3. Vision LLM — objective pixel analysis
-        img_b64 = base64.b64encode(img_data).decode("utf-8")
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            AIProviderError,
+        )
+        from services.image_input import analyze_image_bytes
+
         vision_prompt = t("clients.telegram_bot.bot_msg_dec305")
-        vision_msg = HumanMessage(content=[
-            {"type": "text",      "text": vision_prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-        ])
         print(f"\033[94m[Vision]: Visual analysis...\033[0m")
-        analysis_raw  = safe_llm_invoke(llm, [vision_msg])
-        memory_analysis = clean_message(analysis_raw.content)
+        try:
+            memory_analysis = analyze_image_bytes(
+                img_data,
+                mime_type="image/jpeg",
+                prompt=vision_prompt,
+            )
+            if not memory_analysis:
+                memory_analysis = "No visual analysis available."
+        except CapabilityNotSupportedError as exc:
+            print(f"\033[93m[Vision Capability]: {exc}\033[0m")
+            memory_analysis = f"Vision analysis is not supported by active provider '{exc.provider}'."
+        except ProviderAuthError as exc:
+            print(f"\033[91m[Vision Auth Error]: {exc}\033[0m")
+            send_telegram_msg("⚠️ Photo analysis authentication failed. Please verify provider credentials.")
+            return
+        except RateLimitError as exc:
+            print(f"\033[93m[Vision Rate Limit]: {exc}\033[0m")
+            send_telegram_msg("⚠️ Photo analysis quota or rate limit exceeded. Please retry shortly.")
+            return
+        except AIProviderError as exc:
+            print(f"\033[91m[Vision Error]: {exc}\033[0m")
+            memory_analysis = f"Vision analysis error ({exc.provider}): {exc}"
+        except Exception as exc:
+            print(f"\033[91m[Vision Error]: {exc}\033[0m")
+            memory_analysis = f"Vision analysis error: {exc}"
+
         print(f"\033[94m[Vision]: {memory_analysis[:120]}...\033[0m")
+
 
         # 4a. WITH caption → check for /nutrition, /receipt or normal question
         if caption:
@@ -1071,16 +1352,24 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
             else:
                 _process_photo_with_question(filename, local_path, memory_analysis, caption, chat_id)
 
-        # 4b. WITHOUT caption → save as pending, notify
+        # 4b. WITHOUT caption → comment naturally now and keep the photo in history
         else:
+            from services.pending_asset_confirmation import build_photo_share_request
+
             with pending_photo_lock:
                 pending_photo = {
-                    "analysis":  memory_analysis,
-                    "filename":  filename,
-                    "path":      local_path,
-                    "timestamp": time.time()
+                    "analysis": memory_analysis,
+                    "filename": filename,
+                    "path": local_path,
+                    "timestamp": time.time(),
                 }
-            send_telegram_msg(t("clients.telegram_bot.bot_msg_477e48"))
+            _process_photo_with_question(
+                filename,
+                local_path,
+                memory_analysis,
+                build_photo_share_request(),
+                chat_id,
+            )
 
     except Exception as e:
         import traceback
@@ -1088,7 +1377,29 @@ def handle_photo(photo_list: list, caption: str, chat_id: str):
         send_telegram_msg(f"Master, photo stalled. Error: {e}")
 
 
-def _process_photo_with_question(filename: str, local_path: str, analysis: str, question: str, chat_id: str):
+def _process_photo_with_question(
+    filename: str, local_path: str, analysis: str, question: str, chat_id: str,
+) -> None:
+    """Keep photo execution evidence open through preparation and transport."""
+    from memory.execution_trace import ExecutionTrace
+
+    trace = ExecutionTrace(channel="telegram", user_message=question)
+    response = None
+    try:
+        response = _run_photo_question_turn(filename, local_path, analysis, question, chat_id, trace)
+    except Exception as exc:
+        trace.error = type(exc).__name__
+        raise
+    finally:
+        trace.finalize(response=response,
+            error=trace.error or ("NoResponse" if not response else None))
+        trace.save()
+
+
+def _run_photo_question_turn(
+    filename: str, local_path: str, analysis: str, question: str, chat_id: str,
+    trace: "ExecutionTrace",
+) -> str | None:
     """Passes a photo + question to the graph and sends ONE response (correct streaming pattern)."""
     import re
     from langchain_core.messages import HumanMessage, AIMessage
@@ -1098,22 +1409,31 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
     context_msgs = _load_shared_context_messages("telegram")
 
     now_ts = datetime.now().strftime("%H:%M")
+    from core.untrusted_content import (
+        USER_PROVIDED_ASSET_SOURCE,
+        external_content_history_metadata,
+        format_untrusted_tool_result,
+    )
     user_log_msg = (
         f"[{now_ts}] "
         f"[USER_UPLOADED_PHOTO]: {filename}\n"
         f"[PHOTO PATH]: {local_path}\n"
-        f"[VISUAL ANALYSIS]: {analysis}\n"
+        f"[ANALYSIS]: {format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, analysis)}\n"
         f"Question: {question}"
     )
     print(f"\033[94m[Photo->Graph]: {user_log_msg[:200]}\033[0m")
 
     # Streaming — collect, send once (same pattern as handle_message)
     final_response = ""
+    events: list[dict] = []
+    photo_message = HumanMessage(
+        content=user_log_msg,
+        additional_kwargs=external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE]),
+    )
     try:
-        from memory.execution_trace import ExecutionTrace
-        _ptrace = ExecutionTrace(channel="telegram", user_message=user_log_msg)
-        for event in graph.stream({"messages": context_msgs + [HumanMessage(content=user_log_msg)], "channel": "telegram"}, {"recursion_limit": 50}):
-            _ptrace.process_event(event)
+        for event in graph.stream({"messages": context_msgs + [photo_message], "channel": "telegram"}, {"recursion_limit": 50}):
+            events.append(event)
+            trace.process_event(event)
             for node, data in event.items():
                 if data is None:
                     continue
@@ -1123,9 +1443,8 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
                         candidate = clean_message(msgs[-1].content).strip()
                         if candidate:
                             final_response = candidate
-        _ptrace.finalize(response=final_response or None)
-        _ptrace.save()
     except Exception as e:
+        trace.error = type(e).__name__
         send_telegram_msg(f"❌ Photo processing error: {e}")
         return
 
@@ -1133,26 +1452,64 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
         send_telegram_msg(t("clients.telegram_bot.bot_msg_226c6b"))
         return
 
-    from memory.pending_assets import looks_like_asset_confirmation_prompt
-    if not looks_like_asset_confirmation_prompt(final_response):
-        final_response += t("clients.telegram_bot.bot_msg_2d5d94")
+    from services.pending_asset_confirmation import ensure_asset_archive_prompt
+
+    final_response = ensure_asset_archive_prompt(final_response, "photo")
 
     # ── Photo persistence / Pending asset ──
+    from core.untrusted_content import (
+        derived_external_content_history_metadata,
+        external_content_source_names,
+        external_tool_names_from_events,
+        user_asset_history_metadata,
+    )
+    current_external_tool_names = external_tool_names_from_events(events)
+    assistant_metadata = derived_external_content_history_metadata(
+        context_msgs + [photo_message],
+        current_external_tool_names,
+    )
+    external_content_sources = external_content_source_names(assistant_metadata)
     try:
         from memory.conversation_history import append_message
         now = datetime.now()
-        append_message(role="user", content=user_log_msg, channel="telegram", agent=None, timestamp=now)
-        append_message(role="assistant", content=final_response, channel="telegram", agent="Chat_Agent", timestamp=now)
+        append_message(
+            role="user",
+            content=question,
+            channel="telegram",
+            agent=None,
+            metadata=user_asset_history_metadata(
+                filename=filename,
+                file_path=local_path,
+                analysis=analysis,
+            ),
+            timestamp=now,
+        )
+        append_message(
+            role="assistant",
+            content=final_response,
+            channel="telegram",
+            agent="Chat_Agent",
+            metadata=assistant_metadata,
+            timestamp=now,
+        )
     except Exception as e:
         print(f"[Photo/History]: {e}")
 
     handling_agent = "Chat_Agent"
-    enqueue_fast_task(log_exchange, user_log_msg, final_response, handling_agent, "telegram")
-    enqueue_fast_task(update_working_memory, user_log_msg, final_response)
-    enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, final_response, handling_agent, "telegram")
-    enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, final_response, handling_agent)
-    enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, final_response, handling_agent, "telegram")
-    enqueue_slow_task(extract_and_update_context_flags, user_log_msg, final_response)
+    if external_content_sources:
+        print("[Security]: external-derived photo reply - use trusted user text only for background state")
+        enqueue_fast_task(log_exchange, question or "", "", handling_agent, "telegram")
+        enqueue_fast_task(update_working_memory, question or "", "", external_content_sources)
+        enqueue_fast_task(_enqueue_slow_memory_sifter, question or "", "", handling_agent, "telegram", set(external_content_sources), True)
+        enqueue_slow_task(_enqueue_followup_pipeline, question or "", "", handling_agent, "telegram")
+        enqueue_slow_task(extract_and_update_context_flags, question or "", "")
+    else:
+        enqueue_fast_task(log_exchange, user_log_msg, final_response, handling_agent, "telegram")
+        enqueue_fast_task(update_working_memory, user_log_msg, final_response)
+        enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, final_response, handling_agent, "telegram")
+        enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, final_response, handling_agent)
+        enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, final_response, handling_agent, "telegram")
+        enqueue_slow_task(extract_and_update_context_flags, user_log_msg, final_response)
 
     try:
         from memory.pending_assets import create_pending_asset_archive, looks_like_asset_confirmation_prompt
@@ -1164,29 +1521,36 @@ def _process_photo_with_question(filename: str, local_path: str, analysis: str, 
                 filename=filename,
                 analysis=analysis,
                 caption=question or "",
+                external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
             )
     except Exception as e:
         print(f"[PendingAssets]: {e}")
 
-    # Interceptor for CREATED_FILE
-    file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_response)
-    if file_match:
-        file_path = file_match.group(1).strip()
-        final_response = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", "", final_response).strip()
-        if final_response:
-            send_telegram_msg(final_response)
-        try:
-            from tools.telegram import send_telegram_document
-            send_telegram_document(file_path)
-        except Exception:
-            pass
-    else:
+    from services.created_file import extract_created_files
+
+    generated = extract_created_files(final_response)
+    final_response = generated.text
+    if final_response:
         send_telegram_msg(final_response)
+    for output in generated.outputs:
+        try:
+            if output.kind == "photo":
+                _send_photo_to_telegram(output.path, chat_id)
+            else:
+                from tools.telegram import send_telegram_document
+
+                send_telegram_document(output.path)
+        except Exception as exc:
+            trace.error = type(exc).__name__
+    return final_response or None
+
+
 def _run_nutrition(image_path: str, chat_id: str):
     """Runs the nutrition analyzer and sends the result."""
     try:
-        from astakos_skills.nutrition_analyzer import analyze_nutrition
-        result = analyze_nutrition(image_path)
+        from services.photo_commands import analyze_nutrition_photo
+
+        result = analyze_nutrition_photo(image_path)
         _send_and_record_assistant(result, chat_id)
     except Exception as e:
         _send_and_record_assistant(f"❌ Nutrition analysis error: {e}", chat_id)
@@ -1195,8 +1559,9 @@ def _run_nutrition(image_path: str, chat_id: str):
 def _run_receipt(image_path: str, chat_id: str):
     """Runs the receipt scanner and sends the result."""
     try:
-        from astakos_skills.scan_receipt import scan_receipt
-        result = scan_receipt.invoke({"image_path": image_path})
+        from services.photo_commands import scan_receipt_photo
+
+        result = scan_receipt_photo(image_path)
         _send_and_record_assistant(result, chat_id)
     except Exception as e:
         _send_and_record_assistant(f"❌ Receipt scan error: {e}", chat_id)
@@ -1205,9 +1570,9 @@ def _run_receipt(image_path: str, chat_id: str):
 def _run_story_maker(theme: str, characters: str, chat_id: str):
     """Generates a fairy tale + images and sends them to Telegram."""
     try:
-        from astakos_skills.story_maker import make_story
+        from services.story_generation import generate_story
         from tools.telegram import send_telegram_photo
-        result = make_story(theme, characters)
+        result = generate_story(theme, characters)
 
         if result.get("error") or not result.get("story"):
             send_telegram_msg(f"❌ {result.get('error', t("clients.telegram_bot.bot_msg_cf83ee"))}")
@@ -1276,7 +1641,48 @@ def send_voice_reply(text, chat_id):
     except Exception as e:
         print(f"❌ TTS Error: {e}")
         send_telegram_msg(f"Master, I lost my voice... (Error: {e})")
-def _append_to_analytics_log(role: str, content: str, agent: str | None = None):
+
+def _enqueue_capability_gap_telegram(user_text: str, ai_text: str, agent: str, channel: str, correlation_rowid: int, chat_id: str | None = None):
+    from core.capability_draft import is_bug_diagnosis_text
+    if is_bug_diagnosis_text(ai_text):
+        return
+    from memory.working_memory import update_capabilities_from_exchange
+    observation = update_capabilities_from_exchange(user_text, ai_text, agent)
+    if not observation:
+        return
+
+    from core.capability_draft import is_bug_proposal_text, is_capability_proposal_text
+    if is_capability_proposal_text(ai_text) or is_bug_proposal_text(ai_text):
+        return
+
+    from memory.conversation_history import load_messages_after_rowid
+    newer = load_messages_after_rowid(after_rowid=correlation_rowid, channel=channel)
+    if any(m.get("role") == "user" for m in newer):
+        return
+
+    from core.capability_draft import render_capability_followup
+    proposal = render_capability_followup(observation.kind, observation.description)
+    if not proposal:
+        return
+
+    try:
+        _send_and_record_assistant(proposal, chat_id, agent="Dev_Agent")
+    except Exception as e:
+        print(f"[CapabilityGapTelegram]: error {e}")
+
+def _schedule_capability_gap_if_valid(user_text: str, ai_text: str, agent: str, user_rowid: int | None, chat_id: str | None = None):
+    if user_rowid is not None:
+        enqueue_slow_task(_enqueue_capability_gap_telegram, user_text, ai_text, agent, "telegram", user_rowid, chat_id)
+
+
+def _append_to_analytics_log(
+    role: str,
+    content: str,
+    agent: str | None = None,
+    *,
+    metadata: dict | None = None,
+    message_id: str | None = None,
+) -> int | None:
     """Logging of a message in the shared SQLite conversation history (telegram channel)."""
     try:
         now = datetime.now()
@@ -1284,19 +1690,49 @@ def _append_to_analytics_log(role: str, content: str, agent: str | None = None):
         try:
             # notify_telegram_message: saves to shared SQLite + WebSocket broadcast to Web UI
             from api.server import notify_telegram_message
-            notify_telegram_message(role=shared_role, content=content, agent=agent)
+            saved = notify_telegram_message(
+                role=shared_role,
+                content=content,
+                agent=agent,
+                metadata=metadata,
+                return_saved=True,
+                **({"message_id": message_id} if message_id is not None else {}),
+            )
+            rowid = saved.get("rowid") if isinstance(saved, dict) else None
+            if shared_role == "user":
+                from services.behavioral_event_scheduler import schedule_persisted_user_intake
+
+                schedule_persisted_user_intake(
+                    rowid=rowid,
+                    metadata=metadata,
+                    enqueue_slow_task=enqueue_slow_task,
+                )
+            return rowid
         except Exception:
             # Fallback: direct append without broadcast (if the server is not running)
             from memory.conversation_history import append_message
-            append_message(
+            saved = append_message(
                 role=shared_role,
                 content=content,
                 channel="telegram",
                 timestamp=now,
                 agent=agent,
+                metadata=metadata,
+                message_id=message_id,
             )
+            rowid = saved.get("rowid") if isinstance(saved, dict) else None
+            if shared_role == "user":
+                from services.behavioral_event_scheduler import schedule_persisted_user_intake
+
+                schedule_persisted_user_intake(
+                    rowid=rowid,
+                    metadata=metadata,
+                    enqueue_slow_task=enqueue_slow_task,
+                )
+            return rowid
     except Exception as e:
         print(f"[ConversationHistory/telegram]: Error shared write: {e}")
+        return None
 
 
 def _send_and_record_assistant(
@@ -1304,17 +1740,49 @@ def _send_and_record_assistant(
     chat_id: str | None = None,
     agent: str | None = "Chat_Agent",
 ):
-    """Sends an assistant reply to Telegram and writes it to the shared history."""
-    if len(content) <= 3500:
-        message_id = send_telegram_msg(content)
-    else:
-        from tools.telegram import send_telegram_msg_full
-        message_id = send_telegram_msg_full(content)
-    if message_id:
-        _append_to_analytics_log("ai", content, agent=agent)
-    else:
-        print(f"[TelegramSend]: outbound send failed for agent={agent}")
-    return message_id
+    """Send assistant text through the selected external channel and record it."""
+    from memory.conversation_history import append_message
+    from services.external_assistant_delivery import deliver_external_assistant_text, AssistantHistoryError
+
+    def _record_delivery(channel, text, handling_agent, external_id):
+        metadata = {
+            "transport": channel,
+            "external_message_id": external_id,
+        }
+        if channel == "telegram":
+            _append_to_analytics_log(
+                "ai",
+                text,
+                agent=handling_agent,
+                metadata=metadata,
+            )
+            return
+        append_message(
+            role="assistant",
+            content=text,
+            channel=channel,
+            agent=handling_agent,
+            message_id=f"assistant-delivery-{channel}-{external_id}",
+            metadata=metadata,
+        )
+
+    try:
+        receipt = deliver_external_assistant_text(
+            content,
+            agent=agent,
+            record_message=_record_delivery,
+        )
+    except AssistantHistoryError as exc:
+        print(f"[ExternalSend]: confirmed delivery for agent={agent}; history repair queued")
+        try:
+            enqueue_fast_task(exc.repair)
+        except Exception:
+            print("[ExternalSend]: history repair could not be queued")
+        return exc.receipt.external_id
+    except Exception as exc:
+        print(f"[ExternalSend]: outbound send failed for agent={agent}: {exc}")
+        return None
+    return receipt.external_id
 
 
 def _arm_pending_georgian():
@@ -1380,11 +1848,11 @@ def _send_georgian_translation(text: str, *, force_src: str = "auto"):
 
     try:
         audio_bytes = tts_audio(result["translated"], lang=result["tgt"])
-        tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendAudio"
+        tg_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVoice"
         requests.post(
             tg_url,
             data={"chat_id": TELEGRAM_CHAT_ID},
-            files={"audio": ("georgian.mp3", audio_bytes, "audio/mpeg")},
+            files={"voice": ("georgian.mp3", audio_bytes, "audio/mpeg")},
             timeout=20,
         )
         print(f"\033[92m[Georgian]: {direction} '{text}' → '{result['translated']}' + audio\033[0m")
@@ -1439,7 +1907,7 @@ def _build_web_approval_result_message(tool_name: str, execution_result) -> str:
     return _tool_results_fallback_response(tool_name, tool_results)
 
 
-def _load_shared_context_messages(channel: str) -> list:
+def _load_shared_context_messages(channel: str, *, exclude_rowid: int | None = None) -> list:
     """Loads mixed shared context. If it fails, the caller falls back to legacy history."""
     try:
         from memory.conversation_history import load_recent_context
@@ -1449,15 +1917,31 @@ def _load_shared_context_messages(channel: str) -> list:
         return []
 
     context_msgs = []
+    from core.untrusted_content import (
+        format_model_history_content,
+        history_message_additional_kwargs,
+    )
     for entry in entries:
+        if exclude_rowid is not None and entry.get("rowid") == exclude_rowid:
+            continue
         content = entry.get("content", "")
         if not content:
             continue
         prefix = f"[{entry.get('date', '')} {entry.get('time', '')} / {entry.get('channel', '')}] "
+        content = format_model_history_content(
+            f"{prefix}{content}",
+            entry.get("metadata"),
+        )
         if entry.get("role") in ("user", "human", "Human"):
-            context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
+            context_msgs.append(HumanMessage(
+                content=content,
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
         else:
-            context_msgs.append(AIMessage(content=f"{prefix}{content}"))
+            context_msgs.append(AIMessage(
+                content=content,
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
     return context_msgs
 
 
@@ -1521,213 +2005,527 @@ def _send_pending_reflections_summary() -> None:
 
 from core.utils import is_simple_chat_fast_path_candidate
 
-def _build_fast_chat_context(clean_user_text: str):
+def _build_fast_chat_context(
+    clean_user_text: str, *, user_rowid: int | None = None,
+) -> tuple[list, HumanMessage]:
+    """Build mixed context without repeating the current persisted input row."""
     now_ts = datetime.now().strftime("%H:%M")
-    context_msgs = _load_shared_context_messages("telegram")
-    current_msg = HumanMessage(content=f"[{now_ts}] {clean_user_text}")
+    context_msgs = _load_shared_context_messages("telegram", exclude_rowid=user_rowid)
+    current_msg = HumanMessage(content=f"[{now_ts}] {clean_user_text}",
+                               additional_kwargs={"astakos_owner_rowid": user_rowid})
     return context_msgs, current_msg
 
-def _run_fast_chat_path(context_msgs, current_msg):
-    return list(
-        graph.stream(
-            {"messages": context_msgs[-6:] + [current_msg], "channel": "telegram"},
-            {"recursion_limit": 12},
+def _run_fast_chat_path(
+    context_msgs: list,
+    current_msg: HumanMessage,
+    *,
+    routine_draft_offer_authorized: bool = False,
+    trace: "ExecutionTrace | None" = None,
+) -> list[dict]:
+    """Run the compact Telegram graph path with room for bounded read-tool chains."""
+    graph_state = {"messages": context_msgs[-6:] + [current_msg], "channel": "telegram"}
+    if routine_draft_offer_authorized:
+        graph_state["routine_draft_offer_authorized"] = True
+    return _collect_telegram_graph_events(graph_state, 24, trace)
+
+
+def _collect_telegram_graph_events(
+    graph_state: dict, limit: int, trace: "ExecutionTrace | None" = None,
+) -> list[dict]:
+    """Record events as they arrive, retaining evidence if the stream raises."""
+    events = []
+    for event in graph.stream(graph_state, {"recursion_limit": limit}):
+        if trace is not None:
+            trace.process_event(event)
+        events.append(event)
+    return events
+
+
+def _prepare_telegram_message(
+    user_text: str,
+    *,
+    voice_input: bool = False,
+    voice_mode: bool = False,
+) -> tuple[str, bool, SystemMessage | None]:
+    """Separate Telegram transport metadata from the user's message text."""
+    legacy_voice_input = any(
+        marker in user_text
+        for marker in (
+            "[VOICE_INPUT]",
+            "[VOICE]",
         )
+    )
+    legacy_voice_mode = any(
+        marker in user_text
+        for marker in (
+            t("clients.telegram_bot.bot_msg_ad207c"),
+            "[VOICE_MESSAGE]",
+        )
+    )
+    resolved_voice_input = voice_input or legacy_voice_input
+    resolved_voice_mode = voice_mode or legacy_voice_mode or voice_mode_enabled
+
+    clean_user_text = user_text.replace("/voice", "")
+    for marker in (
+        t("clients.telegram_bot.bot_msg_d42a74"),
+        t("clients.telegram_bot.bot_msg_ad207c"),
+        "[VOICE_MESSAGE]:",
+        "[VOICE_MESSAGE]",
+        "[VOICE_INPUT]",
+        "[VOICE]:",
+        "[VOICE]",
+    ):
+        clean_user_text = clean_user_text.replace(marker, "")
+    clean_user_text = clean_user_text.strip()
+    if not clean_user_text:
+        clean_user_text = t("clients.telegram_bot.bot_msg_630052")
+
+    return (
+        clean_user_text,
+        resolved_voice_mode,
+        build_voice_delivery_context(resolved_voice_input or resolved_voice_mode),
     )
 
 
-def handle_message(user_text: str, chat_id: str):
+@trace_turn("telegram")
+def handle_message(
+    user_text: str,
+    chat_id: str,
+    *,
+    voice_input: bool = False,
+    voice_mode: bool = False,
+    reply_event_id: str | None = None,
+    inbound_message_id: str | None = None,
+):
     """Sends the message to Lobster and replies (Text or Audio)."""
     global last_interaction_time
     from tools.telegram import send_telegram_voice, send_telegram_msg
     import re
 
-    # 1. Check if voice was requested (from audio, /voice command, or global toggle)
-    is_voice_mode = t("clients.telegram_bot.bot_msg_ad207c") in user_text or "[VOICE_MESSAGE]" in user_text or voice_mode_enabled
-    is_voice_input = "[VOICE_INPUT]" in user_text  # the message came from voice
+    clean_user_text, is_voice_mode, voice_delivery_context = _prepare_telegram_message(
+        user_text,
+        voice_input=voice_input,
+        voice_mode=voice_mode,
+    )
+    from services.routine_context_clarification import (
+        context_answer_graph_context, try_context_question_reply,
+    )
 
-    # 2. We clean the tags before they go to the brain
-    clean_user_text = user_text.replace("/voice", "").replace(t("clients.telegram_bot.bot_msg_d42a74"), "").replace("[VOICE_MESSAGE]:", "").strip()
-    # /plan is maintained so that the graph router can recognize it
-    # If it is a voice input, we keep the hint for Lobster but remove the tag
-    if is_voice_input:
-        clean_user_text = clean_user_text.replace("[VOICE_INPUT]", "").strip()
-        clean_user_text = f"[Voice message — reply short and casually]: {clean_user_text}"
-    if not clean_user_text: 
-        clean_user_text = t("clients.telegram_bot.bot_msg_630052")
-    # ── ROUTINE FEEDBACK LOOP ──
-    if pending_routine_confirmations:
-        text_check = _normalize_gr(clean_user_text)
-        text_words = text_check.replace(",", "").replace(".", "").replace("!", "").split()
+    context_answer = try_context_question_reply(
+        clean_user_text, "telegram",
+        trusted_owner=bool(config.TELEGRAM_CHAT_ID)
+        and str(chat_id) == str(config.TELEGRAM_CHAT_ID),
+        **({"reply_to_id": reply_event_id} if reply_event_id is not None else {}),
+    )
+    if context_answer.consumed and not context_answer.continue_conversation:
+        reply = context_answer.reply
+        _append_to_analytics_log("user", clean_user_text,
+            **({"message_id": inbound_message_id} if inbound_message_id is not None else {}))
+        _send_and_record_assistant(reply, chat_id, agent="Routine_Context")
+        enqueue_fast_task(log_exchange, clean_user_text, reply, "Routine_Context", "telegram")
+        last_interaction_time = time.time()
+        return
+    # Reuse this exact input identity for routine inference and background work.
+    user_rowid = _append_to_analytics_log("user", clean_user_text,
+        **({"message_id": inbound_message_id} if inbound_message_id is not None else {}))
+    if type(user_rowid) is not int or user_rowid <= 0:
+        print("[ConversationHistory/telegram]: turn stopped; user identity not persisted")
+        send_telegram_msg(t("api.server.internal_error"))
+        return
+    if context_answer.context_flags_processed and context_answer.continue_conversation:
+        from services.context_extractor import reconcile_context_message
+        enqueue_slow_task(reconcile_context_message, clean_user_text, user_rowid,
+                          config.CONVERSATION_DB_FILE)
+    # ── ROUTINE COMPLETION DECISION ────────────────────────────────
+    # Pending routines get first priority; a pass-through still checks today's pool.
+    from memory.event_log import log_event
+    from services.routine_completion_helper import RoutineSelection, decide_completion
+    from services.routine_completion_context import accept_pending_messenger_draft_offer
+    from services.routine_completion_selector import select_routine as _completion_selector
+    routine_completion_context: SystemMessage | None = None
+    routine_draft_offer_context: SystemMessage | None = None
+    routine_draft_offer_authorized = False
+    routine_draft_offer_to_consume: tuple[int, object] | None = None
+    routine_action_consumed = False
 
-        pending_items = [
-            (rid, pending_routine_confirmations.get(rid, {}))
-            for rid in list(pending_routine_confirmations.keys())
-        ]
-        has_pending_partner_messenger = any(
-            (
-                t("clients.telegram_bot.bot_msg_2e67ed") in _normalize_gr(str((pdata or {}).get("event", "")))
-                or any(term in _normalize_gr(str((pdata or {}).get("event", ""))) for term in _partner_match_terms())
-                or "messenger" in _normalize_gr(str((pdata or {}).get("event", "")))
-                or t("clients.telegram_bot.bot_msg_500d81") in _normalize_gr(str((pdata or {}).get("event", "")))
-            )
-            for _, pdata in pending_items
-        )
-
-        if has_pending_partner_messenger and _looks_like_contextual_not_needed_reply(clean_user_text):
-            from memory.routine_db import remove_pending_confirmation
-            from memory.event_log import log_event
-
-            for rid, pdata in pending_items:
-                ev = (pdata or {}).get("event", "?")
-                event_l = _normalize_gr(str(ev))
-                is_partner_messenger = (
-                    t("clients.telegram_bot.bot_msg_2e67ed") in event_l
-                    or any(term in event_l for term in _partner_match_terms())
-                    or "messenger" in event_l
-                    or t("clients.telegram_bot.bot_msg_500d81") in event_l
-                )
-                if not is_partner_messenger:
-                    continue
-
-                print(f"📉 [Routine Dismissed - Contextual, No Decay]: {pdata}")
-                log_event(
-                    "routines",
-                    "routine_context_skip",
-                    routine_id=rid,
-                    event=ev,
-                    reason="user_already_with_partner",
-                    debug_type="manual_control",
-                    debug_source="user_message",
-                    debug_effect="no_decay"
-                )
-                remove_pending_confirmation(rid)
-                bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
-                pending_routine_confirmations.pop(rid, None)
-
-        yes_words = [_normalize_gr(w) for w in [t("clients.telegram_bot.bot_msg_f4e83b"), "yes", t("clients.telegram_bot.bot_msg_337d7a"), "ok", t("clients.telegram_bot.bot_msg_255bcd"), t("clients.telegram_bot.bot_msg_9e152e"), t("clients.telegram_bot.bot_msg_252996")]]
-        no_words  = [_normalize_gr(w) for w in [t("clients.telegram_bot.bot_msg_e0413c"), t("clients.telegram_bot.bot_msg_3e60e0"), "no", t("clients.telegram_bot.bot_msg_b1bd66"), t("clients.telegram_bot.bot_msg_d9175f"), t("clients.telegram_bot.bot_msg_3605b2"), t("clients.telegram_bot.bot_msg_0b4ad0"), t("clients.telegram_bot.bot_msg_3381ac")]]
-        question_words = [_normalize_gr(w) for w in [
-            t("clients.telegram_bot.bot_msg_0ab538"), t("clients.telegram_bot.bot_msg_03a47d"), t("clients.telegram_bot.bot_msg_0c4b0a"), t("clients.telegram_bot.bot_msg_2053f3"), t("clients.telegram_bot.bot_msg_4126e1"), t("clients.telegram_bot.bot_msg_00308a"), t("clients.telegram_bot.bot_msg_f3dbb1"), t("clients.telegram_bot.bot_msg_d5aba6"),
-            t("clients.telegram_bot.bot_msg_12cede"), t("clients.telegram_bot.bot_msg_a7c975"), t("clients.telegram_bot.bot_msg_42541a"), t("clients.telegram_bot.bot_msg_4c18a3"), t("clients.telegram_bot.bot_msg_cd673a"), "show", "check", "why"
-        ]]
-
-        action_words = [_normalize_gr(w) for w in [
-            t("clients.telegram_bot.bot_msg_cada71"), t("clients.telegram_bot.bot_msg_f41f82"), t("clients.telegram_bot.bot_msg_78e601"), t("clients.telegram_bot.bot_msg_0e436a"), t("clients.telegram_bot.bot_msg_4ebe60"), t("clients.telegram_bot.bot_msg_648c67"),
-            t("clients.telegram_bot.bot_msg_6e2acb"), t("clients.telegram_bot.bot_msg_705d25"), t("clients.telegram_bot.bot_msg_d5a67f"), t("clients.telegram_bot.bot_msg_3ede59"), t("clients.telegram_bot.bot_msg_70e4d0"), t("clients.telegram_bot.bot_msg_1813ca"),
-            t("clients.telegram_bot.bot_msg_8821ce"), t("clients.telegram_bot.bot_msg_1053ee"), t("clients.telegram_bot.bot_msg_8ce38d"), t("clients.telegram_bot.bot_msg_f3dee4"), t("clients.telegram_bot.bot_msg_2f0a33"), "went",
-            "going", "done", "finished", "started"
-        ]]
-        is_question_like = any(w in text_words for w in question_words) or "?" in clean_user_text
-        explicit_yes = (
-            not is_question_like
-            and len(text_words) <= 4
-            and any(w in text_words for w in yes_words)
-        )
-        implicit_confirmed = False
-        llm_dismissed = False
-        if not explicit_yes and not is_question_like and not any(w in text_check for w in no_words):
-            # LLM judges if the message is an implicit confirmation/dismissal
-            event_names = [
-                (rdata.get("event", "") if isinstance(rdata, dict) else str(rdata))
-                for rdata in pending_routine_confirmations.values()
+    if _persisted_routine_feedback_handler is not None:
+        try:
+            routine_result = _persisted_routine_feedback_handler(clean_user_text, {
+                "rowid": user_rowid, "role": "user",
+                "content": clean_user_text, "channel": "telegram",
+            }, **({"reply_event_id": reply_event_id} if reply_event_id is not None else {}))
+            from services.matrix_routine_completion import MatrixRoutineDraftOffer
+            if isinstance(routine_result, MatrixRoutineDraftOffer):
+                routine_draft_offer_context = routine_result.context
+                routine_draft_offer_authorized = True
+                routine_draft_offer_to_consume = (routine_result.routine_id, routine_result.sent_at)
+                routine_completion_context = routine_result.context
+            else:
+                routine_completion_context = routine_result
+            if routine_completion_context is not None and not isinstance(routine_completion_context, SystemMessage):
+                raise TypeError("Routine feedback callback must return trusted context or None")
+        except Exception as exc:
+            from services.routine_completion_context import build_dated_routine_feedback_context
+            from services.routine_feedback_turn import FeedbackTurnResult
+            print(f"[Telegram Routine Feedback]: {type(exc).__name__}")
+            routine_completion_context = build_dated_routine_feedback_context(FeedbackTurnResult("error"))
+        from services.routine_completion_context import routine_feedback_consumes_turn
+        routine_action_consumed = routine_feedback_consumes_turn(routine_completion_context)
+    else:
+        if pending_routine_confirmations:
+            # ── Partner/messenger contextual no-decay (preserved unchanged) ──
+            pending_items = [
+                (rid, pending_routine_confirmations.get(rid, {}))
+                for rid in list(pending_routine_confirmations.keys())
             ]
-            verdict = _llm_routine_judge(clean_user_text, event_names)
-            if verdict == "YES":
-                implicit_confirmed = True
-            elif verdict == "NO":
-                llm_dismissed = True
-
-        if explicit_yes or implicit_confirmed:
-            from memory.routine_db import (
-                confirm_routine,
-                mark_routine_responded,
-                remove_pending_confirmation,
+            has_pending_partner_messenger = any(
+                _is_partner_messenger_routine(str((pdata or {}).get("event", "")))
+                for _, pdata in pending_items
             )
-            from memory.event_log import log_event
 
-            for rid in list(pending_routine_confirmations.keys()):
-                pdata = pending_routine_confirmations.get(rid, {})
-                ev = pdata.get("event", "?")
+            if has_pending_partner_messenger and _looks_like_contextual_not_needed_reply(clean_user_text):
+                from memory.routine_db import remove_pending_confirmation
+                from memory.event_log import log_event
 
-                confirm_routine(rid)
-                mark_routine_responded(rid)
-                remove_pending_confirmation(rid)
+                for rid, pdata in pending_items:
+                    ev = (pdata or {}).get("event", "?")
+                    is_partner_messenger = _is_partner_messenger_routine(str(ev))
+                    if not is_partner_messenger:
+                        continue
 
-                log_event(
-                    "routines", 
-                    "confirmed", 
-                    routine_id=rid, 
-                    event=ev,
-                    debug_type="manual_control",
-                    debug_source="user_message",
-                    debug_effect="routine_changed",
-                )
-                print(f"✅ [Routine Confirmed]: {pdata}")
-                bus.emit("routine_confirmed", routine_id=rid, event=ev, channel="telegram")
-
-                pending_routine_confirmations.pop(rid, None)
-        elif any(w in text_check for w in no_words) or llm_dismissed:
-            from memory.routine_db import (
-                decay_routine,
-                remove_pending_confirmation,
-                mark_routine_responded,
-            )
-            from memory.event_log import log_event
-
-            for rid in list(pending_routine_confirmations.keys()):
-                pdata = pending_routine_confirmations.get(rid, {})
-                ev = pdata.get("event", "?")
-
-                _reason = "explicit_dismissal"
-                _decay = True
-
-                event_l = (ev or "").lower()
-                is_partner_messenger = (
-                    t("clients.telegram_bot.bot_msg_2e67ed") in event_l or
-                    any(term in event_l for term in _partner_match_terms()) or
-                    "messenger" in event_l or
-                    t("clients.telegram_bot.bot_msg_500d81") in event_l
-                )
-
-                if is_partner_messenger and _looks_like_contextual_not_needed_reply(clean_user_text):
-                    _reason = "user_already_with_partner"
-                    _decay = False
-
-                if _decay:
-                    decay_routine(rid)
-                    print(f"📉 [Routine Dismissed - Decayed]: {pdata}")
-                    log_event(
-                        "routines", 
-                        "dismissed", 
-                        routine_id=rid, 
-                        event=ev,
-                        debug_type="manual_control",
-                        debug_source="user_message",
-                        debug_effect="routine_changed",
-                    )
-                else:
-                    mark_routine_responded(rid)
                     print(f"📉 [Routine Dismissed - Contextual, No Decay]: {pdata}")
                     log_event(
                         "routines",
                         "routine_context_skip",
                         routine_id=rid,
                         event=ev,
-                        reason=_reason,
+                        reason="user_already_with_partner",
                         debug_type="manual_control",
                         debug_source="user_message",
                         debug_effect="no_decay"
                     )
+                    remove_pending_confirmation(rid)
+                    bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
+                    pending_routine_confirmations.pop(rid, None)
+
+                # Return immediately — partner/messenger handled; do not enter completion path.
+                return
+
+            # ── Pending-pool completion decision ─────────────────────────
+            pending_candidates = {
+                rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
+                for rid, pdata in pending_routine_confirmations.items()
+            }
+            active_draft, _, _ = _safe_active_draft_status()
+            draft_offer_ids = frozenset(
+                rid
+                for rid, pdata in pending_routine_confirmations.items()
+                if not active_draft and isinstance(pdata, dict) and pdata.get("draft_offer") is True
+            )
+            selector_candidates = {
+                rid: (
+                    f"{event_name}\n[MESSENGER_DRAFT_OFFER]"
+                    if rid in draft_offer_ids else event_name
+                )
+                for rid, event_name in pending_candidates.items()
+            }
+            accepted_draft_offer = None
+            draft_offer_consumed = False
+            if not active_draft:
+                accepted_draft_offer = accept_pending_messenger_draft_offer(
+                    pending_routine_confirmations,
+                    clean_user_text,
+                )
+                if accepted_draft_offer is not None:
+                    pending_data = pending_routine_confirmations.get(
+                        accepted_draft_offer.routine_id,
+                        {},
+                    )
+                    sent_at = pending_data.get("sent_at")
+                    if sent_at is None:
+                        accepted_draft_offer = None
+                    else:
+                        routine_draft_offer_to_consume = (
+                            accepted_draft_offer.routine_id,
+                            sent_at,
+                        )
+            if accepted_draft_offer is not None:
+                decision = RoutineSelection(
+                    action="acknowledge",
+                    routine_id=accepted_draft_offer.routine_id,
+                )
+            else:
+                decision = decide_completion(
+                    user_text=clean_user_text,
+                    candidates=selector_candidates,
+                    pool="pending",
+                    semantic_selector=_completion_selector,
+                    draft_offer_ids=draft_offer_ids,
+                )
+
+            if decision.action == "draft" and decision.routine_id is not None:
+                from memory.routine_db import acknowledge_pending_draft_offer
+                from services.routine_completion_context import get_pending_messenger_draft_offer
+
+                accepted_draft_offer = get_pending_messenger_draft_offer(
+                    pending_routine_confirmations,
+                    decision.routine_id,
+                )
+                if accepted_draft_offer is not None:
+                    pending_data = pending_routine_confirmations.get(decision.routine_id, {})
+                    sent_at = pending_data.get("sent_at")
+                    if sent_at is not None:
+                        routine_draft_offer_to_consume = (decision.routine_id, sent_at)
+                if accepted_draft_offer is None or routine_draft_offer_to_consume is None:
+                    accepted_draft_offer = None
+                    decision = RoutineSelection(action="none", routine_id=None)
+                else:
+                    decision = RoutineSelection(
+                        action="acknowledge",
+                        routine_id=decision.routine_id,
+                    )
+
+            if decision.action == "complete" and decision.routine_id is not None:
+                from memory.routine_db import (
+                    confirm_routine,
+                    mark_routine_responded,
+                    mark_routine_triggered_today,
+                    remove_pending_confirmation,
+                )
+                from memory.event_log import log_event
+
+                rid = decision.routine_id
+                pdata = pending_routine_confirmations.get(rid, {})
+                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+
+                confirm_routine(rid)
+                mark_routine_responded(rid)
+                mark_routine_triggered_today(rid)
+                remove_pending_confirmation(rid)
+                log_event(
+                    "routines", "confirmed",
+                    routine_id=rid, event=ev,
+                    debug_type="manual_control",
+                    debug_source="user_message",
+                    debug_effect="routine_changed",
+                )
+                print(f"✅ [Routine Confirmed]: {pdata}")
+                bus.emit("routine_confirmed", routine_id=rid, event=ev, channel="telegram")
+                pending_routine_confirmations.pop(rid, None)
+
+                from services.routine_completion_context import build_routine_completion_context
+                routine_completion_context = build_routine_completion_context()
+                routine_action_consumed = True
+
+            elif decision.action == "acknowledge" and decision.routine_id is not None:
+                from memory.routine_db import mark_routine_acknowledged, remove_pending_confirmation
+                from memory.event_log import log_event
+
+                rid = decision.routine_id
+                pdata = pending_routine_confirmations.get(rid, {})
+                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+
+                if not draft_offer_consumed and routine_draft_offer_to_consume is None:
+                    mark_routine_acknowledged(rid)
+                    remove_pending_confirmation(rid)
+                if routine_draft_offer_to_consume is None:
+                    log_event(
+                        "routines", "routine_acknowledged",
+                        routine_id=rid, event=ev,
+                        debug_type="manual_control",
+                        debug_source="user_message",
+                        debug_effect="routine_changed",
+                    )
+                    print(f"✅ [Routine Acknowledged]: {pdata}")
+                    bus.emit("routine_acknowledged", routine_id=rid, event=ev, channel="telegram")
+                    pending_routine_confirmations.pop(rid, None)
+                from services.routine_completion_context import build_routine_completion_context
+                routine_completion_context = build_routine_completion_context()
+                if accepted_draft_offer is not None and accepted_draft_offer.routine_id == rid:
+                    routine_draft_offer_context = accepted_draft_offer.context
+                    routine_draft_offer_authorized = True
+                routine_action_consumed = True
+
+            elif decision.action == "skip_today" and decision.routine_id is not None:
+                from memory.routine_db import record_routine_skip_today, remove_pending_confirmation
+                from memory.event_log import log_event
+
+                rid = decision.routine_id
+                pdata = pending_routine_confirmations.get(rid, {})
+                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+                result = record_routine_skip_today(rid)
 
                 remove_pending_confirmation(rid)
-                bus.emit("routine_dismissed", routine_id=rid, event=ev, channel="telegram")
-
+                log_event(
+                    "routines", "routine_skipped_today",
+                    routine_id=rid, event=ev,
+                    skip_streak=result["skip_streak"],
+                    cooldown_hours=result["cooldown_hours"],
+                    debug_type="manual_control",
+                    debug_source="user_message",
+                    debug_effect="cooldown_changed" if result["cooldown_applied"] else "routine_changed",
+                )
+                print(f"⏭️ [Routine Skipped Today]: {pdata}")
+                bus.emit("routine_skipped_today", routine_id=rid, event=ev, channel="telegram")
                 pending_routine_confirmations.pop(rid, None)
+                from services.routine_completion_context import build_routine_completion_context
+                routine_completion_context = build_routine_completion_context()
+                routine_action_consumed = True
+
+            elif decision.action == "pause" and decision.routine_id is not None:
+                from memory.routine_db import pause_routine_indefinitely, remove_pending_confirmation
+                from memory.event_log import log_event
+
+                rid = decision.routine_id
+                pdata = pending_routine_confirmations.get(rid, {})
+                ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+                pause_routine_indefinitely(rid)
+                remove_pending_confirmation(rid)
+                log_event(
+                    "routines", "routine_paused",
+                    routine_id=rid, event=ev,
+                    debug_type="manual_control",
+                    debug_source="user_message",
+                    debug_effect="paused",
+                )
+                print(f"⏸️ [Routine Paused]: {pdata}")
+                bus.emit("routine_paused", routine_id=rid, event=ev, channel="telegram")
+                pending_routine_confirmations.pop(rid, None)
+                from services.routine_completion_context import build_routine_completion_context
+                routine_completion_context = build_routine_completion_context()
+                routine_action_consumed = True
+
+            # decision.action == "pass_through" → continue to normal chat processing.
+
+        if not routine_action_consumed:
+            # ── Today-pool lifecycle decision after pending pass-through ──
+            from datetime import datetime as _dt_now
+            try:
+                from memory.routine_db import (
+                    get_eligible_preemptive_routines_for_day,
+                    mark_routine_acknowledged,
+                    mark_routine_triggered_today,
+                    pause_routine_indefinitely,
+                    record_routine_skip_today,
+                )
+
+                day_name = _dt_now.now().strftime("%A")
+                today_routines = get_eligible_preemptive_routines_for_day(day_name)
+                if today_routines:
+                    today_candidates = {r["id"]: r["event"] for r in today_routines}
+                    decision = decide_completion(
+                        user_text=clean_user_text,
+                        candidates=today_candidates,
+                        pool="today",
+                        semantic_selector=_completion_selector,
+                    )
+
+                    if decision.action == "complete" and decision.routine_id is not None:
+                        from memory.event_log import log_event
+
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+
+                        mark_routine_triggered_today(rid)
+                        log_event(
+                            "routines", "preemptive_completed",
+                            routine_id=rid, event=ev,
+                            debug_type="manual_control",
+                            debug_source="user_message",
+                            debug_effect="routine_changed",
+                        )
+                        print(f"✅ [Routine Pre-emptive Completed]: #{rid} {ev}")
+
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                    elif decision.action == "acknowledge" and decision.routine_id is not None:
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+                        mark_routine_acknowledged(rid)
+                        log_event(
+                            "routines", "routine_acknowledged",
+                            routine_id=rid, event=ev,
+                            debug_type="manual_control",
+                            debug_source="user_message",
+                            debug_effect="routine_changed",
+                        )
+                        print(f"✅ [Routine Acknowledged]: #{rid} {ev}")
+                        bus.emit("routine_acknowledged", routine_id=rid, event=ev, channel="telegram")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                    elif decision.action == "skip_today" and decision.routine_id is not None:
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+                        result = record_routine_skip_today(rid)
+                        log_event(
+                            "routines", "routine_skipped_today",
+                            routine_id=rid, event=ev,
+                            skip_streak=result["skip_streak"],
+                            cooldown_hours=result["cooldown_hours"],
+                            debug_type="manual_control",
+                            debug_source="user_message",
+                            debug_effect="cooldown_changed" if result["cooldown_applied"] else "routine_changed",
+                        )
+                        print(f"⏭️ [Routine Skipped Today]: #{rid} {ev}")
+                        bus.emit("routine_skipped_today", routine_id=rid, event=ev, channel="telegram")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                    elif decision.action == "pause" and decision.routine_id is not None:
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+                        pause_routine_indefinitely(rid)
+                        log_event(
+                            "routines", "routine_paused",
+                            routine_id=rid, event=ev,
+                            debug_type="manual_control",
+                            debug_source="user_message",
+                            debug_effect="paused",
+                        )
+                        print(f"⏸️ [Routine Paused]: #{rid} {ev}")
+                        bus.emit("routine_paused", routine_id=rid, event=ev, channel="telegram")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                if not routine_action_consumed:
+                    from memory.routine_db import get_active_routine_catalog
+                    from services.routine_completion_helper import relevant_catalog_candidates
+
+                    catalog = {
+                        routine["id"]: routine["event"]
+                        for routine in get_active_routine_catalog()
+                    }
+                    pause_candidates = relevant_catalog_candidates(clean_user_text, catalog)
+                    decision = decide_completion(
+                        user_text=clean_user_text,
+                        candidates=pause_candidates,
+                        pool="catalog",
+                        semantic_selector=_completion_selector,
+                    )
+                    if decision.action == "pause" and decision.routine_id is not None:
+                        rid = decision.routine_id
+                        ev = pause_candidates[rid]
+                        pause_routine_indefinitely(rid)
+                        log_event(
+                            "routines", "routine_paused", routine_id=rid, event=ev,
+                            debug_type="manual_control",
+                            debug_source="user_message",
+                            debug_effect="paused",
+                        )
+                        print(f"⏸️ [Routine Paused]: #{rid} {ev}")
+                        bus.emit("routine_paused", routine_id=rid, event=ev, channel="telegram")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+            except Exception as _preempt_err:
+                print(f"[Telegram Pre-emptive Completion]: {_preempt_err}")
+
 
     # ── REFLECTION CONFIRMATION LOOP (ask-tier, 50-75% confidence) ──
     global pending_reflection_confirmations
-    if pending_reflection_confirmations:
+    if not routine_action_consumed and pending_reflection_confirmations:
         text_check = _normalize_gr(clean_user_text)
         text_words = text_check.replace(",", "").replace(".", "").replace("!", "").split()
         yes_words = [_normalize_gr(w) for w in NLP_CONFIG.get("telegram", {}).get("confirm_tokens", [])]
@@ -1784,7 +2582,7 @@ def handle_message(user_text: str, chat_id: str):
 
     # ── SAFE EXECUTOR CONFIRMATION LOOP ──────────────────────────
     global pending_exec_command
-    if pending_exec_command:
+    if not routine_action_consumed and pending_exec_command:
         text_check = _normalize_gr(clean_user_text)
         if any(w in text_check for w in [_normalize_gr(w) for w in NLP_CONFIG.get("telegram", {}).get("confirm_tokens", [])]):
             cmd = pending_exec_command
@@ -1814,24 +2612,13 @@ def handle_message(user_text: str, chat_id: str):
     with memory_lock:
         last_interaction_time = time.time()
 
-    # ── Pending photo: if a photo arrived without a caption recently, combine it ──
-    global pending_photo
-    photo_prefix = ""
-    with pending_photo_lock:
-        if pending_photo and (time.time() - pending_photo["timestamp"]) < 30:
-            p = pending_photo
-            pending_photo = None
-            print(f"\033[94m[Photo+Msg]: Combination of pending photo + message\033[0m")
-            _process_photo_with_question(p["filename"], p["path"], p["analysis"], clean_user_text, chat_id)
-            return  # The _process_photo_with_question sent the response
-
     final_ai_response = ""
     handling_agent = "Chat_Agent"
 
     # ── PENDING ASSET CONFIRMATION ──────────────────────────────
     from memory.pending_assets import (
         clear_expired_pending_assets,
-        get_latest_pending_asset,
+        get_latest_pending_asset_any,
         mark_pending_asset_confirmed,
         mark_pending_asset_cancelled,
         create_pending_asset_archive,
@@ -1840,9 +2627,7 @@ def handle_message(user_text: str, chat_id: str):
     )
     clear_expired_pending_assets()
     from memory.pending_assets import is_reply_to_recent_asset_prompt
-    pending_photo_asset = get_latest_pending_asset("telegram", "photo")
-    pending_doc_asset = get_latest_pending_asset("telegram", "document")
-    pending_asset = pending_photo_asset or pending_doc_asset
+    pending_asset = None if routine_action_consumed else get_latest_pending_asset_any("telegram")
     reply_kind = classify_pending_asset_reply(clean_user_text) if pending_asset else None
     asset_prompt_active = is_reply_to_recent_asset_prompt("telegram") if pending_asset else False
 
@@ -1850,30 +2635,30 @@ def handle_message(user_text: str, chat_id: str):
         print("[PendingAssetGuard]: ignored generic yes/no because no recent archive prompt was active")
 
     if pending_asset and reply_kind == "yes" and asset_prompt_active:
-        if pending_asset["asset_type"] == "photo":
-            memory.save(
-                memory_type="photo",
-                file_path=pending_asset["file_path"],
-                analysis=pending_asset.get("analysis", ""),
-                caption=pending_asset.get("caption", "") or pending_asset["filename"],
+        from services.pending_asset_confirmation import (
+            ConfirmedAssetSaveError,
+            save_confirmed_asset,
+        )
+
+        try:
+            save_confirmed_asset(memory, pending_asset)
+        except ConfirmedAssetSaveError as exc:
+            print(
+                "[PendingAssets]: Telegram save failed; pending retained "
+                f"({type(exc.__cause__ or exc).__name__})"
             )
+            confirm_reply = t("services.pending_asset_confirmation.save_failed_retry")
         else:
-            memory.save(
-                memory_type="document",
-                file_path=pending_asset["file_path"],
-                analysis=pending_asset.get("analysis", ""),
-                caption=pending_asset.get("caption", "") or pending_asset["filename"],
-            )
-            
-        mark_pending_asset_confirmed(pending_asset["id"])
-        confirm_reply = t("clients.telegram_bot.bot_msg_7e53ac")
+            mark_pending_asset_confirmed(pending_asset["id"])
+            confirm_reply = t("clients.telegram_bot.bot_msg_7e53ac")
         _send_and_record_assistant(confirm_reply, chat_id)
         enqueue_fast_task(log_exchange, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
         enqueue_fast_task(update_working_memory, clean_user_text, confirm_reply)
         enqueue_fast_task(_enqueue_slow_memory_sifter, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
         enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, confirm_reply, "Chat_Agent")
         enqueue_slow_task(_enqueue_followup_pipeline, clean_user_text, confirm_reply, "Chat_Agent", "telegram")
-        enqueue_slow_task(extract_and_update_context_flags, clean_user_text, confirm_reply)
+        if not context_answer.context_flags_processed:
+            enqueue_slow_task(extract_and_update_context_flags, clean_user_text, confirm_reply)
         return
 
     if pending_asset and reply_kind == "no" and asset_prompt_active:
@@ -1885,14 +2670,16 @@ def handle_message(user_text: str, chat_id: str):
         enqueue_fast_task(_enqueue_slow_memory_sifter, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
         enqueue_slow_task(update_capabilities_from_exchange, clean_user_text, cancel_reply, "Chat_Agent")
         enqueue_slow_task(_enqueue_followup_pipeline, clean_user_text, cancel_reply, "Chat_Agent", "telegram")
-        enqueue_slow_task(extract_and_update_context_flags, clean_user_text, cancel_reply)
+        if not context_answer.context_flags_processed:
+            enqueue_slow_task(extract_and_update_context_flags, clean_user_text, cancel_reply)
         return
 
     # ── Messenger Draft Intent Guard ─────────────────────────────
     draft_active, draft_reason, draft_data = _safe_active_draft_status()
-    draft_intent = _safe_classify_messenger_intent(
-        clean_user_text,
-        has_active_draft=draft_active,
+    draft_intent = (
+        _safe_classify_messenger_intent(clean_user_text, has_active_draft=draft_active)
+        if not routine_action_consumed
+        else None
     )
 
     if draft_intent and draft_intent.intent == "clear_draft":
@@ -1910,7 +2697,6 @@ def handle_message(user_text: str, chat_id: str):
             pass
 
         try:
-            _append_to_analytics_log("user", clean_user_text)
             _append_to_analytics_log("ai", final_ai_response)
             from memory.execution_trace import ExecutionTrace
             _trace = ExecutionTrace(channel="telegram", user_message=clean_user_text)
@@ -1936,7 +2722,6 @@ def handle_message(user_text: str, chat_id: str):
             pass
 
         try:
-            _append_to_analytics_log("user", clean_user_text)
             _append_to_analytics_log("ai", final_ai_response)
             from memory.execution_trace import ExecutionTrace
             _trace = ExecutionTrace(channel="telegram", user_message=clean_user_text)
@@ -1955,20 +2740,21 @@ def handle_message(user_text: str, chat_id: str):
             
             call_id = f"call_{uuid.uuid4().hex[:12]}"
             
-            save_pending("execute_local_pipeline", {}, call_id, channel="telegram")
+            send_args = {"expected_draft_revision": draft_data.get("revision") or "missing"}
+            save_pending("execute_local_pipeline", send_args, call_id, channel="telegram")
             
             tool_call_fake = {
                 "name": "execute_local_pipeline",
                 "id": call_id,
-                "args": {}
+                "args": send_args
             }
             _notify_telegram(tool_call_fake)
             
             try:
-                _append_to_analytics_log("user", clean_user_text)
                 from memory.execution_trace import ExecutionTrace
                 _trace = ExecutionTrace(channel="telegram", user_message=clean_user_text)
                 _trace.mark_phase("messenger_intent_confirm_intercept_pending", 1)
+                _trace.finalize()
                 _trace.save()
             except Exception:
                 pass
@@ -1988,10 +2774,24 @@ def handle_message(user_text: str, chat_id: str):
     typing_thread = threading.Thread(target=_typing_loop, daemon=True)
     typing_thread.start()
 
+    _trace = None
+    trace_response = None
+    trace_error = None
     try:
         # ── Context: shared mixed history from SQLite ────────────
         t_context_0 = perf_counter()
-        context_msgs, current_msg = _build_fast_chat_context(clean_user_text)
+        context_msgs, current_msg = _build_fast_chat_context(clean_user_text, user_rowid=user_rowid)
+        from services.routine_completion_context import append_routine_completion_context
+        context_msgs = append_routine_completion_context(
+            context_msgs,
+            routine_completion_context,
+            routine_draft_offer_context,
+        )
+        if voice_delivery_context is not None:
+            context_msgs.append(voice_delivery_context)
+        answer_context = context_answer_graph_context(context_answer)
+        if answer_context is not None:
+            context_msgs.append(answer_context)
         context_load_ms = int((perf_counter() - t_context_0) * 1000)
         # ── Flow via LangGraph ───────────────────────────────────_
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "telegram"
@@ -2016,15 +2816,21 @@ def handle_message(user_text: str, chat_id: str):
         )
         
         is_ultra_ack = is_ultra_light_ack(clean_user_text)
+        from core.capability_draft import has_pending_bug_followup
+        pending_bug_followup = has_pending_bug_followup(
+            {"messages": context_msgs + [current_msg]}
+        )
         fast_path_used = False
         medium_path_used = False
+        provenance_messages_for_reply: list = []
 
         # 1. graph_call_ms
         graph_call_started = perf_counter()
 
         mail_prompt_active = is_reply_to_recent_mail_prompt(context_msgs)
         
-        if is_ultra_ack and not mail_prompt_active:
+        if (is_ultra_ack and not pending_bug_followup and routine_completion_context is None
+                and not mail_prompt_active and not context_answer.consumed):
             _trace.mark_phase("ultra_light_ack_used", 1)
             handling_agent = "UltraLightACK"
             final_ai_response = get_ultra_light_ack_response()
@@ -2038,21 +2844,25 @@ def handle_message(user_text: str, chat_id: str):
             _trace.mark_phase("medium_path_candidate", 1 if medium_path_used else 0)
 
             if fast_path_used:
-                events = _run_fast_chat_path(context_msgs, current_msg)
+                provenance_messages_for_reply = context_msgs[-6:] + [current_msg]
+                events = _run_fast_chat_path(
+                    context_msgs,
+                    current_msg,
+                    routine_draft_offer_authorized=routine_draft_offer_authorized,
+                    trace=_trace,
+                )
             elif medium_path_used:
-                events = list(
-                    graph.stream(
-                        {"messages": context_msgs[-8:] + [current_msg], "channel": "telegram"},
-                        {"recursion_limit": 24},
-                    )
-                )
+                provenance_messages_for_reply = context_msgs[-8:] + [current_msg]
+                graph_state = {"messages": context_msgs[-8:] + [current_msg], "channel": "telegram"}
+                if routine_draft_offer_authorized:
+                    graph_state["routine_draft_offer_authorized"] = True
+                events = _collect_telegram_graph_events(graph_state, 24, _trace)
             else:
-                events = list(
-                    graph.stream(
-                        {"messages": context_msgs + [current_msg], "channel": "telegram"},
-                        {"recursion_limit": 100},
-                    )
-                )
+                provenance_messages_for_reply = context_msgs + [current_msg]
+                graph_state = {"messages": context_msgs + [current_msg], "channel": "telegram"}
+                if routine_draft_offer_authorized:
+                    graph_state["routine_draft_offer_authorized"] = True
+                events = _collect_telegram_graph_events(graph_state, 100, _trace)
         graph_call_ms = int((perf_counter() - graph_call_started) * 1000)
         _trace.mark_phase("graph_call_ms", graph_call_ms)
         _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
@@ -2064,9 +2874,6 @@ def handle_message(user_text: str, chat_id: str):
             _trace.mark_phase("telegram_graph_budget", 24)
         else:
             _trace.mark_phase("telegram_graph_budget", 100)
-
-        for event in events:
-            _trace.process_event(event)
 
         # 2. graph_result_extract_ms
         extract_started = perf_counter()
@@ -2082,7 +2889,6 @@ def handle_message(user_text: str, chat_id: str):
                         # [MASTRO-FIX]: Skip intermediate tool-call steps
                         if getattr(last_msg, "tool_calls", None):
                             continue
-                        from core.utils import clean_message
                         candidate_raw = clean_message(last_msg.content)
                         # Skip tool-call announcement strings (internal debug output)
                         if candidate_raw and not candidate_raw.startswith(t("clients.telegram_bot.bot_msg_78c917")):
@@ -2093,6 +2899,18 @@ def handle_message(user_text: str, chat_id: str):
         # 3. tool_message_collect_ms
         tool_collect_started = perf_counter()
         tool_result_fallbacks = []
+        external_tool_names: set[str] = set()
+        tool_args_by_id: dict[str, dict] = {}
+        for event in events:
+            for data in event.values():
+                if data is None:
+                    continue
+                for event_message in data.get("messages", []):
+                    for tool_call in getattr(event_message, "tool_calls", None) or []:
+                        tool_call_id = str(tool_call.get("id", ""))
+                        tool_args = tool_call.get("args", {})
+                        if tool_call_id and isinstance(tool_args, dict):
+                            tool_args_by_id[tool_call_id] = tool_args
         for event in events:
             for node, data in event.items():
                 if data is None:
@@ -2100,11 +2918,52 @@ def handle_message(user_text: str, chat_id: str):
                 if node == "tools":
                     for msg in data.get("messages", []):
                         if getattr(msg, "type", "") == "tool":
+                            from core.untrusted_content import (
+                                format_untrusted_tool_result,
+                                is_untrusted_external_tool_result_content,
+                            )
+                            tool_name = str(getattr(msg, "name", ""))
+                            tool_args = tool_args_by_id.get(str(getattr(msg, "tool_call_id", "")), {})
+                            is_external = is_untrusted_external_tool_result_content(
+                                tool_name, tool_args, str(getattr(msg, "content", "")),
+                            )
+                            if is_external:
+                                external_tool_names.add(tool_name)
                             tool_content = clean_message(getattr(msg, "content", "")).strip()
+                            if is_external:
+                                tool_content = format_untrusted_tool_result(tool_name, tool_content)
                             if tool_content:
                                 tool_result_fallbacks.append(tool_content)
         tool_message_collect_ms = int((perf_counter() - tool_collect_started) * 1000)
         _trace.mark_phase("tool_message_collect_ms", tool_message_collect_ms)
+
+        if routine_draft_offer_to_consume and any(
+            looks_like_terminal_messenger_draft_result(result)
+            for result in tool_result_fallbacks
+        ):
+            draft_routine_id, draft_sent_at = routine_draft_offer_to_consume
+            from memory.routine_db import acknowledge_pending_draft_offer
+
+            if acknowledge_pending_draft_offer(draft_routine_id, draft_sent_at):
+                draft_data = pending_routine_confirmations.get(draft_routine_id, {})
+                draft_event = draft_data.get("event", "?") if isinstance(draft_data, dict) else str(draft_data)
+                log_event(
+                    "routines",
+                    "routine_acknowledged",
+                    routine_id=draft_routine_id,
+                    event=draft_event,
+                    debug_type="manual_control",
+                    debug_source="user_message",
+                    debug_effect="routine_changed",
+                )
+                print(f"✅ [Routine Acknowledged]: {draft_data}")
+                bus.emit(
+                    "routine_acknowledged",
+                    routine_id=draft_routine_id,
+                    event=draft_event,
+                    channel="telegram",
+                )
+                pending_routine_confirmations.pop(draft_routine_id, None)
 
         graph_stream_ms = int((perf_counter() - t_graph_0) * 1000)
         _trace.mark_phase("graph_stream_ms", graph_stream_ms)
@@ -2141,93 +3000,108 @@ def handle_message(user_text: str, chat_id: str):
 
         if not final_ai_response:
             # [MASTRO-FIX]: Fallback when the agent did not generate text (e.g., loop/recursion)
+            trace_error = "NoResponse"
             send_telegram_msg(t("clients.telegram_bot.bot_msg_125f2d"))
             return
 
-        file_path_to_send = None
-        if final_ai_response:
-            # --- MASTRO INTERCEPTOR FOR DOCUMENTS ---
-            file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", final_ai_response)
-            if file_match:
-                file_path_to_send = file_match.group(1).strip()
-                final_ai_response = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", "", final_ai_response).strip()
+        from services.created_file import extract_created_files
+
+        generated = extract_created_files(final_ai_response)
+        generated_outputs = generated.outputs
+        final_ai_response = generated.text
+        if not final_ai_response and generated_outputs:
+            final_ai_response = t(
+                "clients.telegram_bot.bot_msg_file",
+                file=os.path.basename(generated_outputs[0].path),
+            )
 
         final_response_build_ms = int((perf_counter() - response_build_started) * 1000)
         _trace.mark_phase("final_response_build_ms", final_response_build_ms)
 
         _trace.agent = handling_agent
-        _trace.finalize(response=final_ai_response or None)
+        trace_response = final_ai_response or None
 
         if final_ai_response:
             final_ai_response = _strip_existing_time_prefix(final_ai_response)
-            if file_path_to_send:
-                if final_ai_response:
-                    if is_voice_mode:
-                        import asyncio
-                        t_voice_0 = perf_counter()
-                        asyncio.run(send_telegram_voice(final_ai_response))
-                        voice_send_ms = int((perf_counter() - t_voice_0) * 1000)
-                        _trace.mark_phase("telegram_voice_send_ms", voice_send_ms)
-                    else:
-                        t_send_0 = perf_counter()
-                        _mid = send_telegram_msg(final_ai_response)
-                        send_ms = int((perf_counter() - t_send_0) * 1000)
-                        _trace.mark_phase("telegram_send_ms", send_ms)
-                        _cache_bot_message(_mid, final_ai_response)
-
-                # Send the file to Telegram as a document
-                try:
-                    from tools.telegram import send_telegram_document
-                    import os as _os
-                    _fname = _os.path.basename(file_path_to_send)
-                    send_telegram_document(file_path_to_send, caption=f"📎 <b>{_fname}</b>")
-                except Exception as _de:
-                    print(f"❌ [Doc send error]: {_de}")
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_file", file=file_path_to_send))
+            if is_voice_mode:
+                import asyncio
+                t_voice_0 = perf_counter()
+                asyncio.run(send_telegram_voice(final_ai_response))
+                voice_send_ms = int((perf_counter() - t_voice_0) * 1000)
+                _trace.mark_phase("telegram_voice_send_ms", voice_send_ms)
             else:
-                # Normal Flow (No Documents)
-                if is_voice_mode:
-                    import asyncio
-                    t_voice_0 = perf_counter()
-                    asyncio.run(send_telegram_voice(final_ai_response))
-                    voice_send_ms = int((perf_counter() - t_voice_0) * 1000)
-                    _trace.mark_phase("telegram_voice_send_ms", voice_send_ms)
-                else:
-                    t_send_0 = perf_counter()
-                    _mid = send_telegram_msg(final_ai_response)
-                    send_ms = int((perf_counter() - t_send_0) * 1000)
-                    _trace.mark_phase("telegram_send_ms", send_ms)
-                    _cache_bot_message(_mid, final_ai_response)
+                t_send_0 = perf_counter()
+                _mid = send_telegram_msg(final_ai_response)
+                send_ms = int((perf_counter() - t_send_0) * 1000)
+                _trace.mark_phase("telegram_send_ms", send_ms)
+                _cache_bot_message(_mid, final_ai_response)
+
+            for output in generated_outputs:
+                try:
+                    if output.kind == "photo":
+                        _send_photo_to_telegram(output.path, chat_id)
+                    else:
+                        from tools.telegram import send_telegram_document
+                        import os as _os
+
+                        _fname = _os.path.basename(output.path)
+                        send_telegram_document(
+                            output.path,
+                            caption=f"📎 <b>{_fname}</b>",
+                        )
+                except Exception as output_error:
+                    print(f"❌ [Generated output send error]: {output_error}")
+                    send_telegram_msg(
+                        t("clients.telegram_bot.bot_msg_file", file=output.path)
+                    )
             # We keep context for the next message
             _typing_active["on"] = False  # We stop typing
-            _append_to_analytics_log("user", clean_user_text)
-            _append_to_analytics_log("ai", final_ai_response)
-            # Photos
-            if "[SEND_PHOTO:" in final_ai_response:
-                match = re.search(r"\[SEND_PHOTO:\s*(.+?)\]", final_ai_response)
-                if match:
-                    photo_path = match.group(1).strip()
-                    try:
-                        _send_photo_to_telegram(photo_path, chat_id)
-                    except:
-                        pass
-
+            from core.untrusted_content import derived_external_content_history_metadata
+            assistant_metadata = derived_external_content_history_metadata(
+                provenance_messages_for_reply,
+                external_tool_names,
+            )
+            if assistant_metadata:
+                _append_to_analytics_log(
+                    "ai",
+                    final_ai_response,
+                    metadata=assistant_metadata,
+                )
+            else:
+                _append_to_analytics_log("ai", final_ai_response)
             # Background Tasks
             t_bg_0 = perf_counter()
-            enqueue_fast_task(log_exchange,                       user_text, final_ai_response, handling_agent, "telegram")
-            enqueue_fast_task(update_working_memory,              user_text, final_ai_response)
-            enqueue_fast_task(_enqueue_slow_memory_sifter,        user_text, final_ai_response, handling_agent, "telegram")
-            enqueue_slow_task(update_capabilities_from_exchange,  user_text, final_ai_response, handling_agent)
-            enqueue_slow_task(_enqueue_followup_pipeline, user_text, final_ai_response, handling_agent, "telegram")
-            enqueue_slow_task(extract_and_update_context_flags, user_text, final_ai_response)
+            from core.untrusted_content import external_content_source_names
+            external_content_sources = external_content_source_names(assistant_metadata)
+            if external_content_sources:
+                print("[Security]: external-derived reply - use trusted user text only for background state")
+                enqueue_fast_task(log_exchange,                   user_text, "", handling_agent, "telegram")
+                enqueue_fast_task(update_working_memory,          user_text, "")
+                enqueue_fast_task(_enqueue_slow_memory_sifter,    user_text, "", handling_agent, "telegram", None, True)
+                enqueue_slow_task(_enqueue_followup_pipeline, user_text, "", handling_agent, "telegram")
+                if not context_answer.context_flags_processed:
+                    enqueue_slow_task(extract_and_update_context_flags, user_text, "")
+            else:
+                enqueue_fast_task(log_exchange,                   user_text, final_ai_response, handling_agent, "telegram")
+                enqueue_fast_task(update_working_memory,          user_text, final_ai_response, external_content_sources)
+                enqueue_fast_task(_enqueue_slow_memory_sifter,    user_text, final_ai_response, handling_agent, "telegram", external_content_sources)
+                _schedule_capability_gap_if_valid(user_text, final_ai_response, handling_agent, user_rowid, chat_id)
+                enqueue_slow_task(_enqueue_followup_pipeline, user_text, final_ai_response, handling_agent, "telegram")
+                if not context_answer.context_flags_processed:
+                    enqueue_slow_task(extract_and_update_context_flags, user_text, final_ai_response)
             
             background_enqueue_ms = int((perf_counter() - t_bg_0) * 1000)
             _trace.mark_phase("background_enqueue_ms", background_enqueue_ms)
-            _trace.save()
-
     except Exception as e:
+        trace_error = type(e).__name__
         _typing_active["on"] = False  # We stop typing even on error
         send_telegram_msg(t("clients.telegram_bot.bot_msg_error", e=str(e)))
+    finally:
+        _typing_active["on"] = False
+        if _trace is not None:
+            _trace.finalize(response=trace_response,
+                error=trace_error or ("NoResponse" if not trace_response else None))
+            _trace.save()
 
 def _send_photo_to_telegram(photo_path: str, chat_id: str):
     """Sends a photo file to the Telegram chat."""
@@ -2248,68 +3122,32 @@ def _send_photo_to_telegram(photo_path: str, chat_id: str):
         print(f"\033[91m[TelegramBot Photo Send Error]: {e}\033[0m")
         send_telegram_msg(t("clients.telegram_bot.bot_msg_photo_send_fail", e=str(e)))
 def handle_location(msg, live_update=False):
-    """Receives live location and checks for location-based reminders."""
-    import math
-
-    chat_id = str(msg.get("chat", {}).get("id", ""))
-    loc     = msg.get("location", {})
-    lat     = loc.get("latitude")
-    lon     = loc.get("longitude")
+    """Process a trusted Telegram point through the shared location path."""
+    loc = msg.get("location", {})
+    lat, lon = loc.get("latitude"), loc.get("longitude")
     if lat is None or lon is None:
         return
-    # Save location to JSON
+    from services.location_update import process_location_update
+
+    def send_location_reminder(message: str) -> str:
+        """Propagate transport failure so the shared pipeline retains the reminder."""
+        external_id = _send_and_record_assistant(message, agent="Reminder_Agent")
+        if external_id is None:
+            raise RuntimeError("Location reminder delivery was not confirmed")
+        return external_id
+
     try:
-        from config import GPS_STORAGE_FILE
-        import time
-        with open(GPS_STORAGE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"lat": lat, "lon": lon, "timestamp": time.time()}, f)
-    except Exception:
-        pass
-    #print(f"\033[94m[Location]: {lat}, {lon}\033[0m")
-
-    # ── Location Reminders (SQL: time = 'loc:<name>' convention) ──
-    try:
-        import sqlite3
-        from config import HOME_COORDS, HOME_RADIUS_M, STATE_DB
-
-        def haversine(lat1, lon1, lat2, lon2):
-            R = 6371000
-            p = math.pi / 180
-            a = (math.sin((lat2-lat1)*p/2)**2 +
-                 math.cos(lat1*p) * math.cos(lat2*p) *
-                 math.sin((lon2-lon1)*p/2)**2)
-            return 2 * R * math.asin(math.sqrt(a))
-
-        if os.path.exists(STATE_DB):
-            conn = sqlite3.connect(STATE_DB)
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT id, task, time FROM reminders WHERE status='pending' AND time LIKE 'loc:%'"
-                )
-                pending = cursor.fetchall()
-                if pending:
-                    pass # print("HANDLE_LOCATION PENDING:", pending)
-                for rid, task, tm in pending:
-                    target = tm.split(":", 1)[1] if tm and ":" in tm else "home"
-                    if target == "home":
-                        dist = haversine(lat, lon, HOME_COORDS[0], HOME_COORDS[1])
-                        if dist <= HOME_RADIUS_M:
-                            _send_and_record_assistant(
-                                f"📍 REMINDER (You reached home!): {task}",
-                                agent="Reminder_Agent",
-                            )
-                            print(f"\033[93m[Location Reminder]: {task} fired ({dist:.0f}m)\033[0m")
-                            cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
-                conn.commit()
-            finally:
-                conn.close()
-    except Exception as e:
-        print(f"\033[91m[Location Reminder Error]: {e}\033[0m")
-
-    # ── Web Agent only for manual location (no live updates) ──
+        process_location_update(
+            lat,
+            lon,
+            live_update=live_update,
+            source_channel="telegram",
+            send_reminder=send_location_reminder,
+        )
+    except Exception as exc:
+        print(f"[Location Handler Error]: {exc}")
     if live_update:
-        return  # Live location update → only reminders, no message
+        return
 
     from core.graph import graph
     from langchain_core.messages import HumanMessage
@@ -2338,16 +3176,44 @@ def handle_location(msg, live_update=False):
 # POLLING LOOP
 # ────────────────────────────────────────────────────────────────
 
-def _handle_approval_callback(cq: dict):
+def _handle_approval_callback(cq: dict) -> None:
     """Handles the ✅/❌ approval callbacks from inline keyboard."""
     try:
         from core.approval import execute_approved_pending, get_pending, pop_pending
         from tools.system import all_tools
 
-        cq_id   = cq["id"]
+        cq_id   = cq.get("id", "")
         data    = cq.get("data", "")
-        chat_id = str(cq["message"]["chat"]["id"])
-        msg_id  = cq["message"]["message_id"]
+        chat_id = str(cq.get("message", {}).get("chat", {}).get("id", ""))
+        msg_id  = cq.get("message", {}).get("message_id")
+        from_id = str(cq.get("from", {}).get("id", ""))
+
+        # Security check: Both chat_id and from_id must match the authorized private Telegram identity
+        allowed_id = str(TELEGRAM_CHAT_ID)
+        if not allowed_id or chat_id != allowed_id or from_id != allowed_id:
+            logger.warning(
+                "[TelegramBot/Security]: Unauthorized approval callback from user=%s, chat=%s",
+                from_id,
+                chat_id,
+            )
+            if cq_id and TELEGRAM_TOKEN:
+                try:
+                    requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+                        json={
+                            "callback_query_id": cq_id,
+                            "text": UNAUTHORIZED_CALLBACK_ALERT_TEXT,
+                            "show_alert": True,
+                        },
+                        timeout=5,
+                    )
+                except requests.RequestException as error:
+                    logger.warning(
+                        "[TelegramBot/Security]: Failed to answer unauthorized callback %s: %s",
+                        cq_id,
+                        error,
+                    )
+            return
 
         # Answer the callback (remove loading spinner)
         requests.post(
@@ -2388,10 +3254,37 @@ def _handle_approval_callback(cq: dict):
                 send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_exec", tool=tool_name))
 
             execution = execute_approved_pending(tool_call_id, all_tools)
+
+            if execution.get("ok") and tool_name == "run_terminal_command":
+                from services.approved_terminal_continuation import approved_terminal_reply, record_terminal_reply
+
+                reply = approved_terminal_reply(execution)
+                if reply:
+                    record_terminal_reply(execution.get("continuation_context"), origin_channel, reply, tool_call_id)
+                    send_telegram_msg_full(reply)
+                    return
+
+            if execution.get("ok") and tool_name == "execute_local_pipeline":
+                from tools.web import messenger_send_result_succeeded
+
+                if not messenger_send_result_succeeded(execution.get("result")):
+                    returned_error = clean_message(
+                        str(execution.get("result") or "")
+                    ).strip()
+                    execution = {
+                        **execution,
+                        "ok": False,
+                        "status": "failed",
+                        "error": returned_error
+                        or t("clients.telegram_bot.bot_msg_e8006a"),
+                    }
             
             if origin_channel == "web":
                 if execution["ok"]:
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_success_web", tool=tool_name))
+                    if tool_name == "execute_local_pipeline":
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_df3588"))
+                    else:
+                        send_telegram_msg(t("clients.telegram_bot.bot_msg_tool_success_web", tool=tool_name))
                     
                     try:
                         from api.server import append_to_chat_history
@@ -2542,6 +3435,140 @@ def _save_reaction_to_memory(text: str) -> None:
         print(f"⚠️ [Reaction Save]: {e}")
 
 
+def _run_system_doctor_command() -> str:
+    """Run the read-only Doctor tool through its StructuredTool interface."""
+    from tools.system import system_doctor
+
+    return str(system_doctor.invoke({"days": 1}))
+
+
+def _send_system_doctor_report() -> None:
+    """Deliver the Doctor report in Telegram-safe message chunks."""
+    send_telegram_msg_full(_run_system_doctor_command())
+
+
+def render_external_help(*, voice_enabled: bool, include_legacy_confirm: bool = True) -> str:
+    """Render the shared command menu for the active channel's voice state."""
+    voice_status = "🔊 ON" if voice_enabled else "✍️ OFF"
+    menu = t("clients.telegram_bot.bot_msg_help_menu", voice_status=voice_status)
+    if not include_legacy_confirm:
+        menu = "\n".join(
+            line for line in menu.splitlines()
+            if not line.strip().startswith("<code>/confirm ")
+        )
+    return t("clients.telegram_bot.bot_msg_commands_title", bot_name=config.BOT_NAME) + menu
+
+
+def handle_external_admin_command(user_text: str) -> str | None:
+    """Execute one channel-neutral text/admin command and return its reply."""
+    cmd = str(user_text or "").strip().lower()
+
+    if cmd == "/pause":
+        with _override_lock:
+            _override_state["pause_reminders"] = True
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_4c769a")
+
+    if cmd == "/mute":
+        with _override_lock:
+            _override_state["mute_proactive"] = True
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_c9478b")
+
+    if cmd.startswith("/sleep"):
+        parts = cmd.split()
+        hours = float(parts[1]) if len(parts) > 1 else 8.0
+        with _override_lock:
+            _override_state["sleep_until"] = _time.time() + hours * 3600
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_sleep_mode", hours=f"{hours:.0f}")
+
+    if cmd == "/resume":
+        with _override_lock:
+            _override_state.update(
+                {
+                    "pause_reminders": False,
+                    "mute_proactive": False,
+                    "sleep_until": None,
+                    "routine_pause_until": None,
+                }
+            )
+        _reset_vacation_pause_skip_log()
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_b33ab5")
+
+    if cmd == "/vacation_resume":
+        with _override_lock:
+            _override_state["routine_pause_until"] = None
+        _reset_vacation_pause_skip_log()
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_vacation_resumed")
+
+    if cmd == "/vacation" or cmd.startswith("/vacation "):
+        parts = cmd.split()
+        try:
+            days = int(parts[1]) if len(parts) == 2 else 0
+        except ValueError:
+            days = 0
+        if not 1 <= days <= 365:
+            return t("clients.telegram_bot.bot_msg_vacation_usage")
+        _reset_vacation_pause_skip_log()
+        with _override_lock:
+            _override_state["routine_pause_until"] = _time.time() + days * 86400
+        _clear_pending_routine_confirmations_for_vacation()
+        _save_override_state()
+        return t("clients.telegram_bot.bot_msg_vacation_paused", days=days)
+
+    if cmd == "/help":
+        return render_external_help(voice_enabled=voice_mode_enabled)
+
+    if cmd == "/doctor":
+        try:
+            return _run_system_doctor_command()
+        except Exception as exc:
+            return t("clients.telegram_bot.bot_msg_doctor_error", e=exc)
+
+    if cmd == "/status":
+        if astakos_scheduler:
+            return astakos_scheduler.status()
+        return t("clients.telegram_bot.bot_msg_8c16dd")
+
+    return None
+
+
+def _telegram_routine_reply_event_id(message: Mapping[str, object]) -> str | None:
+    """Carry only a same-chat Telegram reply ID after the polling owner gate.
+
+    None means no explicit reply. An empty string preserves an invalid/external
+    explicit reply as unusable correlation: canonical handlers must not fall
+    back to a different implicit question. IDs come only from transport metadata.
+    """
+    if "external_reply" in message:
+        return ""
+    if "reply_to_message" not in message:
+        return None
+    reply = message["reply_to_message"]
+    if not isinstance(reply, Mapping):
+        return ""
+    chat, replied_chat = message.get("chat"), reply.get("chat")
+    if (not isinstance(chat, Mapping) or not isinstance(replied_chat, Mapping)
+            or str(chat.get("id")) != str(TELEGRAM_CHAT_ID)
+            or str(replied_chat.get("id")) != str(TELEGRAM_CHAT_ID)):
+        return ""
+    message_id = reply.get("message_id")
+    return str(message_id) if type(message_id) is int and message_id > 0 else ""
+
+
+def _telegram_inbound_identity(message: Mapping[str, object]) -> dict[str, str]:
+    """Namespace a real owner-chat provider event; never infer identity from text."""
+    chat = message.get("chat")
+    event_id = message.get("message_id")
+    if (not isinstance(chat, Mapping) or str(chat.get("id")) != str(TELEGRAM_CHAT_ID)
+            or type(event_id) is not int or event_id <= 0):
+        return {}
+    return {"inbound_message_id": f"telegram-user-{TELEGRAM_CHAT_ID}-{event_id}"}
+
+
 def run_polling():
     """Long-polling loop — reads updates from the Telegram API."""
     global voice_mode_enabled
@@ -2563,6 +3590,8 @@ def run_polling():
         {"command": "story",            "description": t("clients.telegram_bot.bot_msg_0a3ea6")},
         {"command": "voice",            "description": t("clients.telegram_bot.bot_msg_7c1625")},
         {"command": "status",           "description": t("clients.telegram_bot.bot_msg_12478c")},
+        {"command": "vacation",         "description": t("clients.telegram_bot.bot_msg_vacation")},
+        {"command": "vacation_resume",  "description": t("clients.telegram_bot.bot_msg_vacation_resume")},
         {"command": "doctor",           "description": t("clients.telegram_bot.bot_msg_cde5a6")},
         {"command": "mute",             "description": t("clients.telegram_bot.bot_msg_664071")},
         {"command": "pause",            "description": t("clients.telegram_bot.bot_msg_06c029")},
@@ -2651,6 +3680,8 @@ def run_polling():
                     threading.Thread(
                         target=handle_voice,
                         args=(msg["voice"], chat_id),
+                        kwargs={"reply_event_id": _telegram_routine_reply_event_id(msg),
+                                **_telegram_inbound_identity(msg)},
                         daemon=True
                     ).start()
                     continue
@@ -2679,38 +3710,16 @@ def run_polling():
                 if not cmd.startswith("/") and _consume_pending_partner():
                     _send_georgian_translation(user_text, force_src="ka")
                     continue
-                if cmd.startswith("/") and cmd not in ("/georgian", "/geo", "/g", "/georgian_phrases", "/gr", "/greek"):
+                if cmd.startswith("/") and cmd not in (*GEORGIAN_COMMAND_ALIASES, "/gr", "/greek"):
                     _clear_pending_georgian()
                     _clear_pending_partner()
 
-                if cmd == "/pause":
-                    with _override_lock:
-                        _override_state["pause_reminders"] = True
-                    _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_4c769a"))
-                    continue
-
-                if cmd == "/mute":
-                    with _override_lock:
-                        _override_state["mute_proactive"] = True
-                    _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_c9478b"))
-                    continue
-
-                if cmd.startswith("/sleep"):
-                    parts = cmd.split()
-                    hours = float(parts[1]) if len(parts) > 1 else 8.0
-                    with _override_lock:
-                        _override_state["sleep_until"] = _time.time() + hours * 3600
-                    _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_sleep_mode", hours=f"{hours:.0f}"))
-                    continue
-
-                if cmd == "/resume":
-                    with _override_lock:
-                        _override_state.update({"pause_reminders": False, "mute_proactive": False, "sleep_until": None})
-                    _save_override_state()
-                    send_telegram_msg(t("clients.telegram_bot.bot_msg_b33ab5"))
+                admin_reply = handle_external_admin_command(user_text)
+                if admin_reply is not None:
+                    if len(admin_reply) <= 3500:
+                        send_telegram_msg(admin_reply)
+                    else:
+                        send_telegram_msg_full(admin_reply)
                     continue
                 if user_text.lower().startswith("/confirm"):
                     cmd_to_confirm = user_text[len("/confirm"):].strip()
@@ -2722,29 +3731,6 @@ def run_polling():
                         t("clients.telegram_bot.bot_msg_confirm_req", cmd=cmd_to_confirm)
                     )
                     continue
-                if cmd == "/help":
-                    voice_status = "🔊 ON" if voice_mode_enabled else "✍️ OFF"
-                    send_telegram_msg(
-                        t("clients.telegram_bot.bot_msg_commands_title", bot_name=config.BOT_NAME) +
-                        t("clients.telegram_bot.bot_msg_help_menu", voice_status=voice_status)
-                    )
-                    continue
-
-                if cmd == "/doctor":
-                    try:
-                        from tools.system import system_doctor
-                        send_telegram_msg(system_doctor(days=1))
-                    except Exception as e:
-                        send_telegram_msg(t("clients.telegram_bot.bot_msg_doctor_error", e=e))
-                    continue
-
-                if cmd == "/status":
-                    if astakos_scheduler:
-                        send_telegram_msg(astakos_scheduler.status())
-                    else:
-                        send_telegram_msg(t("clients.telegram_bot.bot_msg_8c16dd"))
-                    continue
-
                 if cmd == "/voice":
                     voice_mode_enabled = not voice_mode_enabled
                     if voice_mode_enabled:
@@ -2753,12 +3739,12 @@ def run_polling():
                         send_telegram_msg(t("clients.telegram_bot.bot_msg_adde11"))
                     continue
 
-                if cmd in ("/georgian", "/geo", "/g", "/georgian_phrases"):
+                if cmd in GEORGIAN_COMMAND_ALIASES:
                     from tools.georgian import phrases_message
                     rest = user_text[len(cmd):].strip()
 
                     # /georgian_phrases → quick list
-                    if cmd == "/georgian_phrases" or rest.lower() == "phrases":
+                    if cmd in GEORGIAN_QUICK_PHRASES_ALIASES or rest.lower() == "phrases":
                         send_telegram_msg(phrases_message())
                         continue
 
@@ -2849,6 +3835,8 @@ def run_polling():
                 threading.Thread(
                     target=handle_message,
                     args=(user_text, chat_id),
+                    kwargs={"reply_event_id": _telegram_routine_reply_event_id(msg),
+                            **_telegram_inbound_identity(msg)},
                     daemon=True
                 ).start()
 
@@ -2863,10 +3851,11 @@ def run_polling():
 # ────────────────────────────────────────────────────────────────
 
 def job_check_reminders():
-    """Checks for reminders (SQL) and sends them to Telegram."""
+    """Deliver due reminders through the selected channel before completing them."""
     if is_reminders_paused():
         return
     import sqlite3
+    from memory.event_log import reserve_notification, release_notification_reservation
     from config import STATE_DB
     if not os.path.exists(STATE_DB):
         return
@@ -2882,9 +3871,12 @@ def job_check_reminders():
         due = cursor.fetchall()
         for rid, task in due:
             msg = f"🔔 REMINDER: {task}"
-            if is_duplicate_notification(msg, cooldown_seconds=60):
+            reserved_at = reserve_notification(msg, cooldown_seconds=60)
+            if reserved_at is None:
                 continue
-            _send_and_record_assistant(msg, agent="Routine_Agent")
+            if _send_and_record_assistant(msg, agent="Routine_Agent") is None:
+                release_notification_reservation(msg, reserved_at)
+                continue
             log_event("reminders", "sent", task=task)
             cursor.execute("UPDATE reminders SET status='done' WHERE id=?", (rid,))
             conn.commit()
@@ -2901,7 +3893,7 @@ def _load_recent_proactive_context(limit: int = 10) -> str:
 
         context = build_memory_context(
             "",
-            channel="telegram",
+            channel=_current_external_runtime_channel(),
             recent_limit=limit,
             semantic_k=0,
             write_debug=True,
@@ -2925,7 +3917,7 @@ def _build_proactive_memory_context(event_name: str) -> str:
         )
         context = build_memory_context(
             recall_query,
-            channel="telegram",
+            channel=_current_external_runtime_channel(),
             recent_limit=18,
             temporal_limit=12,
             semantic_k=6,
@@ -2946,6 +3938,7 @@ def _proactive_state_keys_for_event(event_name: str) -> list[str]:
     keys.extend([
         "kid1_away_from_home",
         "kid1_away_reason",
+        "kid1_absence_scope",
         "kid1_with_user",
         "kid1_with_partner",
         "football_season",
@@ -3015,6 +4008,10 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     # Shared state
     away = state_value("kid1_away_from_home") == "true"
     away_reason = state_value("kid1_away_reason")
+    from services.routine_context import kid1_unavailable_for_routine
+    confirmed_absence = kid1_unavailable_for_routine(
+        away, away_reason, state_value("kid1_absence_scope") or None,
+    )
     football_season = state_value("football_season")
     school_open = state_value("school_open")
     user_at_work = state_value("user_at_work") == "true"
@@ -3033,7 +4030,7 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     if t("clients.telegram_bot.bot_msg_48ded7") in event_l or "park" in event_l or t("clients.telegram_bot.bot_msg_09fd55") in event_l:
         if outing_state in {"in_progress", "done"}:
             return "[SILENT_SKIP] outing already handled"
-        if away:
+        if confirmed_absence:
             return t("clients.telegram_bot.bot_msg_9b132d")
         if kid1_with_partner and not kid1_with_user:
             return t("clients.telegram_bot.bot_msg_00c825")
@@ -3056,7 +4053,7 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
     if (t("clients.telegram_bot.bot_msg_ebba28") in event_l or t("clients.telegram_bot.bot_msg_c11689") in event_l or "sleep" in event_l) and t("clients.telegram_bot.bot_msg_560d13") not in event_l and t("clients.telegram_bot.bot_msg_0b50a2") not in event_l:
         if sleep_state in {"in_progress", "done"}:
             return "[SILENT_SKIP] sleep already handled"
-        if away:
+        if confirmed_absence:
             return t("clients.telegram_bot.bot_msg_06027b")
         if kid1_with_partner and not kid1_with_user:
             return t("clients.telegram_bot.bot_msg_00c825")
@@ -3071,7 +4068,7 @@ def _force_proactive_skip_from_state(event_name: str, state_snapshot: dict) -> s
             return "[SILENT_SKIP] sports training already handled or paused"
         if football_season == "false":
             return "[SILENT_SKIP] not football season"
-        if away:
+        if confirmed_absence:
             return t("clients.telegram_bot.bot_msg_9fbd6e")
         if kid1_with_partner and not kid1_with_user:
             return t("clients.telegram_bot.bot_msg_9ba3e7")
@@ -3254,33 +4251,84 @@ def _get_env_context() -> str:
         return ""
 
 
-def _should_send_sentimental_context_note(
-    routine_id: int,
+def _maybe_send_routine_context_note(
+    candidate: "RoutineCandidate", context: dict, evidence: dict,
+    store: "ClarificationStore", reason: str, *, budget_reserved: bool = False,
+    prepared_message: str | None = None,
+    prepared_history_marker: str | None = None,
+) -> str:
+    """Comment on a held action through the same canonical freshness gates."""
+    from memory.routine_context_clarification import ATHENS
+    from memory.routine_db import get_sentimental_info
+    from memory.conversation_history import get_max_rowid
+    from core.messaging_channel import resolve_external_channel
+    from services.routine_context import build_runtime_routine_context, build_routine_context_evidence, project_routine_context
+    from services.routine_context_clarification_poll import PollSnapshot
+    from services.routine_context_clarification_scheduler import dispatch_context_current
+    from services.routine_context_notes import send_context_note
+    from services.external_assistant_delivery import deliver_external_assistant_text
+
+    def clock() -> datetime:
+        """Read one explicit local instant, also supporting the test clock."""
+        at = datetime.now()
+        return at.replace(tzinfo=ATHENS) if at.tzinfo is None else at.astimezone(ATHENS)
+
+    try:
+        channel = _current_external_runtime_channel()
+        baseline = PollSnapshot((candidate,), context, evidence,
+                                prepared_history_marker if prepared_history_marker is not None
+                                else str(get_max_rowid())).fingerprint()
+
+        def fresh() -> bool:
+            """Recheck silence, receipt-aware eligibility, history and GPS/state."""
+            at = clock()
+            if (channel != resolve_external_channel() or channel != _current_external_runtime_channel()
+                    or get_sentimental_info(int(candidate.id)).get("sentimental_silenced")
+                    or is_quiet_hours()
+                    or should_skip_proactive_for_recent_activity(quiet=True)
+                    or not dispatch_context_current((candidate,), context, store, at)):
+                return False
+            current_evidence = build_routine_context_evidence(at)
+            current = project_routine_context(build_runtime_routine_context(at), current_evidence)
+            return PollSnapshot((candidate,), current, current_evidence,
+                str(get_max_rowid())).fingerprint() == baseline
+
+        outcome = send_context_note(packet={
+            "routine": {"id": candidate.id, "name": candidate.name[:500],
+                        "slot_at": candidate.slot_at.isoformat(),
+                        "conditions": list(candidate.conditions)[:5]},
+            "context": context, "reason": reason[:800], "channel": channel,
+        }, store=store, now=clock(), fresh=fresh,
+            classify=(lambda _: {"message": prepared_message}) if prepared_message is not None else None,
+            deliver=lambda text: deliver_external_assistant_text(
+                text, agent="Routine_Agent", target_channel=channel),
+            queue_history_repair=enqueue_fast_task,
+            budget=(lambda: True) if budget_reserved else can_send_proactive)
+        if (outcome != "already_evaluated"
+                and _should_log_routine_skip(int(candidate.id), "routine_context_note", outcome)):
+            log_event("routines", "routine_context_note", routine_id=int(candidate.id),
+                      event=candidate.name, outcome=outcome, debug_type="proactive_decision",
+                      debug_source="scheduler", debug_effect="context_note_sent"
+                      if outcome.startswith("sent") else "context_note_skipped")
+        return outcome
+    except Exception as exc:
+        print(f"[RoutineContextNote]: failed closed: {type(exc).__name__}")
+        return "error"
+
+
+def _craft_proactive_msg(
     event_name: str,
-) -> bool:
-    """Return whether a skipped sentimental routine may send one warm note."""
-    from memory.routine_db import get_sentimental_info, set_routine_sentimental
-    import random
-
-    info = get_sentimental_info(routine_id)
-    if info.get("sentimental_silenced"):
-        return False
-
-    sentimental = info.get("sentimental")
-    if sentimental is None:
-        sentimental = _infer_sentimental(event_name, "")
-        set_routine_sentimental(routine_id, bool(sentimental))
-
-    if not sentimental:
-        return False
-
-    return random.random() < config.SENTIMENTAL_CONTEXT_NOTE_PROBABILITY
-
-
-def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> str:
-    """LLM creates a natural proactive message instead of a template."""
-    from langchain_core.messages import HumanMessage
+    confidence: float,
+    count: int = 1,
+    *,
+    allow_messenger_draft_offer: bool = True,
+    routine_context: dict | None = None,
+    routine_timing: dict | None = None,
+) -> tuple[str, bool]:
+    """Create one proactive message and its fail-closed structured draft-offer state."""
+    from langchain_core.messages import HumanMessage, SystemMessage
     from core.brain import llm
+    from core.untrusted_content import format_untrusted_tool_result
 
     if count > 1:
         context = t("clients.telegram_bot.bot_msg_has_routines_mins", user_name=config.USER_NAME, count=count, event_name=event_name)
@@ -3295,6 +4343,10 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
     memory_block = f"\n\n{memory_context}\n" if memory_context else ""
 
     state_snapshot = _build_proactive_state_snapshot(event_name)
+    if routine_context is not None:
+        from services.routine_context_evidence import VOLATILE_FLAGS
+        state_snapshot = {**state_snapshot, **{
+            flag: {"value": routine_context.get(flag)} for flag in VOLATILE_FLAGS}}
 
     if state_snapshot:
         try:
@@ -3305,9 +4357,11 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
 
     forced_skip = _force_proactive_skip_from_state(event_name, state_snapshot)
     if forced_skip:
-        return forced_skip
+        return forced_skip, False
 
-    env_context = _get_env_context()
+    # The routine projection already reconciles fresh GPS; the legacy four-hour
+    # environment path must not reintroduce stale location as current authority.
+    env_context = _get_env_context() if routine_context is None else ""
     env_block = f"\n{env_context}\n" if env_context else ""
 
     prompt = core.i18n.load_prompt("telegram_bot_craft_proactive.md").format(
@@ -3315,21 +4369,54 @@ def _craft_proactive_msg(event_name: str, confidence: float, count: int = 1) -> 
         memory_block=memory_block,
         env_block=env_block,
         language=config.RESPONSE_LANGUAGE,
-        user_name=config.USER_NAME
+        user_name=config.USER_NAME,
+        allow_messenger_draft_offer=str(allow_messenger_draft_offer).lower(),
+        timing_block=format_untrusted_tool_result("routine schedule", json.dumps(routine_timing, default=str))
+            if routine_timing is not None else "",
     )
 
     try:
-        response = safe_llm_invoke(llm, [HumanMessage(content=prompt)])
+        messages = [HumanMessage(content=prompt)]
+        if routine_context is not None:
+            current_prompt = core.i18n.load_prompt("routine_context_current.md")
+            messages = [SystemMessage(content=current_prompt),
+                        HumanMessage(content=format_untrusted_tool_result(
+                            "current routine context", json.dumps(routine_context, default=str))), *messages]
+        response = safe_llm_invoke(llm, messages)
         content = response.content
         if isinstance(content, list):
             content = "".join(
                 part.get("text", "") if isinstance(part, dict) else str(part)
                 for part in content
             )
-        return content.strip()
+        raw_content = content.strip()
+        try:
+            parsed = json.loads(raw_content)
+            if (
+                isinstance(parsed, dict)
+                and set(parsed) == {"message", "offers_messenger_draft"}
+                and isinstance(parsed["message"], str)
+                and parsed["message"].strip()
+                and type(parsed["offers_messenger_draft"]) is bool
+            ):
+                message = parsed["message"].strip()
+                # This path has no draft-write tool. A Messenger reminder may
+                # offer preparation, but cannot display a supposedly saved draft.
+                if (_is_partner_messenger_routine(event_name)
+                        and not message.startswith(("[CONTEXT_SKIP]", "[CONTEXT_NOTE]", "[SILENT_SKIP]"))):
+                    key = "messenger_prepare_offer" if allow_messenger_draft_offer else "messenger_routine_reminder"
+                    return t(f"clients.telegram_bot.{key}", event_name=event_name), allow_messenger_draft_offer
+                return (
+                    message,
+                    parsed["offers_messenger_draft"] and allow_messenger_draft_offer,
+                )
+        except (TypeError, ValueError):
+            pass
+        print("[Proactive Craft]: invalid structured response; draft offer disabled.")
+        return t("clients.telegram_bot.bot_msg_oops_remembered", event_name=event_name), False
     except Exception as e:
         print(f"[Proactive Craft Error]: {e}")
-        return t("clients.telegram_bot.bot_msg_oops_remembered", event_name=event_name)
+        return t("clients.telegram_bot.bot_msg_oops_remembered", event_name=event_name), False
 
 
 def _infer_muted_until(event_name: str, memory_context: str) -> str | None:
@@ -3404,28 +4491,6 @@ def _infer_sentimental(event_name: str, memory_context: str) -> bool:
         return False
 
 
-def _should_allow_sentimental_override(event_name: str, cond_result: dict) -> bool:
-    """
-    Keep sentimental overrides for family/home-like routines, but block them
-    for work/shift-driven suppressions.
-    """
-    try:
-        results = cond_result.get("results") or []
-        reason_blob = " ".join(
-            str(item.get("reason", "")) for item in results if isinstance(item, dict)
-        ).lower()
-
-        from config import SENTIMENTAL_OVERRIDE_KEYWORDS
-        
-        if any(token in reason_blob for token in ("shift_mode", "user_at_work", "partner_work_mode")):
-            return False
-
-        event_norm = _normalize_gr(event_name)
-        return any(token in event_norm for token in SENTIMENTAL_OVERRIDE_KEYWORDS)
-    except Exception:
-        return False
-
-
 def _craft_sentimental_absent_msg(
     event_name: str, muted_from: str, muted_until: str, memory_context: str
 ) -> str:
@@ -3480,7 +4545,7 @@ def _craft_deferred_msg(event_name: str, confidence: float, missed_minutes: int)
         from memory.context_builder import build_memory_context
         memory_context = build_memory_context(
             event_name,
-            channel="telegram",
+            channel=_current_external_runtime_channel(),
             recent_limit=8,
             semantic_k=4,
             write_debug=True,
@@ -3525,7 +4590,7 @@ def startup_check_missed_routines():
     from datetime import timedelta
     from config import BASE_DIR, ROUTINE_MISS_GRACE_MINUTES
 
-    if is_quiet_hours() or is_proactive_muted():
+    if is_quiet_hours() or is_proactive_muted() or is_routines_paused():
         print("\033[90m[MissedRoutines]: Quiet hours / muted — skip startup check.\033[0m")
         return
 
@@ -3583,12 +4648,31 @@ def startup_check_missed_routines():
             get_routine_schedule_meta, is_routine_temporarily_inactive_meta,
             get_routine_conditions,
         )
-        from services.routine_context import build_runtime_routine_context
+        from services.routine_context import (
+            build_runtime_routine_context, build_routine_context_evidence, project_routine_context,
+        )
         from services.routine_conditions import evaluate_routine_conditions
+        from memory.routine_context_clarification import ATHENS, ClarificationStore
+        from services.routine_context_clarification import RoutineCandidate
+        from services.routine_context_clarification_scheduler import question_blocks_dispatch, dispatch_context_current
+        from pathlib import Path
 
         rt_context = build_runtime_routine_context(now=now)
+        clarification_store = ClarificationStore(Path(BASE_DIR) / "astakos_routine_context_questions.json")
+        aware_now = now.replace(tzinfo=ATHENS) if now.tzinfo is None else now
+        dated_sender = _dated_deferred_routine_sender
+        if dated_sender is not None:
+            rt_context = project_routine_context(rt_context, build_routine_context_evidence(aware_now))
 
         for r_id, event_name, confidence, time_str in missed:
+            h, m = map(int, time_str.split(":"))
+            slot = aware_now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if question_blocks_dispatch(clarification_store, aware_now,
+                    RoutineCandidate(str(r_id), event_name, slot, ())):
+                log_event("routines", "routine_context_expired", routine_id=r_id,
+                          debug_type="scheduler_decision", debug_source="context_clarification",
+                          debug_effect="no_late_replay")
+                continue
             # ── Seasonal/temporary inactivity check (paused_until / active window) ──
             # Must run BEFORE any missed/trigger logic — a routine in
             # pause or out of active window is not "lost", it just does not apply right now.
@@ -3634,6 +4718,9 @@ def startup_check_missed_routines():
             except Exception:
                 missed_min = ROUTINE_MISS_GRACE_MINUTES // 2
 
+            candidate = RoutineCandidate(str(r_id), event_name, slot, tuple(cond_list))
+            selected_channel = resolve_external_channel() if dated_sender is not None else None
+            revision = dated_sender.revision(r_id) if dated_sender is not None else None
             msg = _craft_deferred_msg(event_name, confidence, missed_min)
             ctx = ""
             if msg.strip().startswith("[SILENT_SKIP]") or "[CONTEXT_SKIP]" in msg:
@@ -3642,7 +4729,29 @@ def startup_check_missed_routines():
                 except Exception:
                     ctx = ""
 
-            # Mark as triggered so that the regular job does not send it again today
+            ordinary_dated = (dated_sender is not None
+                              and not msg.strip().startswith("[SILENT_SKIP]")
+                              and "[CONTEXT_SKIP]" not in msg)
+            if ordinary_dated:
+                result = dated_sender.send(
+                    routine_id=r_id, occurrence_date=aware_now.date(), text=msg,
+                    expected_revision=revision,
+                    eligible=lambda: (
+                        resolve_external_channel() == selected_channel
+                        and _current_external_runtime_channel() == selected_channel
+                        and can_send_proactive()
+                        and dispatch_context_current((candidate,), rt_context,
+                            clarification_store, dated_sender.now(),
+                            late_grace_minutes=ROUTINE_MISS_GRACE_MINUTES)),
+                )
+                if result.receipt is None:
+                    continue
+                if result.delivery_repair is not None:
+                    enqueue_fast_task(result.delivery_repair)
+                if result.history_repair is not None:
+                    enqueue_fast_task(result.history_repair)
+
+            # A dated send is marked only after confirmed transport delivery.
             conn2   = sqlite3.connect(DB_PATH)
             cursor2 = conn2.cursor()
             cursor2.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
@@ -3655,7 +4764,7 @@ def startup_check_missed_routines():
                 log_event("routines", "routine_silent_skip", routine_id=r_id, event=event_name,
                           deferred=True, muted_until=muted_until, debug_type="proactive_policy", debug_source="scheduler", debug_effect="silent_skip")
                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name,
-                         deferred=True, channel="telegram")
+                         deferred=True, channel=_current_external_runtime_channel())
                 print(f"\033[90m[MissedRoutines]: SILENT_SKIP '{event_name}' ({missed_min} minutes late)\033[0m")
                 continue
 
@@ -3674,21 +4783,27 @@ def startup_check_missed_routines():
                           deferred=True, missed_minutes=missed_min,
                           muted_until=muted_until, preview=(context_skip_preview or msg)[:160], debug_type="proactive_policy", debug_source="scheduler", debug_effect="context_skip")
                 bus.emit("routine_skipped_context", routine_id=r_id, event=event_name,
-                         deferred=True, channel="telegram")
+                         deferred=True, channel=_current_external_runtime_channel())
                 print(f"\033[90m[MissedRoutines]: CONTEXT_SKIP '{event_name}' ({missed_min} minutes late) → '{msg[:80]}'\033[0m")
                 continue
 
-            _send_and_record_assistant(msg, agent="Routine_Agent")
+            if not ordinary_dated:
+                _send_and_record_assistant(msg, agent="Routine_Agent")
 
-            mark_routine_notified(r_id)
             sent_at = datetime.now()
-            pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
-            save_pending_confirmation(r_id, event_name, sent_at)
+            if not ordinary_dated:
+                mark_routine_notified(r_id)
+                pending_routine_confirmations[r_id] = {
+                    "event": event_name,
+                    "sent_at": sent_at,
+                    "draft_offer": False,
+                }
+                save_pending_confirmation(r_id, event_name, sent_at, draft_offer=False)
             log_event("routines", "deferred_followup",
                       routine_id=r_id, event=event_name,
                       missed_minutes=missed_min, preview=msg[:160])
             bus.emit("routine_triggered", routine_id=r_id, event=event_name,
-                     confidence=confidence, deferred=True, channel="telegram")
+                     confidence=confidence, deferred=True, channel=_current_external_runtime_channel())
             print(f"\033[92m[MissedRoutines]: ✅ Deferred '{event_name}' ({missed_min} minutes late) → '{msg[:80]}'\033[0m")
 
             if len(missed) > 1:
@@ -3698,6 +4813,50 @@ def startup_check_missed_routines():
         print(f"\033[91m[MissedRoutines]: {e}\033[0m")
 
 
+from services.routine_context_clarification_scheduler import serialized_routine_dispatch
+
+
+def _routine_response_elapsed(sent_at: datetime, now: datetime) -> float:
+    """Compare pending-window instants, accepting canonical legacy Athens wall times."""
+    from datetime import timezone
+    from services.routine_feedback import ATHENS, aware
+    sent = aware(sent_at.replace(tzinfo=ATHENS) if sent_at.tzinfo is None else sent_at)
+    current = aware(now.replace(tzinfo=ATHENS) if now.tzinfo is None else now)
+    return (current.astimezone(timezone.utc) - sent.astimezone(timezone.utc)).total_seconds()
+
+
+def _expire_pending_routine_response(routine_id: int, *, sent_at: datetime, now: datetime) -> dict | None:
+    """Select one expiry policy; dated cleanup never falls back to legacy decay."""
+    if _dated_pending_expiry_handler is None:
+        if any(dependency is not None for dependency in (
+            _dated_routine_feedback_tick, _dated_single_routine_sender,
+            _dated_deferred_routine_sender, _dated_batch_routine_sender,
+            _persisted_routine_feedback_handler,
+        )):
+            log_event("routines", "routine_response_window_cleanup_unconfigured",
+                      routine_id=routine_id, debug_type="pending_cleanup",
+                      debug_source="dated_feedback", debug_effect="retry_pending")
+            return None
+        from memory.routine_db import record_unanswered_routine_expiry
+        return record_unanswered_routine_expiry(routine_id)
+    try:
+        if _dated_pending_expiry_handler(routine_id, sent_at=sent_at, now=now) is True:
+            return {"confidence_reduced": False, "dated_window_closed": True}
+    except Exception:
+        log_event("routines", "routine_response_window_cleanup_failed", routine_id=routine_id,
+                  debug_type="pending_cleanup", debug_source="dated_feedback", debug_effect="retry_pending")
+    return None
+
+
+def _refresh_dated_draft_confirmation(routine_id: int) -> None:
+    """Reload confirmed canonical offer state after write-only receipt recovery."""
+    from memory.routine_db import load_pending_confirmations
+    pending = load_pending_confirmations().get(routine_id)
+    if pending is not None and pending.get("draft_offer") is True:
+        pending_routine_confirmations[routine_id] = pending
+
+
+@serialized_routine_dispatch
 def job_check_routines():
     """
     Checks for upcoming routines (30' in advance) and performs timeout decay
@@ -3706,6 +4865,25 @@ def job_check_routines():
     import sqlite3
     from datetime import timedelta
     from config import BASE_DIR
+
+    if _dated_routine_feedback_tick is not None:
+        from services.routine_feedback import ATHENS
+        try:
+            if _dated_routine_feedback_tick(datetime.now(ATHENS)) is not True:
+                return
+        except Exception as exc:
+            logger.warning("Dated routine maintenance callback failed (%s)", type(exc).__name__)
+            return
+
+    if _dated_pending_expiry_handler is not None:
+        from memory.routine_db import load_pending_confirmations
+        try:
+            canonical_pending = load_pending_confirmations()
+        except Exception as exc:
+            logger.warning("Dated routine pending reload failed (%s)", type(exc).__name__)
+            return
+        pending_routine_confirmations.clear()
+        pending_routine_confirmations.update(canonical_pending)
 
     DB_PATH = config.ROUTINES_DB
     DAYS_MAP = {
@@ -3746,10 +4924,10 @@ def job_check_routines():
         return
     if is_quiet_hours():
         if pending_routine_confirmations:
-            from memory.routine_db import decay_routine, remove_pending_confirmation, get_routine_state, RoutineState
+            from memory.routine_db import record_unanswered_routine_expiry, remove_pending_confirmation, get_routine_state, RoutineState
             now_check = datetime.now()
             for rid in list(pending_routine_confirmations.keys()):
-                if (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds() > 1800:
+                if _routine_response_elapsed(pending_routine_confirmations[rid]["sent_at"], now_check) > 1800:
                     try:
                         current_state = get_routine_state(rid)
                     except Exception:
@@ -3769,24 +4947,30 @@ def job_check_routines():
                         remove_pending_confirmation(rid)
                         continue
 
-                    decay_routine(rid)
+                    result = _expire_pending_routine_response(rid,
+                        sent_at=pending_routine_confirmations[rid]["sent_at"], now=now_check)
+                    if result is None:
+                        continue
                     log_event(
                         "routines", 
-                        "routine_timeout_decay", 
+                        "routine_unanswered_decay" if result["confidence_reduced"] else "routine_response_window_expired",
                         routine_id=rid,
                         event=pending_routine_confirmations[rid]["event"],
                         elapsed_s=1800,
                         debug_type="pending_cleanup",
                         debug_source="timeout_guard",
-                        debug_effect="cooldown_changed",
+                        debug_effect=(
+                            "confidence_decayed"
+                            if result["confidence_reduced"]
+                            else "response_window_closed" if result.get("dated_window_closed") else "pending_expired_unanswered"
+                        ),
                     )
                     pending_routine_confirmations.pop(rid, None)
                     remove_pending_confirmation(rid)
-    # 2. Timeout decay for pending confirmations (>30')
-    # TRIGGER_PENDING → IGNORED → ACTIVE (cooldown doubled, confidence intact)
+    # 2. Close response windows; the injected dated policy accounts only at day close.
     if pending_routine_confirmations:
         from memory.routine_db import (
-            mark_routine_ignored,
+            record_unanswered_routine_expiry,
             remove_pending_confirmation,
             get_routine_state,
             RoutineState,
@@ -3794,7 +4978,7 @@ def job_check_routines():
 
         now_check = datetime.now()
         for rid in list(pending_routine_confirmations.keys()):
-            elapsed = (now_check - pending_routine_confirmations[rid]["sent_at"]).total_seconds()
+            elapsed = _routine_response_elapsed(pending_routine_confirmations[rid]["sent_at"], now_check)
             if elapsed > 1800:
                 ev = pending_routine_confirmations[rid]["event"]
 
@@ -3818,27 +5002,42 @@ def job_check_routines():
                     continue
 
                 try:
-                    mark_routine_ignored(rid)  # TRIGGER_PENDING → IGNORED → ACTIVE + doubled cooldown
+                    result = _expire_pending_routine_response(rid,
+                        sent_at=pending_routine_confirmations[rid]["sent_at"], now=now_check)
+                    if result is None:
+                        continue
                 except DBWriteError as e:
-                    print(f"\033[91m[Timeout Decay DBWriteError]: {e}\033[0m")
+                    print(f"\033[91m[Routine Response Window DBWriteError]: {e}\033[0m")
+                    result = {"confidence_reduced": False}
 
                 timeout_err = PendingTimeoutError(rid, ev, elapsed)
-                log_event("routines", "routine_timeout_decay",
+                log_event("routines", "routine_unanswered_decay" if result["confidence_reduced"] else "routine_response_window_expired",
                     routine_id=rid,
                     event=ev,
                     elapsed_s=int(elapsed),
                     error=str(timeout_err),
                     debug_type="pending_cleanup",
                     debug_source="timeout_guard",
-                    debug_effect="cooldown_changed",
+                    debug_effect=(
+                        "confidence_decayed"
+                        if result["confidence_reduced"]
+                        else "response_window_closed" if result.get("dated_window_closed") else "pending_expired_unanswered"
+                    ),
                 )
 
                 del pending_routine_confirmations[rid]
                 remove_pending_confirmation(rid)
 
+    routine_pause_until = _active_routine_pause_until()
+    if routine_pause_until is not None:
+        _log_vacation_routine_skip(routine_pause_until)
+        return
+
     # 1. Upcoming routine notifications
     try:
         if os.path.exists(DB_PATH):
+            from services.routine_context_clarification_scheduler import schedule_context_clarification
+            schedule_context_clarification(enqueue_slow_task)
             conn   = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             try:
@@ -3871,11 +5070,21 @@ def job_check_routines():
                     get_routine_schedule_meta, is_routine_temporarily_inactive_meta,
                     get_routine_conditions,
                 )
-                from services.routine_context import build_runtime_routine_context
+                from services.routine_context import build_runtime_routine_context, build_routine_context_evidence, project_routine_context
+                from memory.routine_context_clarification import ATHENS, ClarificationStore
+                from services.routine_context_clarification import RoutineCandidate
+                from services.routine_context_clarification_scheduler import (
+                    routine_context_block, question_blocks_dispatch, dispatch_context_current,
+                )
+                from pathlib import Path
                 from services.routine_conditions import evaluate_routine_conditions
                 due_routines = []
+                due_context_candidates = []
                 triggered_conflict_groups = set()
-                rt_context = build_runtime_routine_context(now=now)
+                aware_now = now.replace(tzinfo=ATHENS) if now.tzinfo is None else now
+                context_evidence = build_routine_context_evidence(aware_now)
+                rt_context = project_routine_context(build_runtime_routine_context(now=now), context_evidence)
+                clarification_store = ClarificationStore(Path(BASE_DIR) / "astakos_routine_context_questions.json")
 
                 def _get_conflict_group(name: str) -> str:
                     parts = name.lower().split()
@@ -3923,6 +5132,24 @@ def job_check_routines():
                         continue
                     # ── Phase 3C: Conditions Evaluator ───────────────────────
                     cond_list = get_routine_conditions(r_id)
+                    slot = routine_dt.replace(tzinfo=ATHENS) if routine_dt.tzinfo is None else routine_dt
+                    if time_diff_mins >= 0 and slot < aware_now:
+                        slot += timedelta(days=1)
+                    candidate = RoutineCandidate(str(r_id), event_name, slot, tuple(cond_list))
+                    if question_blocks_dispatch(clarification_store, aware_now, candidate):
+                        triggered_conflict_groups.add(conflict_group)
+                        continue
+                    if (not get_routine_muted_until(r_id)
+                            and not is_duplicate_routine(r_id, get_routine_notify_info(r_id)["cooldown_hours"])
+                            and routine_context_block(
+                                candidate,
+                                rt_context, context_evidence, clarification_store, aware_now)):
+                        if _should_log_routine_skip(r_id, "routine_context_unknown", "context_unknown"):
+                            log_event("routines", "routine_context_unknown", routine_id=r_id,
+                                reason="context_unknown", debug_type="scheduler_decision",
+                                debug_source="context_clarification", debug_effect="waiting_context")
+                        triggered_conflict_groups.add(conflict_group)
+                        continue
                     if cond_list:
                         cond_result = evaluate_routine_conditions(cond_list, rt_context, now=now)
                         if not cond_result.get("allowed", True):
@@ -3940,19 +5167,11 @@ def job_check_routines():
                                     debug_effect="blocked",
                                 )
                         
-                            import random
-                            # 30% chance for a Sentimental Override (approx 2 times a week for a daily routine)
-                            if random.random() < 0.30 and _should_allow_sentimental_override(event_name, cond_result):
-                                blocked_reason_text = ", ".join(str(r.get("reason", "blocked")) for r in cond_result.get("results", []) if not r.get("allowed"))
-                                override_name = f"{event_name} [CANCELLED TODAY DUE TO: {blocked_reason_text}]"
-                                if should_log:
-                                    print(f"\U0001f496 [job_check_routines]: #{r_id} '{event_name}' blocked but triggering sentimental override!")
-                                # Fall through to due_routines to let the LLM generate a [CONTEXT_SKIP]
-                                event_name = override_name
-                            else:
-                                if should_log:
-                                    print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('failed_count')} failed) — skipped")
-                                continue
+                            _maybe_send_routine_context_note(candidate, rt_context,
+                                context_evidence, clarification_store, blocked_reason)
+                            if should_log:
+                                print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('failed_count')} failed) — skipped")
+                            continue  # A note can never fall through to action/reminder delivery.
                         else:
                             log_event(
                                 "routines", 
@@ -3997,7 +5216,10 @@ def job_check_routines():
                         if _should_log_routine_skip(r_id, "routine_cooldown_skip", skip_reason):
                             log_event("routines", "routine_cooldown_skip", routine_id=r_id, event=event_name, cooldown_hours=cd_hours, debug_type="scheduler_decision", debug_source="scheduler", debug_effect="cooldown_skip")
                         continue
+                    if not clarification_store.claim_routine_wording(candidate.id, candidate.slot_at, now=aware_now):
+                        continue
                     due_routines.append((r_id, event_name, confidence))
+                    due_context_candidates.append(candidate)
                     triggered_conflict_groups.add(conflict_group)
 
 
@@ -4014,10 +5236,36 @@ def job_check_routines():
                     conn.close()
                     return
 
+                routine_timing = {"now": aware_now.isoformat(), "slots": [
+                    {"id": item.id, "name": item.name, "at": item.slot_at.isoformat()}
+                    for item in due_context_candidates]}
+                from memory.conversation_history import get_max_rowid
+                wording_history_marker = str(get_max_rowid())
                 # ── Batching: multiple routines → one message ──────────────────
                 if len(due_routines) > 1:
+                    dated_batch_sender = _dated_batch_routine_sender
+                    batch_revisions = ({rid: dated_batch_sender.revision(rid)
+                                        for rid, _, _ in due_routines}
+                                       if dated_batch_sender is not None else None)
+                    batch_date = (dated_batch_sender.now().astimezone(ATHENS).date()
+                                  if dated_batch_sender is not None else None)
+                    batch_channel = _current_external_runtime_channel()
                     names = ", ".join(f"'{e}'" for _, e, _ in due_routines)
-                    msg = _craft_proactive_msg(names, 0.9, count=len(due_routines))
+                    msg, _ = _craft_proactive_msg(
+                        names,
+                        0.9,
+                        count=len(due_routines),
+                        allow_messenger_draft_offer=False,
+                        routine_context=rt_context,
+                        routine_timing=routine_timing,
+                    )
+                    dispatch_now = datetime.now()
+                    if str(get_max_rowid()) != wording_history_marker:
+                        return
+                    if not dispatch_context_current(tuple(due_context_candidates), rt_context,
+                            clarification_store, dispatch_now.replace(tzinfo=ATHENS)
+                            if dispatch_now.tzinfo is None else dispatch_now):
+                        return
 
                     if msg.strip().startswith("[CONTEXT_NOTE]"):
                         msg = msg.replace("[CONTEXT_NOTE]", "[CONTEXT_SKIP]", 1)
@@ -4040,7 +5288,7 @@ def job_check_routines():
                                 debug_source="scheduler",
                                 debug_effect="notification_skipped",
                             )
-                            bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
+                            bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel=_current_external_runtime_channel())
                             _clear_routine_pending_confirmation(r_id)
                             _apply_context_mute(r_id, event_name, ctx)
                         conn.commit()
@@ -4060,8 +5308,28 @@ def job_check_routines():
                                 context_skip_ctx = _build_proactive_memory_context(names)
                             except Exception:
                                 context_skip_ctx = ""
+                        dated_batch_delivery = dated_batch_sender is not None and not is_context_skip
+                        if dated_batch_delivery:
+                            def batch_eligible() -> bool:
+                                """Reload the whole group's canonical gates before reservation."""
+                                return (batch_channel == _current_external_runtime_channel()
+                                    and batch_channel == resolve_external_channel()
+                                    and can_send_proactive()
+                                    and dispatch_context_current(tuple(due_context_candidates),
+                                        rt_context, clarification_store, dated_batch_sender.now()))
+                            result = dated_batch_sender.send_batch(occurrence_date=batch_date,
+                                text=msg, expected_revisions=batch_revisions, eligible=batch_eligible)
+                            if result.receipt is None:
+                                return  # Never retry an uncertain group using legacy transport.
+                            if result.delivery_repair is not None:
+                                enqueue_fast_task(result.delivery_repair)
+                            if result.history_repair is not None:
+                                enqueue_fast_task(result.history_repair)
+                        elif not is_context_skip and not _send_and_record_assistant(msg, agent="Routine_Agent"):
+                            return
                         for r_id, event_name, confidence in due_routines:
-                            cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                            if not is_context_skip:
+                                cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                             if is_context_skip:
                                 _clear_routine_pending_confirmation(r_id)
                                 muted_until = None
@@ -4077,29 +5345,53 @@ def job_check_routines():
                                     debug_source="scheduler",
                                     debug_effect="notification_skipped",
                                 )
-                                bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel="telegram")
+                                bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, batch=True, channel=_current_external_runtime_channel())
                             else:
-                                _send_and_record_assistant(msg, agent="Routine_Agent")
                                 sent_at = datetime.now()
-                                mark_routine_notified(r_id)
+                                if not dated_batch_delivery:
+                                    mark_routine_notified(r_id)
                                 log_event("routines", "routine_triggered", 
                                     routine_id=r_id,
                                     event=event_name, 
                                     confidence=confidence,
-                                    batch=len(due_routines, debug_type="scheduler_decision", debug_source="scheduler", debug_effect="triggered"), 
+                                    batch=len(due_routines),
                                     preview=msg[:160],
                                     debug_type="proactive_decision",
                                     debug_source="scheduler",
                                     debug_effect="notification_sent",
                                 )
-                                pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
-                                save_pending_confirmation(r_id, event_name, sent_at)
-                                bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel="telegram")
+                                if not dated_batch_delivery:
+                                    pending_routine_confirmations[r_id] = {
+                                        "event": event_name,
+                                        "sent_at": sent_at,
+                                        "draft_offer": False,
+                                    }
+                                    save_pending_confirmation(r_id, event_name, sent_at, draft_offer=False)
+                                bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=True, channel=_current_external_runtime_channel())
                         conn.commit()
                 else:
                     # One routine → personalized message
                     r_id, event_name, confidence = due_routines[0]
-                    msg = _craft_proactive_msg(event_name, confidence)
+                    dated_sender = _dated_single_routine_sender
+                    dated_revision = dated_sender.revision(r_id) if dated_sender is not None else None
+                    dated_date = dated_sender.now().astimezone(ATHENS).date() if dated_sender is not None else None
+                    dated_channel = _current_external_runtime_channel()
+                    can_offer_messenger_draft = _is_partner_messenger_routine(event_name)
+                    msg, draft_offer = _craft_proactive_msg(
+                        event_name,
+                        confidence,
+                        allow_messenger_draft_offer=can_offer_messenger_draft,
+                        routine_context=rt_context,
+                        routine_timing=routine_timing,
+                    )
+                    dispatch_now = datetime.now()
+                    if str(get_max_rowid()) != wording_history_marker:
+                        return
+                    if not dispatch_context_current(tuple(due_context_candidates), rt_context,
+                            clarification_store, dispatch_now.replace(tzinfo=ATHENS)
+                            if dispatch_now.tzinfo is None else dispatch_now):
+                        return
+                    draft_offer = draft_offer and can_offer_messenger_draft
 
                     if msg.strip().startswith("[SILENT_SKIP]"):
                         # First time SILENT_SKIP — estimate muted_until
@@ -4118,7 +5410,7 @@ def job_check_routines():
                             debug_source="scheduler",
                             debug_effect="notification_skipped",
                         )
-                        bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
+                        bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel=_current_external_runtime_channel())
                         _clear_routine_pending_confirmation(r_id)
                         _apply_context_mute(r_id, event_name, ctx)
                     else:
@@ -4129,35 +5421,17 @@ def job_check_routines():
                         if is_context_skip:
                             marker = "[CONTEXT_NOTE]" if is_context_note else "[CONTEXT_SKIP]"
                             context_skip_preview = msg.replace(marker, "").strip()
+                            prepared_context_note = context_skip_preview if is_context_note else None
                             if not context_skip_preview:
                                 context_skip_preview = "context_skip_without_explanation"
                             msg = context_skip_preview
 
-                        cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
-                        conn.commit()
-
                         if is_context_skip:
-                            if (
-                                is_context_note
-                                and _should_send_sentimental_context_note(
-                                    r_id,
-                                    event_name,
-                                )
-                            ):
-                                _send_and_record_assistant(
-                                    msg,
-                                    agent="Routine_Agent",
-                                )
-                                log_event(
-                                    "routines",
-                                    "routine_context_note",
-                                    routine_id=r_id,
-                                    event=event_name,
-                                    preview=msg[:160],
-                                    debug_type="proactive_decision",
-                                    debug_source="scheduler",
-                                    debug_effect="context_note_sent",
-                                )
+                            _maybe_send_routine_context_note(due_context_candidates[0], rt_context,
+                                context_evidence, clarification_store, context_skip_preview,
+                                budget_reserved=True,
+                                prepared_message=prepared_context_note,
+                                prepared_history_marker=wording_history_marker if is_context_note else None)
                             _clear_routine_pending_confirmation(r_id)
                             muted_until = None
                             log_event(
@@ -4172,10 +5446,44 @@ def job_check_routines():
                                 debug_effect="notification_skipped",
                             )
                             # DO NOT mark as pending, just keep it active.
-                            bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel="telegram")
+                            bus.emit("routine_skipped_context", routine_id=r_id, event=event_name, channel=_current_external_runtime_channel())
                         else:
-                            _send_and_record_assistant(msg, agent="Routine_Agent")
-                            mark_routine_notified(r_id)
+                            dated_delivery = dated_sender is not None
+                            if dated_delivery:
+                                def dated_eligible() -> bool:
+                                    """Reload canonical gates at the durable reservation boundary."""
+                                    return (dated_channel == _current_external_runtime_channel()
+                                        and dated_channel == resolve_external_channel()
+                                        and can_send_proactive()
+                                        and dispatch_context_current(tuple(due_context_candidates),
+                                            rt_context, clarification_store, dated_sender.now()))
+                                draft_options = {"draft_event": event_name} if draft_offer else {}
+                                result = dated_sender.send(routine_id=r_id,
+                                    occurrence_date=dated_date, text=msg,
+                                    expected_revision=dated_revision, eligible=dated_eligible,
+                                    **draft_options)
+                                if result.receipt is None:
+                                    return  # A blocked/unknown send never falls back to legacy transport.
+                                if result.delivery_repair is not None:
+                                    if draft_offer:
+                                        def repair_draft_delivery(repair=result.delivery_repair, rid=r_id) -> bool:
+                                            """Repair canonical writes and refresh the exact pending offer."""
+                                            repaired = repair()
+                                            _refresh_dated_draft_confirmation(rid)
+                                            return repaired
+                                        enqueue_fast_task(repair_draft_delivery)
+                                    else:
+                                        enqueue_fast_task(result.delivery_repair)
+                                if result.history_repair is not None:
+                                    enqueue_fast_task(result.history_repair)
+                            elif not _send_and_record_assistant(msg, agent="Routine_Agent"):
+                                return
+                            cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
+                            conn.commit()
+                            if not dated_delivery:
+                                mark_routine_notified(r_id)
+                            if dated_delivery and draft_offer:
+                                _refresh_dated_draft_confirmation(r_id)
                             log_event(
                                 "routines", 
                                 "routine_triggered", 
@@ -4187,10 +5495,15 @@ def job_check_routines():
                                 debug_source="scheduler",
                                 debug_effect="notification_sent",
                             )
-                            sent_at = datetime.now()
-                            pending_routine_confirmations[r_id] = {"event": event_name, "sent_at": sent_at}
-                            save_pending_confirmation(r_id, event_name, sent_at)
-                            bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=False, channel="telegram")
+                            if not dated_delivery:
+                                sent_at = datetime.now()
+                                pending_routine_confirmations[r_id] = {
+                                    "event": event_name,
+                                    "sent_at": sent_at,
+                                    "draft_offer": draft_offer,
+                                }
+                                save_pending_confirmation(r_id, event_name, sent_at, draft_offer=draft_offer)
+                            bus.emit("routine_triggered", routine_id=r_id, event=event_name, confidence=confidence, batch=False, channel=_current_external_runtime_channel())
 
 
                 conn.close()
@@ -4259,28 +5572,14 @@ def job_analytics_engine():
         from services.analytics_engine import run_analytics
         stats = run_analytics()
         if stats.get("created", 0) + stats.get("merged", 0) > 0:
-            send_telegram_msg(
+            _send_and_record_assistant(
                 f"🧠 [Analytics]: Detected new routines!\n"
                 f"✅ New: {stats['created']} | 🔗 Merged: {stats['merged']} | "
-                f"📊 Detected: {stats['detected']}"
+                f"📊 Detected: {stats['detected']}",
+                agent="Analytics_Agent",
             )
     except Exception as e:
         print(f"[Analytics Job Error]: {e}")
-
-    # Reflection engine — runs immediately after the analytics
-    try:
-        from services.reflection_engine import run_reflection
-        global pending_reflection_confirmations
-        r_stats = run_reflection()
-        for item in r_stats.get("pending_items", []):
-            pending_reflection_confirmations[item["id"]] = item
-
-        if pending_reflection_confirmations:
-            _send_pending_reflections_summary()
-
-        print(f"[Reflection Job]: applied={r_stats.get('applied',0)}, pending={r_stats.get('pending',0)}")
-    except Exception as re:
-        print(f"[Reflection Job Error]: {re}")
 
 def job_morning_fit_briefing():
     """Morning Google Fit briefing — runs only 08:00–09:00, once."""
@@ -4428,7 +5727,7 @@ def job_morning_hn_briefing():
 
 def job_goal_followup():
     """
-    Checks active goals that have not been reported in the last 7 days.
+    Checks goals with no recorded activity or related memory for seven days.
     Runs once a day at 10:00.
     """
     now_hour = datetime.now().hour
@@ -4451,44 +5750,55 @@ def job_goal_followup():
         if not goals:
             return
 
-        # Semantic search: we search if there are recent memories for each goal
+        # Check the goal's own activity first; semantic memory is a secondary guard.
         from datetime import timedelta
         from memory.vector_store import vector_store, vector_lock
-        cutoff_ts = (datetime.now() - timedelta(days=7)).timestamp()
+        from services.goal_followup_timing import (
+            format_goal_followup_context,
+            recent_memories_show_goal_activity,
+            select_goals_for_followup,
+        )
+        now = datetime.now()
+        cutoff_ts = (now - timedelta(days=7)).timestamp()
 
-        stale_goals = []
-        for g in goals:
-            try:
-                emb = vector_store.embeddings.embed_query(g["project"] + " " + g["description"])
-                with vector_lock:
-                    results = vector_store._collection.query(
-                        query_embeddings=[emb],
-                        n_results=3,
-                        where={"timestamp": {"$gte": cutoff_ts}},
-                    )
-                # If nothing recent was found → stale
-                if not results["ids"] or not results["ids"][0]:
-                    stale_goals.append(g)
-                    print(f"[GoalFollowup]: '{g['project']}' → stale (0 recent memories)")
-                else:
-                    print(f"[GoalFollowup]: '{g['project']}' → active ({len(results['ids'][0])} recent memories)")
-            except Exception as _e:
-                print(f"[GoalFollowup]: semantic check error for '{g['project']}': {_e}")
-                stale_goals.append(g)
+        def has_recent_memory(goal: dict) -> bool:
+            """Check fresh semantic memory after the goal's own date is due."""
+            emb = vector_store.embeddings.embed_query(goal["project"] + " " + goal["description"])
+            with vector_lock:
+                results = vector_store._collection.query(
+                    query_embeddings=[emb],
+                    n_results=3,
+                    where={"$and": [
+                        {"timestamp": {"$gte": cutoff_ts}},
+                        {"timestamp": {"$lte": now.timestamp()}},
+                        {"category": {"$ne": "goal"}},
+                    ]},
+                    include=["documents", "metadatas"],
+                )
+            ids = results.get("ids") or []
+            found = recent_memories_show_goal_activity(goal, results, now=now)
+            print(
+                f"[GoalFollowup]: '{goal['project']}' → "
+                f"{'active' if found else 'stale'} "
+                f"(candidates: {len(ids[0]) if ids else 0}; semantic activity: {found})"
+            )
+            return found
+
+        stale_goals = select_goals_for_followup(
+            goals, now=now, has_recent_memory=has_recent_memory,
+        )
 
         if not stale_goals:
             return
 
         # LLM crafts natural follow-up message
         from services.gemini import safe_gemini_call
+        from core.untrusted_content import format_untrusted_persisted_content
         goals_text_lines = []
         for g in stale_goals[:3]:
-            line = f"- {g['project']}: {g['description']}"
-            if g.get('progress'):
-                line += t("clients.telegram_bot.bot_msg_progress_percent", progress=g["progress"])
-            if g.get('milestones'):
-                line += f"\n  Milestones: {g['milestones']}"
-            goals_text_lines.append(line)
+            goals_text_lines.append(format_untrusted_persisted_content(
+                format_goal_followup_context(g), g.get("metadata"),
+            ))
         goals_text = "\n".join(goals_text_lines)
 
         prompt = core.i18n.load_prompt("telegram_bot_goal_followup.md").format(language=config.RESPONSE_LANGUAGE, user_name=config.USER_NAME, goals_text=goals_text)
@@ -4575,8 +5885,19 @@ class AstakosScheduler:
                 "quiet_hours":           is_quiet_hours(),
                 "proactive_muted":       is_proactive_muted(),
                 "reminders_paused":      is_reminders_paused(),
+                "routines_paused":       is_routines_paused(),
                 "memory_context":        memory_context_debug,
             }
+            routine_pause_until = _active_routine_pause_until()
+            if routine_pause_until is not None:
+                remaining_seconds = max(0, routine_pause_until - now)
+                snapshot["routine_pause_until"] = datetime.fromtimestamp(
+                    routine_pause_until,
+                ).isoformat(timespec="seconds")
+                snapshot["routine_pause_remaining_days"] = max(
+                    1,
+                    int((remaining_seconds + 86399) // 86400),
+                )
             with _proactive_lock:
                 snapshot["proactive_this_hour"] = _proactive_count["count"]
             path = os.path.join(BASE_DIR, "runtime_snapshot.json")
@@ -4614,7 +5935,10 @@ class AstakosScheduler:
                         job["disabled"] = True
                         log_event(job["name"], "disabled", reason="db_crash", error=str(crash))
                         print(f"\033[91m\U0001f6ab [Scheduler]: {crash}\033[0m")
-                        send_telegram_msg(f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 (DB errors).\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}")
+                        _send_and_record_assistant(
+                            f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 (DB errors).\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}",
+                            agent="Scheduler_Agent",
+                        )
                 except Exception as e:
                     job["fail_count"] += 1
                     job["last_error"] = str(e)
@@ -4625,7 +5949,10 @@ class AstakosScheduler:
                         job["disabled"] = True
                         log_event(job["name"], "disabled", reason="max_failures", error=str(crash))
                         print(f"\033[91m\U0001f6ab [Scheduler]: {crash}\033[0m")
-                        send_telegram_msg(f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 \u03bc\u03b5\u03c4\u03ac \u03b1\u03c0\u03cc {self.MAX_FAILURES} \u03c3\u03c6\u03ac\u03bb\u03bc\u03b1\u03c4\u03b1.\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}")
+                        _send_and_record_assistant(
+                            f"\u26a0\ufe0f Watchdog: Job `{job['name']}` \u03b1\u03c0\u03b5\u03bd\u03b5\u03c1\u03b3\u03bf\u03c0\u03bf\u03b9\u03ae\u03b8\u03b7\u03ba\u03b5 \u03bc\u03b5\u03c4\u03ac \u03b1\u03c0\u03cc {self.MAX_FAILURES} \u03c3\u03c6\u03ac\u03bb\u03bc\u03b1\u03c4\u03b1.\n\u03a4\u03b5\u03bb\u03b5\u03c5\u03c4\u03b1\u03af\u03bf: {str(e)[:200]}",
+                            agent="Scheduler_Agent",
+                        )
                 job["last_run"]      = time.time()
                 job["last_duration"] = time.time() - t_start
 
@@ -4657,6 +5984,7 @@ class AstakosScheduler:
         quiet = is_quiet_hours()
         quiet_label = t("clients.telegram_bot.bot_msg_1e9be7") if quiet else t("clients.telegram_bot.bot_msg_4e73eb")
         lines.append(f"\U0001f319 Quiet hours: {quiet_label} ({QUIET_HOURS[0]:02d}:00\u2013{QUIET_HOURS[1]:02d}:00)")
+        routine_pause_until = _active_routine_pause_until()
         with _proactive_lock:
             lines.append(f"\U0001f4e3 Proactive this hour: {_proactive_count['count']}/{MAX_PROACTIVE_PER_HOUR}")
         with _override_lock:
@@ -4664,13 +5992,181 @@ class AstakosScheduler:
             muted   = _override_state.get("mute_proactive")
             sleep_u = _override_state.get("sleep_until")
             sleeping = sleep_u and _time.time() < sleep_u
-        if paused or muted or sleeping:
+        if paused or muted or sleeping or routine_pause_until is not None:
             ovr = []
             if paused:   ovr.append("reminders paused")
             if muted:    ovr.append("proactive muted")
             if sleeping: ovr.append(f"sleep until {datetime.fromtimestamp(sleep_u).strftime('%H:%M')}")
+            if routine_pause_until is not None:
+                remaining_seconds = max(0, routine_pause_until - now)
+                remaining_days = max(1, int((remaining_seconds + 86399) // 86400))
+                until = datetime.fromtimestamp(routine_pause_until).strftime("%d/%m %H:%M")
+                ovr.append(f"Vacation routines paused until {until} ({remaining_days} day(s) remaining)")
             lines.append(f"\U0001f6d1 Override: {', '.join(ovr)}")
         return "\n".join(lines)
+
+
+def _initialize_external_background_state() -> None:
+    """Initialize stores and recover scheduler state without starting polling."""
+    _load_override_state()
+    try:
+        from memory.pending_assets import init_pending_assets_table
+        from memory.list_store import init_list_store
+        from memory.reminder_store import init_reminder_store
+
+        init_pending_assets_table()
+        init_list_store()
+        init_reminder_store()
+        ensure_pending_followups_table()
+    except Exception as exc:
+        print(f"[PendingAssets]: Init failed: {exc}")
+
+    from memory.routine_db import load_pending_confirmations
+
+    pending_routine_confirmations.update(load_pending_confirmations())
+    if pending_routine_confirmations:
+        print(
+            f"\033[93m[Recovery]: \u03a6\u03bf\u03c1\u03c4\u03ce\u03b8\u03b7\u03ba\u03b1\u03bd "
+            f"{len(pending_routine_confirmations)} pending confirmations.\033[0m"
+        )
+
+
+def prepare_dated_feedback_runtime(channel: str) -> "PersistedRoutineFeedbackHandler | None":
+    """Prepare paired dependencies at startup after explicit schema approval."""
+    global _dated_feedback_runtime
+    from config import CONVERSATION_DB_FILE
+    from memory import routine_db
+    from services.routine_feedback_runtime import build_existing_routine_feedback_runtime
+    if channel not in {"telegram", "matrix"}:
+        raise ValueError("Dated external feedback requires Telegram or Matrix")
+    if _dated_feedback_runtime is not None:
+        if _persisted_routine_feedback_handler._channel != channel:
+            raise RuntimeError("Dated feedback is prepared for a different external channel")
+        return _persisted_routine_feedback_handler
+    runtime = build_existing_routine_feedback_runtime()
+    if runtime is None:
+        return None
+    handler = runtime.handler(channel=channel, conversation_db_path=CONVERSATION_DB_FILE)
+    runtime.install_scheduler(sys.modules[__name__], handler=handler, routine_db=routine_db)
+    _dated_feedback_runtime = runtime
+    return handler
+
+
+def _build_external_scheduler() -> AstakosScheduler:
+    """Register the single shared set of external-channel background jobs."""
+    from services.web_mirror_delivery import drain_web_mirrors
+    from services.pending_approval_delivery import drain_queued_matrix_approvals
+    from services.behavioral_initiative_scheduler import schedule_behavioral_initiative
+    from services.owntracks import drain_owntracks
+
+    def queue_behavioral_initiative() -> None:
+        """Keep model work off the shared scheduler's single thread."""
+        if _external_background_runtime_channel in {"telegram", "matrix"} and not shutdown_event.is_set():
+            schedule_behavioral_initiative(enqueue_slow_task)
+
+    def drain_selected_web_mirrors() -> None:
+        """Retry display-only Web copies through this process's selected transport."""
+        if _external_background_runtime_channel in {"telegram", "matrix"}:
+            drain_web_mirrors(_external_background_runtime_channel)
+
+    def drain_selected_owntracks() -> None:
+        """Process owner GPS through this process's active external transport."""
+        if _external_background_runtime_channel in {"telegram", "matrix"}:
+            drain_owntracks(channel=_external_background_runtime_channel)
+
+    scheduler = AstakosScheduler()
+    scheduler.register(drain_selected_owntracks, interval_seconds=5, name="owntracks_location", verbose=False)
+    scheduler.register(drain_selected_web_mirrors, interval_seconds=10, name="web_mirror", verbose=False)
+    scheduler.register(
+        drain_queued_matrix_approvals,
+        interval_seconds=5,
+        name="matrix_approvals",
+        verbose=False,
+    )
+    scheduler.register(job_check_reminders, interval_seconds=20, name="reminders", verbose=False)
+    scheduler.register(job_check_routines, interval_seconds=60, name="routines", verbose=False)
+    scheduler.register(job_proactive_scan, interval_seconds=43200, name="proactive", verbose=True)
+    scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics", verbose=True)
+    scheduler.register(job_check_pending_followups, interval_seconds=600, name="pending_followups", verbose=False)
+    scheduler.register(job_morning_fit_briefing, interval_seconds=3600, name="fit_briefing", verbose=True)
+    scheduler.register(job_morning_calendar_briefing, interval_seconds=3600, name="cal_briefing", verbose=True)
+    scheduler.register(job_morning_ai_briefing, interval_seconds=3600, name="ai_briefing", verbose=True)
+    scheduler.register(job_morning_hn_briefing, interval_seconds=3600, name="hn_briefing", verbose=True)
+    scheduler.register(job_goal_followup, interval_seconds=3600, name="goal_followup", verbose=True)
+    scheduler.register(queue_behavioral_initiative, interval_seconds=600, name="behavioral_initiative", verbose=False)
+    return scheduler
+
+
+def start_external_background_runtime(channel: str) -> AstakosScheduler:
+    """Start shared queues and scheduled jobs once, independently of polling."""
+    global astakos_scheduler, _external_background_runtime_channel
+    global _external_scheduler_thread, _external_missed_check_thread
+    global _external_worker_stop_event
+
+    normalized_channel = str(channel or "").strip().lower()
+    if normalized_channel not in {"telegram", "matrix"}:
+        raise ValueError("External background runtime requires telegram or matrix")
+
+    with _external_background_runtime_lock:
+        if _external_background_runtime_channel is not None:
+            if _external_background_runtime_channel != normalized_channel:
+                raise RuntimeError(
+                    "External background runtime already started for "
+                    f"{_external_background_runtime_channel}"
+                )
+            if astakos_scheduler is None:
+                raise RuntimeError("External background runtime has invalid state")
+            return astakos_scheduler
+
+        shutdown_event.clear()
+        _initialize_external_background_state()
+        prepare_dated_feedback_runtime(normalized_channel)
+        scheduler = _build_external_scheduler()
+        startup_stale_cleanup(channel=normalized_channel)
+        _maybe_trigger_auto_session_summary(channel=normalized_channel)
+        astakos_scheduler = scheduler
+        _external_background_runtime_channel = normalized_channel
+
+        _external_worker_stop_event = threading.Event()
+        threading.Thread(
+            target=fast_queue_worker,
+            args=(_external_worker_stop_event,),
+            daemon=True,
+        ).start()
+        threading.Thread(
+            target=slow_queue_worker,
+            args=(_external_worker_stop_event,),
+            daemon=True,
+        ).start()
+        _external_scheduler_thread = threading.Thread(target=scheduler.run, daemon=True)
+        _external_scheduler_thread.start()
+
+        def _delayed_missed_check() -> None:
+            if shutdown_event.wait(timeout=10):
+                return
+            startup_check_missed_routines()
+
+        _external_missed_check_thread = threading.Thread(
+            target=_delayed_missed_check,
+            daemon=True,
+        )
+        _external_missed_check_thread.start()
+        return scheduler
+
+
+def _reset_external_background_runtime_for_tests() -> None:
+    """Reset process-local startup state for deterministic offline tests."""
+    global astakos_scheduler, _external_background_runtime_channel
+    global _external_scheduler_thread, _external_missed_check_thread
+    global _external_worker_stop_event
+
+    with _external_background_runtime_lock:
+        astakos_scheduler = None
+        _external_background_runtime_channel = None
+        _external_scheduler_thread = None
+        _external_missed_check_thread = None
+        _external_worker_stop_event = None
+        shutdown_event.clear()
 
 
 # ────────────────────────────────────────────────────────────────
@@ -4686,52 +6182,10 @@ if __name__ == "__main__":
 
     _signal.signal(_signal.SIGTERM, _handle_exit)
     _signal.signal(_signal.SIGINT,  _handle_exit)
+    if hasattr(_signal, "SIGBREAK"):
+        _signal.signal(_signal.SIGBREAK, _handle_exit)
 
-    threading.Thread(target=fast_queue_worker, daemon=True).start()
-    threading.Thread(target=slow_queue_worker, daemon=True).start()
-
-    _load_override_state()
-    try:
-        from memory.pending_assets import init_pending_assets_table
-        init_pending_assets_table()
-        ensure_pending_followups_table()
-    except Exception as e:
-        print(f"[PendingAssets]: Init failed: {e}")
-    from memory.routine_db import load_pending_confirmations
-    from services.reflection_engine import load_pending_reflections
-    pending_routine_confirmations.update(load_pending_confirmations())
-    pending_reflection_confirmations.update(load_pending_reflections())
-    if pending_routine_confirmations:
-        print(f"\033[93m[Recovery]: \u03a6\u03bf\u03c1\u03c4\u03ce\u03b8\u03b7\u03ba\u03b1\u03bd {len(pending_routine_confirmations)} pending confirmations.\033[0m")
-    if pending_reflection_confirmations:
-        print(f"\033[93m[Recovery]: Loaded {len(pending_reflection_confirmations)} pending reflections.\033[0m")
-
-    astakos_scheduler = AstakosScheduler()
-    astakos_scheduler.register(job_check_reminders, interval_seconds=20,    name="reminders",   verbose=False)
-    astakos_scheduler.register(job_check_routines,  interval_seconds=60,    name="routines",    verbose=False)
-    astakos_scheduler.register(job_proactive_scan,  interval_seconds=43200, name="proactive",   verbose=True)
-    astakos_scheduler.register(job_analytics_engine, interval_seconds=3600, name="analytics",   verbose=True)
-    astakos_scheduler.register(job_check_pending_followups, interval_seconds=600, name="pending_followups", verbose=False)
-    astakos_scheduler.register(job_morning_fit_briefing,       interval_seconds=3600, name="fit_briefing",      verbose=True)
-    astakos_scheduler.register(job_morning_calendar_briefing,  interval_seconds=3600, name="cal_briefing",      verbose=True)
-    astakos_scheduler.register(job_morning_ai_briefing,        interval_seconds=3600, name="ai_briefing",       verbose=True)
-    astakos_scheduler.register(job_morning_hn_briefing,        interval_seconds=3600, name="hn_briefing",       verbose=True)
-    astakos_scheduler.register(job_goal_followup,              interval_seconds=3600, name="goal_followup",     verbose=True)
-    # astakos_scheduler.register(job_daily_backup,               interval_seconds=3600, name="daily_backup",      verbose=True) # User runs this from Windows Scheduler
-    threading.Thread(target=astakos_scheduler.run, daemon=True).start()
-
-    # Startup check for lost routines (10s delay for full initialization)
-    def _delayed_missed_check():
-        import time as _t
-        _t.sleep(10)
-        startup_check_missed_routines()
-    threading.Thread(target=_delayed_missed_check, daemon=True).start()
-
-    # Stale working memory cleanup (hard restart recovery)
-    startup_stale_cleanup(channel="telegram")
-    
-    # Resume pending summaries that might have crashed mid-flight or piled up
-    _maybe_trigger_auto_session_summary(channel="telegram")
+    start_external_background_runtime("telegram")
 
 
     print("\u2501" * 50)
@@ -4744,29 +6198,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         _handle_exit()
     finally:
-        shutdown_event.set()
-        # Drain queue before summary (max 5s)
-        try:
-            import threading as _th
-            _done = _th.Event()
-            def _drain(): 
-                fast_queue.join()
-                slow_queue.join()
-                _done.set()
-            _th.Thread(target=_drain, daemon=True).start()
-            _done.wait(timeout=5)
-        except Exception:
-            pass
-        # Graceful ChromaDB shutdown — wait for any pending writes to finish
-        try:
-            from memory.vector_store import vector_lock
-            acquired = vector_lock.acquire(timeout=3)
-            if acquired:
-                vector_lock.release()
-        except Exception:
-            pass
-        try:
-            handle_end_session(TELEGRAM_CHAT_ID)
-        except Exception:
-            pass
+        archive_telegram_runtime(
+            sys.modules[__name__],
+            send_message=send_telegram_msg,
+        )
         print('[TelegramBot]: Terminated.')

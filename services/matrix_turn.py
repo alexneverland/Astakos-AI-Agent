@@ -1,0 +1,559 @@
+"""Matrix application turns through the existing Astakos graph."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Callable
+from datetime import datetime
+from typing import Any
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+from clients.matrix_client import MatrixReply
+from config import CONVERSATION_DB_FILE
+from core.utils import clean_message
+from memory.conversation_history import (
+    append_message,
+    load_recent_context,
+)
+from memory.execution_trace import ExecutionTrace
+from services.turn_timing import trace_turn
+
+UserPersistedHook = Callable[[dict[str, Any]], None]
+ExchangeCompletedHook = Callable[[str, str, str, str], None]
+ToolChannelSelector = Callable[[str], None]
+CommandHandler = Callable[[str], str | MatrixReply | None]
+RoutineConfirmationHandler = Callable[[str], Any | None]
+PersistedRoutineConfirmationHandler = Callable[[str, dict[str, Any]], Any | None]
+
+
+def _select_default_tool_channel(channel: str) -> None:
+    """Set the channel used by tools inside this process's graph invocation."""
+    import tools.system as system_tools
+
+    system_tools._CURRENT_CHANNEL = channel
+
+
+class MatrixTurnService:
+    """Persist and process one trusted Matrix text turn."""
+
+    def __init__(
+        self,
+        *,
+        graph: Any | None = None,
+        conversation_db_path: str = CONVERSATION_DB_FILE,
+        on_user_persisted: UserPersistedHook | None = None,
+        on_exchange_completed: ExchangeCompletedHook | None = None,
+        select_tool_channel: ToolChannelSelector = _select_default_tool_channel,
+        command_handler: CommandHandler | None = None,
+        routine_confirmation_handler: RoutineConfirmationHandler | None = None,
+        persisted_routine_confirmation_handler: PersistedRoutineConfirmationHandler | None = None,
+    ) -> None:
+        if routine_confirmation_handler is not None and persisted_routine_confirmation_handler is not None:
+            raise ValueError("Use one routine confirmation handler, never two mutation paths")
+        if graph is None:
+            from core.graph import graph as default_graph
+
+            graph = default_graph
+        self._graph = graph
+        self._conversation_db_path = conversation_db_path
+        self._on_user_persisted = on_user_persisted
+        self._on_exchange_completed = on_exchange_completed
+        self._select_tool_channel = select_tool_channel
+        self._command_handler = command_handler
+        self._routine_confirmation_handler = routine_confirmation_handler
+        # Explicit dependency injection only; production activation waits for RF4.
+        self._persisted_routine_confirmation_handler = persisted_routine_confirmation_handler
+
+    async def __call__(self, user_text: str, event_id: str) -> str | MatrixReply:
+        """Run the blocking graph outside the Matrix sync event loop."""
+        return await asyncio.to_thread(self._run_sync, user_text, event_id)
+
+    async def run_asset_question(
+        self,
+        *,
+        question: str,
+        event_id: str,
+        filename: str,
+        file_path: str,
+        analysis: str,
+    ) -> str | MatrixReply:
+        """Run a photo question while persisting only the user-visible question."""
+        from core.untrusted_content import user_asset_history_metadata
+
+        asset_metadata = user_asset_history_metadata(
+            filename=filename,
+            file_path=file_path,
+            analysis=analysis,
+        )
+        reply = await asyncio.to_thread(
+            self._run_sync,
+            question,
+            event_id,
+            asset_metadata,
+            True,
+            False,
+            "photo",
+        )
+        from memory.pending_assets import (
+            create_pending_asset_archive,
+            init_pending_assets_table,
+        )
+        from core.untrusted_content import USER_PROVIDED_ASSET_SOURCE
+
+        raw_name = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+        safe_name = "".join(
+            ch for ch in raw_name if ch.isprintable() and ch != "`"
+        ).strip()[:255]
+        init_pending_assets_table()
+        create_pending_asset_archive(
+            channel="matrix",
+            asset_type="photo",
+            file_path=file_path,
+            filename=safe_name or "matrix_photo",
+            analysis=analysis,
+            caption=question,
+            external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
+        )
+        return reply
+
+    @staticmethod
+    def _run_hook(hook: Callable[..., None] | None, *args: Any, **kwargs: Any) -> None:
+        """Keep an optional background hook failure from losing the reply."""
+        if hook is None:
+            return
+        accepted_kwargs: dict[str, Any] = {}
+        if kwargs:
+            import inspect
+
+            try:
+                signature = inspect.signature(hook)
+            except (ValueError, TypeError):
+                pass
+            else:
+                has_var_keyword = any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
+                accepted_kwargs = (
+                    kwargs
+                    if has_var_keyword
+                    else {key: value for key, value in kwargs.items() if key in signature.parameters}
+                )
+        try:
+            hook(*args, **accepted_kwargs)
+        except Exception as exc:
+            print(f"[MatrixTurn]: post-turn hook failed: {type(exc).__name__}")
+
+    def _history_messages(self, *, exclude_message_id: str) -> list[Any]:
+        entries = load_recent_context(
+            channel="matrix",
+            global_limit=12,
+            channel_limit=10,
+            total_limit=20,
+            db_path=self._conversation_db_path,
+        )
+        messages: list[Any] = []
+        from core.untrusted_content import (
+            format_model_history_content,
+            history_message_additional_kwargs,
+        )
+
+        for entry in entries:
+            if entry.get("id") == exclude_message_id:
+                continue
+            content = str(entry.get("content") or "").strip()
+            if not content:
+                continue
+            prefix = (
+                f"[{entry.get('date', '')} {entry.get('time', '')} "
+                f"/ {entry.get('channel', '')}] "
+            )
+            formatted = format_model_history_content(
+                f"{prefix}{content}",
+                entry.get("metadata"),
+            )
+            kwargs = history_message_additional_kwargs(entry.get("metadata"))
+            if entry.get("role") in {"user", "human", "Human"}:
+                messages.append(HumanMessage(content=formatted, additional_kwargs=kwargs))
+            else:
+                messages.append(AIMessage(content=formatted, additional_kwargs=kwargs))
+        return messages
+
+    @trace_turn("matrix")
+    def _run_sync(
+        self,
+        user_text: str,
+        event_id: str,
+        user_metadata_extra: dict[str, Any] | None = None,
+        external_derived: bool = False,
+        allow_commands: bool = True,
+        ensure_asset_prompt_type: str | None = None,
+    ) -> str | MatrixReply:
+        """Record one isolated execution trace, including intercepts and failures."""
+        trace = ExecutionTrace(channel="matrix", user_message=user_text,
+            console=True, correlation_id=event_id)
+        trace.mark_phase("graph_used", 0)
+        try:
+            reply = self._run_traced_sync(user_text, event_id, user_metadata_extra,
+                external_derived, allow_commands, ensure_asset_prompt_type, trace=trace)
+            trace.finalize(response=reply.text if isinstance(reply, MatrixReply) else reply)
+            return reply
+        except Exception as exc:
+            trace.finalize(error=type(exc).__name__)
+            raise
+        finally:
+            trace.save()
+
+    def _run_traced_sync(
+        self,
+        user_text: str,
+        event_id: str,
+        user_metadata_extra: dict[str, Any] | None = None,
+        external_derived: bool = False,
+        allow_commands: bool = True,
+        ensure_asset_prompt_type: str | None = None,
+        *, trace: ExecutionTrace,
+    ) -> str | MatrixReply:
+        """Execute the existing turn lifecycle with a caller-owned recorder."""
+        clean_user_text = str(user_text or "").strip()
+        if not clean_user_text:
+            raise ValueError("Matrix turn requires non-empty user text")
+        normalized_event_id = str(event_id or "").strip()
+        if not normalized_event_id:
+            raise ValueError("Matrix turn requires event_id")
+
+        if (
+            allow_commands
+            and clean_user_text.startswith("/")
+            and self._command_handler is not None
+        ):
+            command_reply = self._command_handler(clean_user_text)
+            if command_reply is not None:
+                if isinstance(command_reply, MatrixReply):
+                    if not str(command_reply.text or "").strip():
+                        raise ValueError("Matrix command handler returned an empty reply")
+                    return command_reply
+                normalized_reply = str(command_reply).strip()
+                if not normalized_reply:
+                    raise ValueError("Matrix command handler returned an empty reply")
+                return normalized_reply
+
+        routine_completion_context = None
+        routine_draft_offer = None
+        from services.routine_context_clarification import (
+            context_answer_graph_context, try_context_question_reply,
+        )
+
+        context_answer = try_context_question_reply(
+            clean_user_text, "matrix", trusted_owner=True, external_derived=external_derived,
+        )
+        if context_answer.consumed and not context_answer.continue_conversation:
+            reply = context_answer.reply
+            saved_user = append_message(
+                role="user", content=clean_user_text, channel="matrix",
+                message_id=normalized_event_id, db_path=self._conversation_db_path,
+                metadata={"transport": "matrix", "matrix_event_id": normalized_event_id},
+            )
+            self._run_hook(self._on_user_persisted, saved_user)
+            append_message(
+                role="assistant", content=reply, channel="matrix", agent="Routine_Context",
+                message_id="context-answer-" + normalized_event_id,
+                db_path=self._conversation_db_path,
+            )
+            self._run_hook(
+                self._on_exchange_completed, clean_user_text, reply, "Routine_Context", "matrix",
+                correlation_rowid=saved_user.get("rowid"), context_flags_processed=True,
+            )
+            return reply
+        provenance = {
+            "transport": "matrix",
+            "matrix_event_id": normalized_event_id,
+        }
+        user_metadata = {**provenance, **(user_metadata_extra or {})}
+
+        saved_user = append_message(
+            role="user",
+            content=clean_user_text,
+            channel="matrix",
+            metadata=user_metadata,
+            db_path=self._conversation_db_path,
+        )
+        self._run_hook(self._on_user_persisted, saved_user)
+        trace.mark_phase("owner_rowid", saved_user["rowid"])
+
+        if not external_derived and (
+            self._routine_confirmation_handler is not None
+            or self._persisted_routine_confirmation_handler is not None
+        ):
+            try:
+                if self._persisted_routine_confirmation_handler is not None:
+                    from services.routine_context_clarification import current_matrix_reply_target
+                    reply_target = current_matrix_reply_target()
+                    reply_metadata = {"reply_event_id": reply_target} if reply_target is not None else {}
+                    routine_result = self._persisted_routine_confirmation_handler(
+                        clean_user_text, saved_user, **reply_metadata,
+                    )
+                else:
+                    routine_result = self._routine_confirmation_handler(clean_user_text)
+                from services.matrix_routine_completion import MatrixRoutineDraftOffer
+
+                if isinstance(routine_result, MatrixRoutineDraftOffer):
+                    routine_draft_offer = routine_result
+                    routine_completion_context = routine_result.context
+                else:
+                    routine_completion_context = routine_result
+            except Exception as exc:
+                print(
+                    "[MatrixTurn]: routine confirmation failed: "
+                    f"{type(exc).__name__}"
+                )
+
+        draft_reply = None
+        from services.routine_completion_context import routine_feedback_consumes_turn
+        if not routine_feedback_consumes_turn(routine_completion_context) and not external_derived:
+            from core.messenger_draft import active_draft_status, clear_draft, capture_draft_write_guard
+            draft_guard = capture_draft_write_guard([HumanMessage(content=clean_user_text,
+                additional_kwargs={"astakos_owner_rowid": saved_user["rowid"]})], db_path=self._conversation_db_path)
+            from services.messenger_intent import classify_messenger_intent
+            from core.i18n import t
+
+            draft_active, _, draft_data = active_draft_status()
+            draft_intent = classify_messenger_intent(
+                clean_user_text, has_active_draft=draft_active,
+            ).intent
+            if draft_intent == "clear_draft":
+                draft_reply = (
+                    t("server.draft_cleared")
+                    if clear_draft(write_guard=draft_guard) else t("api.server.no_active_draft_to_clear")
+                )
+            elif draft_intent == "clarify_draft":
+                if draft_active and draft_data and draft_data.get("message"):
+                    draft_reply = (
+                        t("api.server.draft_preview")
+                        + str(draft_data["message"]).strip()
+                        + "\n\n"
+                        + t("api.server.draft_action_prompt")
+                    )
+                else:
+                    draft_reply = (
+                        t("api.server.no_active_draft")
+                        + t("server.draft_clarification")
+                    )
+            elif (
+                draft_intent == "confirm_send"
+                and draft_active
+                and draft_data
+                and draft_data.get("message")
+                and draft_data.get("target_name")
+            ):
+                import uuid
+                from core import approval
+
+                call_id = f"call_{uuid.uuid4().hex[:12]}"
+                send_args = {"expected_draft_revision": draft_data.get("revision") or "missing"}
+                approval.save_pending(
+                    "execute_local_pipeline", send_args, call_id, channel="matrix",
+                )
+                tool_call = {
+                    "name": "execute_local_pipeline", "id": call_id, "args": send_args,
+                }
+                try:
+                    delivery_channel = approval._notify_selected_approval(tool_call)
+                except Exception:
+                    delivery_channel = None
+                if delivery_channel != "matrix":
+                    approval.pop_pending(call_id)
+                    draft_reply = t(
+                        "core.approval.delivery_failed",
+                        name="execute_local_pipeline", channel="Element",
+                    )
+                else:
+                    draft_reply = t(
+                        "core.approval.waiting",
+                        name="execute_local_pipeline", channel="Element",
+                    )
+
+        if draft_reply is not None:
+            from core.utils import (
+                sanitize_messenger_draft_claims,
+                strip_operational_assistant_paragraphs,
+            )
+
+            visible_draft_reply = (
+                strip_operational_assistant_paragraphs(
+                    sanitize_messenger_draft_claims(draft_reply)
+                ).strip() or draft_reply
+            )
+            append_message(
+                role="assistant",
+                content=visible_draft_reply,
+                channel="matrix",
+                agent="Chat_Agent",
+                metadata=provenance,
+                db_path=self._conversation_db_path,
+            )
+            self._run_hook(
+                self._on_exchange_completed,
+                clean_user_text,
+                visible_draft_reply,
+                "Chat_Agent",
+                "matrix",
+                correlation_rowid=saved_user.get("rowid"),
+                context_flags_processed=context_answer.context_flags_processed,
+                context_reconciliation_pending=(context_answer.context_flags_processed
+                                                and context_answer.continue_conversation),
+            )
+            return visible_draft_reply
+
+        context = self._history_messages(exclude_message_id=str(saved_user["id"]))
+        from core.untrusted_content import (
+            external_content_history_metadata,
+            format_model_history_content,
+            history_message_additional_kwargs,
+            USER_PROVIDED_ASSET_SOURCE,
+        )
+
+        current_content = format_model_history_content(clean_user_text, user_metadata)
+        current = HumanMessage(
+            content=f"[{datetime.now().strftime('%H:%M')}] {current_content}",
+            additional_kwargs={**history_message_additional_kwargs(user_metadata),
+                               "astakos_owner_rowid": saved_user["rowid"]},
+        )
+        self._select_tool_channel("matrix")
+
+        final_reply = ""
+        handling_agent = "Chat_Agent"
+        answer_context = context_answer_graph_context(context_answer)
+        graph_messages = (context + ([answer_context] if answer_context is not None else [])
+                          + ([routine_completion_context] if routine_completion_context is not None else []) + [current])
+        graph_state: dict[str, Any] = {
+            "messages": graph_messages,
+            "channel": "matrix",
+        }
+        if routine_draft_offer is not None:
+            graph_state["routine_draft_offer_authorized"] = True
+        tool_results: list[str] = []
+        trace.mark_phase("graph_used", 1)
+        for event in self._graph.stream(
+            graph_state,
+            {"recursion_limit": 100},
+        ):
+            trace.process_event(event)
+            for node, data in event.items():
+                if data is None:
+                    continue
+                messages = data.get("messages", [])
+                if node == "tools":
+                    tool_results.extend(
+                        clean_message(getattr(message, "content", "")).strip()
+                        for message in messages
+                        if getattr(message, "type", "") == "tool"
+                    )
+                    continue
+                if node == "supervisor":
+                    continue
+                if not messages:
+                    continue
+                last_message = messages[-1]
+                if getattr(last_message, "tool_calls", None):
+                    continue
+                candidate = clean_message(getattr(last_message, "content", "")).strip()
+                if candidate and not candidate.startswith("[Tool Call:"):
+                    handling_agent = node
+                    final_reply = candidate
+
+        import core.utils as response_utils
+
+        if response_utils.should_attach_linkedin_draft_reply(
+            clean_user_text,
+            tool_results,
+            recent_linkedin_prompt_active=response_utils.is_reply_to_recent_linkedin_prompt(context),
+        ):
+            final_reply = response_utils.build_linkedin_draft_ready_reply(tool_results)
+
+        if any(
+            response_utils.looks_like_terminal_messenger_draft_result(result)
+            for result in tool_results
+        ):
+            final_reply = response_utils.build_messenger_draft_ready_reply(tool_results)
+
+        if not final_reply and tool_results:
+            from clients.telegram_bot import _tool_results_fallback_response
+
+            final_reply = _tool_results_fallback_response(clean_user_text, tool_results)
+
+        if not final_reply:
+            raise RuntimeError("Matrix graph produced no final reply")
+
+        if ensure_asset_prompt_type is not None:
+            from services.pending_asset_confirmation import ensure_asset_archive_prompt
+
+            final_reply = ensure_asset_archive_prompt(
+                final_reply,
+                ensure_asset_prompt_type,
+            )
+
+        if routine_draft_offer is not None:
+            from core.utils import looks_like_terminal_messenger_draft_result
+            from memory.routine_db import acknowledge_pending_draft_offer
+            from memory.event_log import log_event
+
+            if any(
+                looks_like_terminal_messenger_draft_result(result)
+                for result in tool_results
+            ) and acknowledge_pending_draft_offer(
+                routine_draft_offer.routine_id,
+                routine_draft_offer.sent_at,
+            ):
+                log_event(
+                    "routines",
+                    "routine_acknowledged",
+                    routine_id=routine_draft_offer.routine_id,
+                    event=routine_draft_offer.event_name,
+                    debug_type="manual_control",
+                    debug_source="user_message",
+                    debug_effect="routine_changed",
+                )
+
+        from services.created_file import extract_created_files
+
+        created_files = extract_created_files(final_reply)
+        visible_reply = created_files.text
+        if not visible_reply and created_files.paths:
+            visible_reply = "Το αρχείο είναι έτοιμο."
+        if not visible_reply:
+            raise RuntimeError("Matrix graph produced no visible reply")
+
+        assistant_metadata = dict(provenance)
+        if external_derived:
+            assistant_metadata.update(
+                external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
+            )
+        append_message(
+            role="assistant",
+            content=visible_reply,
+            channel="matrix",
+            agent=handling_agent,
+            metadata=assistant_metadata,
+            db_path=self._conversation_db_path,
+        )
+        external_sources = [USER_PROVIDED_ASSET_SOURCE] if external_derived else None
+        self._run_hook(
+            self._on_exchange_completed,
+            clean_user_text,
+            "" if external_derived else visible_reply,
+            handling_agent,
+            "matrix",
+            external_content_sources=external_sources,
+            correlation_rowid=saved_user.get("rowid"),
+            context_flags_processed=context_answer.context_flags_processed,
+            context_reconciliation_pending=(context_answer.context_flags_processed
+                                            and context_answer.continue_conversation),
+        )
+        if created_files.paths:
+            return MatrixReply(
+                visible_reply,
+                attachment_paths=created_files.paths,
+            )
+        return visible_reply

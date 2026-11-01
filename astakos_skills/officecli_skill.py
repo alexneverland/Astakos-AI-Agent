@@ -5,6 +5,7 @@ from pathlib import Path
 from langchain_core.tools import tool
 from config import BASE_DIR
 from core.i18n import t
+from services.officecli_installation import officecli_binary_path, verified_officecli_path
 
 
 _OFFICE_OUTPUT_SUFFIXES = {".docx", ".xlsx", ".pptx", ".pdf", ".html", ".png", ".jpg", ".jpeg"}
@@ -47,26 +48,34 @@ def _created_file_tags(outputs_dir: str, before: dict[str, float]) -> str:
 def run_officecli(command: str) -> str:
     """
     Executes commands in OfficeCLI to create and edit Word (.docx), Excel (.xlsx), and PowerPoint (.pptx) files.
-    OfficeCLI supports templates, HTML to docx rendering, Excel formulas, etc.
+    OfficeCLI supports document nodes, template merging, and Excel cell values/formulas.
 
-    FORBIDDEN: Do not use the old create_file_tool or generate_word_doc for Office files. 
-    Use this tool for simple conversions or templates. HOWEVER, IF a complex structure is needed (e.g., custom calendars, specific cells using openpyxl/python-docx), you ARE ALLOWED to use python (run_terminal_command or run_code), bypassing this tool.
-    ALWAYS create or save files inside the folder:
-    C:/astakos_v2/outputs/
-    So that drive_manager and the Web UIs can find them!
+    First choice for Word, Excel and PowerPoint output, even simple Office files.
+    Native generators may be used directly for PDF, TXT and CSV.
+    For Office output, native DOCX/XLSX generators or custom Python are fallback
+    options only when OfficeCLI is unavailable, returns an error, or cannot cover
+    the required structure. Preserve the requested format and all safety/approval
+    gates; never use fallback to bypass a security rejection.
+    ALWAYS create or save files inside this installation's outputs folder so
+    drive_manager and the Web UIs can find them. Commands run in that folder;
+    use relative filenames as in the examples, without a host-specific path.
     
     Examples:
-    - officecli add deck.pptx / --type slide --title "Intro"
-    - officecli render template.docx data.json --out C:/astakos_v2/outputs/report.docx
-    - officecli formula calc C:/astakos_v2/outputs/data.xlsx
+    - officecli create report.docx
+    - officecli add report.docx /body --type paragraph --prop "text=Hello"
+    - officecli add deck.pptx / --type slide --prop "title=Intro"
+    - officecli set data.xlsx /Sheet1/A1 --prop "value=42"
+    - officecli help docx paragraph
+    Use create before editing a new file; inspect help for supported properties.
     
     If the command starts with 'officecli ', it will be replaced with the full path of the executable.
     """
-    officecli_path = os.path.join(BASE_DIR, "vendor", "officecli", "officecli.exe")
+    verified_path = verified_officecli_path(BASE_DIR)
+    officecli_path = str(verified_path or officecli_binary_path(BASE_DIR, allow_bundled=False))
     outputs_dir = os.path.join(BASE_DIR, "outputs")
     os.makedirs(outputs_dir, exist_ok=True)
     
-    if not os.path.exists(officecli_path):
+    if verified_path is None or not os.path.exists(officecli_path):
         return t("skills.officecli_skill.msg_not_found_2", path=officecli_path)
     
     # Remove 'officecli ' from the beginning if it exists, in order to insert our own path

@@ -6,6 +6,32 @@ from config import STATE_DB
 
 _db_lock = threading.Lock()
 
+PENDING_PLAN_CONFIRMATION_MAX_AGE_SECONDS = 5 * 60
+
+
+def is_pending_plan_fresh(
+    created_at: str,
+    *,
+    now: datetime | None = None,
+    max_age_seconds: int = PENDING_PLAN_CONFIRMATION_MAX_AGE_SECONDS,
+) -> bool:
+    """Return whether a pending plan is still safe for bare confirmation."""
+    try:
+        created = datetime.fromisoformat(created_at)
+    except (TypeError, ValueError):
+        return False
+
+    if now is None:
+        reference = datetime.now(tz=created.tzinfo) if created.tzinfo else datetime.now()
+    else:
+        reference = now
+
+    if (created.tzinfo is None) != (reference.tzinfo is None):
+        return False
+
+    age_seconds = (reference - created).total_seconds()
+    return 0 <= age_seconds <= max_age_seconds
+
 def _init_db():
     with _db_lock:
         with sqlite3.connect(STATE_DB) as conn:

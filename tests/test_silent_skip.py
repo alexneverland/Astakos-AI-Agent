@@ -8,10 +8,13 @@ import sqlite3
 import sys
 import types
 import tempfile
+from contextlib import closing
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+from services.routine_context import kid1_unavailable_for_routine as _real_child_absence
+from services.routine_context_evidence import ContextEvidence, VOLATILE_FLAGS
 
 # ─────────────────────────────────────────────────────────────
 # Stub ALL heavy dependencies BEFORE importing the bot
@@ -36,14 +39,16 @@ _TMP_BASE = tempfile.mkdtemp()   # persistent temp dir for config.BASE_DIR
 _STUB_MODULE_NAMES = [
     "config",
     "langchain_core", "langchain_core.messages",
-    "memory", "memory.event_log", "memory.vector_store",
+    "memory", "memory.event_log", "memory.execution_trace", "memory.vector_store",
     "memory.working_memory", "memory.session_memory", "memory.pending_followups",
-    "memory.context_builder", "memory.routine_db",
+    "memory.context_builder", "memory.routine_db", "memory.pending_assets",
     "core.brain", "core.graph", "core.agents",
     "core.exceptions", "core.event_bus",
+    "core",
     "core.routine_state", "core.prompts", "core.utils", "core.i18n", "core.nl_config",
     "services", "services.gemini", "services.embeddings", "services.context_extractor", "services.messenger_intent", "services.routine_context",
-    "services.routine_conditions",
+    "services.routine_conditions", "services.routine_completion_context",
+    "services.routine_completion_helper", "services.routine_completion_selector",
     "tools", "tools.telegram",
     "telegram", "telegram.ext",
 ]
@@ -52,6 +57,12 @@ bot = None  # populated inside setup_module() with clients.telegram_bot (stubbed
 
 
 def _stub_modules():
+    # Preserve package search paths so a focused run can load light boundaries
+    # without relying on other test files having imported them first.
+    for package in ("core", "memory", "services", "tools"):
+        module = types.ModuleType(package)
+        module.__path__ = [os.path.join(os.path.dirname(os.path.dirname(__file__)), package)]
+        sys.modules[package] = module
     # ── config (force-replace) ────────────────────────────────
     cfg = types.ModuleType("config")
     cfg.TELEGRAM_TOKEN                   = "fake_token"
@@ -76,10 +87,11 @@ def _stub_modules():
         sys.modules[mod] = types.ModuleType(mod)
     sys.modules["langchain_core.messages"].HumanMessage = MagicMock
     sys.modules["langchain_core.messages"].AIMessage    = MagicMock
+    sys.modules["langchain_core.messages"].SystemMessage = MagicMock
 
     # ── memory.* ──────────────────────────────────────────────
     for mod in [
-        "memory", "memory.event_log", "memory.vector_store",
+        "memory.event_log", "memory.execution_trace", "memory.vector_store",
         "memory.working_memory", "memory.session_memory", "memory.pending_followups",
         "memory.context_builder", "memory.routine_db",
         "memory.pending_assets",
@@ -92,6 +104,8 @@ def _stub_modules():
     el.is_duplicate_routine      = MagicMock(return_value=False)
 
     sys.modules["memory.vector_store"].memory = MagicMock()
+    sys.modules["memory.execution_trace"].ExecutionTrace = MagicMock()
+    sys.modules["memory.execution_trace"]._TRACES_DIR = "unused-test-traces"
 
     wm = sys.modules["memory.working_memory"]
     wm.update_working_memory             = MagicMock()
@@ -106,6 +120,8 @@ def _stub_modules():
     sm._maybe_trigger_auto_session_summary = MagicMock()
     pf = sys.modules["memory.pending_followups"]
     pf.ensure_pending_followups_table = lambda: None
+    pf.find_pending_followups = lambda *a, **k: []
+    pf.process_followup_exchange = lambda *a, **k: None
     pf.maybe_create_followup_from_exchange = lambda *a, **k: None
     pf.maybe_resolve_followups_from_user_message = lambda *a, **k: 0
     pf.looks_like_followup_resolution_update = lambda *a, **k: False
@@ -152,6 +168,8 @@ def _stub_modules():
     rdb.mark_routine_responded     = MagicMock()
     rdb.clear_pending_confirmations = MagicMock()
     rdb.mark_routine_ignored       = MagicMock()
+    rdb.expire_routine_confirmation = MagicMock()
+    rdb.record_unanswered_routine_expiry = MagicMock(return_value={"confidence_reduced": False})
     # new stubs for muted_until
     rdb.get_routine_muted_until    = MagicMock(return_value=None)   # not muted by default
     rdb.set_routine_muted_until    = MagicMock()
@@ -168,6 +186,12 @@ def _stub_modules():
     rdb.set_routine_resume_rule    = MagicMock()
     rdb.get_routine_condition      = MagicMock(return_value={})
     rdb.get_routine_conditions     = MagicMock(return_value=[])
+    def eligible(day, *, now=None, occurrence_date=None):
+        """Expose the isolated fixture catalogue to canonical dispatch gates."""
+        with closing(sqlite3.connect(sys.modules["config"].ROUTINES_DB)) as connection:
+            return [{"id": row[0], "event": row[1], "time": row[2]}
+                    for row in connection.execute("SELECT id,event_name,time_str FROM routines WHERE state='active'")]
+    rdb.get_eligible_preemptive_routines_for_day = eligible
     rdb.get_context_state          = MagicMock(return_value=None)
     # new stubs for sentimental
     rdb.get_sentimental_info       = MagicMock(return_value={
@@ -213,14 +237,26 @@ def _stub_modules():
     rs.is_notifiable = lambda s: s == "active"
 
     for mod in [
-        "services", "services.gemini", "services.embeddings",
+        "services.gemini", "services.embeddings",
         "services.routine_context", "services.routine_conditions",
         "services.context_extractor", "services.messenger_intent",
+        "services.routine_completion_context", "services.routine_completion_helper",
+        "services.routine_completion_selector",
     ]:
         sys.modules[mod] = types.ModuleType(mod)
 
     sys.modules["services.context_extractor"].extract_and_update_context_flags = MagicMock()
     sys.modules["services.messenger_intent"].classify_messenger_intent = MagicMock(return_value=None)
+    sys.modules["services.messenger_intent"].is_draft_offer_acceptance = MagicMock(return_value=False)
+    sys.modules["services.routine_completion_context"].accept_pending_messenger_draft_offer = MagicMock(return_value=None)
+    sys.modules["services.routine_completion_context"].build_routine_completion_context = MagicMock()
+    sys.modules["services.routine_completion_helper"].decide_completion = MagicMock()
+    sys.modules["services.routine_completion_helper"].RoutineSelection = type(
+        "RoutineSelection",
+        (),
+        {},
+    )
+    sys.modules["services.routine_completion_selector"].select_routine = MagicMock()
 
     sys.modules["services.routine_context"].build_runtime_routine_context = MagicMock(return_value={
         "today": "2026-06-17",
@@ -228,8 +264,12 @@ def _stub_modules():
         "football_season": True,
         "school_open": True,
         "current_shift": None,
-        "partner_work_mode": "office"
+        "partner_work_mode": "office", **{flag: False for flag in VOLATILE_FLAGS}
     })
+    sys.modules["services.routine_context"].build_routine_context_evidence = lambda *a, **kw: {
+        flag: ContextEvidence(effective_value=False, status="known") for flag in VOLATILE_FLAGS}
+    sys.modules["services.routine_context"].project_routine_context = lambda context, evidence: dict(context)
+    sys.modules["services.routine_context"].kid1_unavailable_for_routine = _real_child_absence
     sys.modules["services.gemini"].safe_gemini_call = MagicMock(return_value="ok")
     sys.modules["services.embeddings"].embeddings   = MagicMock()
     sys.modules["services.routine_conditions"].evaluate_routine_condition = MagicMock(
@@ -240,7 +280,7 @@ def _stub_modules():
     )
 
     # ── tools.* ───────────────────────────────────────────────
-    for mod in ["tools", "tools.telegram"]:
+    for mod in ["tools.telegram"]:
         sys.modules[mod] = types.ModuleType(mod)
     tg = sys.modules["tools.telegram"]
     tg.send_telegram_msg      = MagicMock()
@@ -293,7 +333,16 @@ def teardown_module(module):
     # FAKE dependencies. We remove it so that the next test file that does it
     # import to re-run the real module on the REAL (just
     # restored) dependencies.
-    sys.modules.pop("clients.telegram_bot", None)
+    original_bot = _ORIGINAL_MODULES.get("clients.telegram_bot")
+    clients_package = sys.modules.get("clients")
+    if original_bot is not None:
+        sys.modules["clients.telegram_bot"] = original_bot
+        if clients_package is not None:
+            clients_package.telegram_bot = original_bot
+    else:
+        sys.modules.pop("clients.telegram_bot", None)
+        if clients_package is not None:
+            clients_package.__dict__.pop("telegram_bot", None)
     bot = None
 
 
@@ -333,10 +382,12 @@ def _run_job(
     muted_until=None,
     sentimental_info=None,
     random_value=0.99,
+    return_craft_mock=False,
+    note_message=None,
 ):
     """
     Runs job_check_routines() with mocked externals.
-    Returns: (sent_messages, logged_events, bus_events)
+    Returns: (sent_messages, logged_events, bus_events), plus the craft mock on request.
     """
     sent       = []
     logged     = []
@@ -358,6 +409,8 @@ def _run_job(
         "sentimental": 0, "muted_from": None, "muted_until": None,
         "sentimental_send_every": 2, "sentimental_last_sent": None, "sentimental_silenced": False
     }
+    crafted_result = craft_return if isinstance(craft_return, tuple) else (craft_return, False)
+    craft_mock = MagicMock(return_value=crafted_result)
 
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "astakos_routines.db")
@@ -377,14 +430,20 @@ def _run_job(
             patch.object(bot, "is_duplicate_routine",  return_value=duplicate),
             patch.object(bot, "can_send_proactive",    return_value=True),
             patch.object(bot, "should_skip_proactive_for_recent_activity", return_value=False),
-            patch.object(bot, "_craft_proactive_msg",  return_value=craft_return),
+            patch.object(bot, "_craft_proactive_msg",  craft_mock),
+            patch.object(bot, "_maybe_send_routine_context_note",
+                         side_effect=lambda *a, **kw: sent.append(note_message) or "sent"
+                         if note_message else "no_note"),
             patch.object(bot, "send_telegram_msg",     side_effect=lambda m: sent.append(m)),
+            patch.object(bot, "_send_and_record_assistant", side_effect=lambda m, **kw: sent.append(m) or "fixture-event"),
             patch.object(bot, "log_event",             side_effect=lambda *a, **kw: logged.append((a[0], a[1]))),
             patch.object(bot, "bus",                   mock_bus),
             patch("random.random", return_value=random_value),
         ):
             bot.job_check_routines()
 
+    if return_craft_mock:
+        return sent, logged, bus_events, craft_mock
     return sent, logged, bus_events
 
 
@@ -510,7 +569,7 @@ def test_silent_skip_updates_last_triggered():
             patch.object(bot, "is_duplicate_routine", return_value=False),
             patch.object(bot, "can_send_proactive",   return_value=True),
             patch.object(bot, "should_skip_proactive_for_recent_activity", return_value=False),
-            patch.object(bot, "_craft_proactive_msg", return_value="[SILENT_SKIP]"),
+            patch.object(bot, "_craft_proactive_msg", return_value=("[SILENT_SKIP]", False)),
             patch.object(bot, "send_telegram_msg",    return_value=None),
             patch.object(bot, "log_event",            return_value=None),
             patch.object(bot, "bus",                  mock_bus),
@@ -731,6 +790,19 @@ def test_normal_msg_is_sent():
     assert sent == ["Μάστορα, πάμε πάρκο;"], f"Got: {sent}"
 
 
+def test_single_non_messenger_routine_disables_draft_offer_authorization():
+    """A model response cannot arm a Messenger offer for an ordinary routine."""
+    bot.pending_routine_confirmations.clear()
+    _, _, _, craft_mock = _run_job(
+        [_due_routine()],
+        craft_return=("Shall I do the routine?", True),
+        return_craft_mock=True,
+    )
+
+    assert craft_mock.call_args.kwargs["allow_messenger_draft_offer"] is False
+    assert bot.pending_routine_confirmations[1]["draft_offer"] is False
+
+
 def test_normal_msg_no_skip_logs():
     """Normal message → NO routine_silent_skip or routine_context_skip in the log."""
     _, logged, _ = _run_job([_due_routine()], craft_return="Μάστορα, πάμε βόλτα!")
@@ -767,6 +839,43 @@ def test_timeout_decay_ignores_stale_pending():
 
     # Reset mock
     rdb.get_routine_state.return_value = rdb.RoutineState.TRIGGER_PENDING
+
+
+def test_timeout_records_unanswered_delivery_without_cooldown_penalty():
+    """An unanswered delivered reminder is recorded without using refusal cooldown logic."""
+    past_time = _fixed_now() - timedelta(minutes=40)
+    bot.pending_routine_confirmations[889] = {"event": "Routine", "sent_at": past_time}
+
+    rdb = sys.modules["memory.routine_db"]
+    rdb.get_routine_state.return_value = rdb.RoutineState.TRIGGER_PENDING
+    rdb.mark_routine_ignored.reset_mock()
+    rdb.record_unanswered_routine_expiry.reset_mock()
+
+    _, logged, _ = _run_job([])
+
+    assert 889 not in bot.pending_routine_confirmations
+    rdb.mark_routine_ignored.assert_not_called()
+    rdb.record_unanswered_routine_expiry.assert_called_once_with(889)
+    assert any(action == "routine_response_window_expired" for _, action in logged)
+
+
+def test_timeout_logs_confidence_decay_after_unanswered_threshold():
+    """The threshold result is exposed as a distinct routine lifecycle outcome."""
+    past_time = _fixed_now() - timedelta(minutes=40)
+    bot.pending_routine_confirmations[890] = {"event": "Routine", "sent_at": past_time}
+
+    rdb = sys.modules["memory.routine_db"]
+    rdb.get_routine_state.return_value = rdb.RoutineState.TRIGGER_PENDING
+    rdb.record_unanswered_routine_expiry.reset_mock()
+    rdb.record_unanswered_routine_expiry.return_value = {"confidence_reduced": True}
+
+    _, logged, _ = _run_job([])
+
+    assert 890 not in bot.pending_routine_confirmations
+    rdb.record_unanswered_routine_expiry.assert_called_once_with(890)
+    assert any(action == "routine_unanswered_decay" for _, action in logged)
+    rdb.record_unanswered_routine_expiry.return_value = {"confidence_reduced": False}
+
 
 def test_telegram_bot_contextual_dismiss_skips_decay_for_sofia():
     bot.pending_routine_confirmations = {
@@ -918,34 +1027,40 @@ def test_sentimental_context_note_sends_without_pending_confirmation(monkeypatch
     rdb = sys.modules['memory.routine_db']
     bot.pending_routine_confirmations.clear()
 
-    monkeypatch.setattr(
-        bot,
-        '_should_send_sentimental_context_note',
-        lambda routine_id, event_name: True,
-    )
-
     sent, logged, _ = _run_job(
         [_due_routine()],
         craft_return='[CONTEXT_NOTE] Καλή ταινία με τον Αλέξανδρο, ο ύπνος πάει αργότερα σήμερα.',
+        note_message='Καλή ταινία με τον Αλέξανδρο, ο ύπνος πάει αργότερα σήμερα.',
     )
 
     assert sent == ['Καλή ταινία με τον Αλέξανδρο, ο ύπνος πάει αργότερα σήμερα.']
-    assert any(action == 'routine_context_note' for _, action in logged)
     assert bot.pending_routine_confirmations == {}
     rdb.save_pending_confirmation.assert_not_called()
     rdb.mark_routine_notified.assert_not_called()
 
 
 def test_non_sentimental_context_note_skips_without_sending(monkeypatch):
-    monkeypatch.setattr(
-        bot,
-        '_should_send_sentimental_context_note',
-        lambda routine_id, event_name: False,
-    )
-
     sent, _, _ = _run_job(
         [_due_routine()],
         craft_return='[CONTEXT_NOTE] Καλή ταινία με τον Αλέξανδρο, ο ύπνος πάει αργότερα σήμερα.',
     )
 
     assert sent == []
+
+
+def test_work_condition_note_never_falls_through_to_reminder():
+    rdb = sys.modules["memory.routine_db"]
+    evaluator = sys.modules["services.routine_conditions"].evaluate_routine_conditions
+    rdb.get_routine_conditions.return_value = [{"condition_type": "shift_mode"}]
+    evaluator.return_value = {"allowed": False, "results": [
+        {"allowed": False, "reason": "user_at_work=true"}], "failed_count": 1}
+    try:
+        sent, _, _, craft = _run_job([_due_routine()], note_message="Βάρδια σήμερα, η βόλτα περιμένει.",
+                                     return_craft_mock=True)
+        assert sent == ["Βάρδια σήμερα, η βόλτα περιμένει."]
+        craft.assert_not_called()
+        rdb.mark_routine_notified.assert_not_called()
+        rdb.save_pending_confirmation.assert_not_called()
+    finally:
+        rdb.get_routine_conditions.return_value = []
+        evaluator.return_value = {"allowed": True, "results": [], "failed_count": 0}
