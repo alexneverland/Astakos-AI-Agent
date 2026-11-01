@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+
+- Upgrade ReportLab to 5.1.0 with upstream restricted-evaluation security fixes.
+  PDF generation retains the default rejection of untrusted image URLs without
+  enabling permissive host or evaluation settings.
+
 ### Added
 
 - End-to-end latency spans for Web, Matrix and Telegram text turns, named
