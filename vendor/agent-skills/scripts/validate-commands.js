@@ -10,6 +10,7 @@
  * Checks (errors block CI):
  *   - Every command present in one directory exists in all three
  *   - The 'description' field is identical across all three equivalents
+ *   - Claude command frontmatter is valid YAML, not merely splittable
  *
  * What this does NOT check:
  *   Prompt body differences are intentional — each tool has its own
@@ -22,6 +23,14 @@
 
 const fs   = require('fs');
 const path = require('path');
+
+// The same frontmatter-validity rules validate-skills applies to SKILL.md.
+// `descriptionFromMd` below splits each line on its first colon, exactly as the
+// skill reader used to, so a command whose frontmatter is not valid YAML passes
+// every check here — and Claude Code parses that frontmatter when the command is
+// loaded. The #494 thread verified all 25 SKILL.md files AND the command files by
+// hand; this makes the second half a check too.
+const { frontmatterYamlErrors } = require(path.join(__dirname, 'lib', 'skill-lint.js'));
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -136,6 +145,32 @@ function main() {
     }
   }
 
+  // ── Claude frontmatter validity ─────────────────────────────────────────────
+  // Only the .md directory: the TOML dirs are parsed by a real TOML parser
+  // already, so a malformed one surfaces as a missing description above.
+  console.log('\nChecking Claude command frontmatter...');
+
+  for (const stem of claudeStems) {
+    const full = path.join(DIRS.claude.dir, `${stem}${DIRS.claude.ext}`);
+    let yamlErrors = [];
+    try {
+      yamlErrors = frontmatterYamlErrors(fs.readFileSync(full, 'utf8'));
+    } catch (e) {
+      console.log(`  ✗  ${stem} — cannot read file: ${e.message}`);
+      errors++;
+      continue;
+    }
+    if (yamlErrors.length === 0) {
+      console.log(`  ✓  ${stem}`);
+      continue;
+    }
+    console.log(`  ✗  ${stem}`);
+    for (const message of yamlErrors) {
+      console.log(`       ${message}`);
+      errors++;
+    }
+  }
+
   // ── Description sync check ──────────────────────────────────────────────────
   console.log('\nChecking description sync...');
 
@@ -144,6 +179,21 @@ function main() {
     const descClaude = byTool.claude[claudeStem];
     const descGemini = byTool.gemini[tomlStem];
     const descAgy    = byTool.antigravity[tomlStem];
+
+    const malformed = [
+      ['.claude/commands', byTool.claude, claudeStem],
+      ['.gemini/commands', byTool.gemini, tomlStem],
+      ['commands/', byTool.antigravity, tomlStem],
+    ].filter(([, commands, stem]) => Object.prototype.hasOwnProperty.call(commands, stem) && commands[stem] == null);
+
+    if (malformed.length) {
+      console.log(`  ✗  ${claudeStem}`);
+      for (const [toolDir, , stem] of malformed) {
+        console.log(`       ${toolDir}/${stem} — missing or malformed description`);
+      }
+      errors++;
+      continue;
+    }
 
     if (descClaude == null || descGemini == null || descAgy == null) {
       // Missing file already flagged by parity check

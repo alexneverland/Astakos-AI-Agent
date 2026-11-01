@@ -1,16 +1,32 @@
-import json
 import config
-from core import nl_config
-from core.i18n import t
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Iterable
 from services.gemini import safe_gemini_call
 from core.utils import clean_message, extract_json_from_text
-from memory.routine_db import set_context_state, get_context_state
-from memory.conversation_history import load_recent_context
+from core.untrusted_content import external_content_source_names, format_untrusted_tool_result
+from memory.conversation_history import load_recent_state_messages, load_daily_state_messages, get_latest_trusted_user_rowid
+from memory.routine_db import get_context_state, set_context_states_if_unchanged
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from services.routine_reconciler import (
-    reconcile_fact_to_routines,
+    infer_routine_reconciliation_directives,
     apply_routine_reconciliation_directives,
+    observed_shift_expiry,
 )
+
+_CONTEXT_BOOLEAN_FLAGS = {
+    "user_out_of_home", "family_at_home", "partner_with_user",
+    "kid1_away_from_home", "user_at_work", "kid1_with_user",
+    "kid1_with_partner", "partner_at_work", "quiet_hours",
+}
+_CONTEXT_ENUM_VALUES = {
+    "current_shift": {"morning", "afternoon", "night"},
+    "partner_work_mode": {"office", "remote"},
+    "kid1_absence_scope": {"extended", "temporary", "home"},
+    "state:kid1:outing": {"in_progress", "done"},
+}
 
 _CONTEXT_EXTRACTION_PROMPT = """
 You are {bot_name}, an AI assistant. The user ({user_name}) sends you a message.
@@ -24,17 +40,40 @@ Available flags:
 5. "user_at_work": (boolean) The user is at work now.
 6. "kid1_with_user": (boolean) The kid1 is with the user now.
 7. "kid1_with_partner": (boolean) The kid1 is with the partner now, without necessarily meaning that the user is also with them.
+8. "current_shift": one of "morning", "afternoon", or "night" only when the user directly confirms their active work shift now.
+9. "partner_at_work": (boolean) The partner is at work now.
+10. "partner_work_mode": "office" or "remote" only when the user directly states that the partner is working at their workplace or remotely/from home.
+11. "quiet_hours": (boolean) The user requests quiet or no interruptions now, or clearly says the child is already asleep now. A future bedtime does not activate quiet hours.
+12. "kid1_absence_scope": "extended" when the child is explicitly away from the family for a stay/overnight period and cannot take part in their routines; "temporary" for school or a short outing; "home" when the child has returned or is with the user. Do not infer an extended absence merely from being outside the house. Omit this key when the new message does not establish a different absence scope.
+13. "state:kid1:outing": "in_progress" only when a current report establishes that an outing with the child has actually begun; "done" when the outing ended or the current report clearly places them back home. Playing together at home plus a later outing plan is not an outing in progress. Resolve each clause's time and subjects separately; omit ambiguous changes. This state is not a routine completion.
 
 Rules:
 - Return ONLY a JSON object.
-- Include only flags that are clearly confirmed by the message.
+- Include flags grounded by the current report and its timed owner context,
+  including clearly supported consequences for related states.
+- Recent timestamped user messages across all channels are supplied to resolve
+  unambiguous pronoun or reference in the current message. They are not current
+  state by themselves: never carry a previous location or relationship forward
+  unless the current message clearly says it still applies or changed.
+- Interpret completed transitions chronologically using the current report and
+  the timed history. Separate past movement, present whereabouts and future
+  intentions. A completed departure changes presence, not arrival at a destination.
+  Habit or a typical schedule alone never proves current location. Omit flags
+  when the current statement and its reference do not establish a state clearly.
 - If you are not sure enough, do not include the flag at all.
-- DO NOT deduce unstated whereabouts. For example, if the user says the kids are alone, DO NOT deduce that the partner is with the user. Only update states explicitly stated.
+- DO NOT invent unstated whereabouts. For example, the kids being alone does not
+  establish that the partner is with the user. Distinguish supported relationship
+  transitions from guesses about another person's location.
 - DO NOT convert future intention into a current state.
 - If the user says they will leave in a bit, that they will go somewhere later, or that they are planning to go, this DOES NOT mean they are already out of the house.
+- Preparing, eating, drinking coffee, or getting ready in order to leave for work means the user is still at their current location until they explicitly say they left or arrived at work.
 - If the user is talking about a draft message, a plan, an idea, or what to write, this DOES NOT necessarily mean that the state is currently true.
 - If the user says they are all out together now, then user_out_of_home=true and partner_with_user=true may apply.
 - If the user is at work, then usually user_at_work=true and user_out_of_home=true.
+- If the user directly confirms they are at work now, their active shift may be current_shift="morning", current_shift="afternoon", or current_shift="night". Do not infer a shift from a routine name, a future plan, or a past shift.
+- An active work statement supersedes older co-presence: do not leave partner_with_user=true or kid1_with_user=true unless the user explicitly says they are also at work with the user.
+- If the user directly says the partner is at work now, set partner_at_work=true, partner_with_user=false, kid1_with_partner=false, and family_at_home=false. If the user says the partner is not at work, set only partner_at_work=false; do not assume that the partner is home or with the user.
+- Treat a clear, current statement that the whole household is home as family_at_home=true. The user's own presence at home alone does not establish anyone else's location.
 
 - If the user says they are with {kid1_name} now, then kid1_with_user=true may apply.
 - If the user says {kid1_name} is with {partner_name} now, then kid1_with_partner=true may apply.
@@ -84,123 +123,244 @@ Message: "I came back home after shopping and we are playing with the kid."
 Answer:
 {{"user_out_of_home": false, "user_at_work": false, "kid1_with_user": true}}
 
+Example 9:
+Message: "I have the kid here with me, I am having coffee and food before I leave for work. My partner is working today."
+Answer:
+{{"user_out_of_home": false, "user_at_work": false, "kid1_with_user": true, "partner_with_user": false}}
+
+Example 10:
+Message: "I am at work on the afternoon shift."
+Answer:
+{{"user_at_work": true, "user_out_of_home": true, "partner_with_user": false, "kid1_with_user": false, "current_shift": "afternoon"}}
+
+Example 11:
+Message: "The kids are home alone and my partner is at work."
+Answer:
+{{"partner_at_work": true, "partner_work_mode": "office", "partner_with_user": false, "kid1_with_partner": false, "family_at_home": false}}
+
 User Message: "{user_text}"
+Recent shared user context (historical reference, not current-state authority):
+{recent_user_context}
 AI Answer (recent/current): "{ai_text}"
 """
 
 
-def _has_communication_verb(text: str) -> bool:
-    t = _normalize_live_text(text)
-    comms = [
-        "μίλησα μαζί", "μιλησα μαζι", "μίλησα με", "μιλησα με",
-        "μίλησα στο τηλέφωνο", "μιλησα στο τηλεφωνο", "πήρα τηλέφωνο",
-        "πηρα τηλεφωνο", "με πήρε", "με πηρε", "μου είπε", "μου ειπε",
-        "μου έστειλε", "μου εστειλε", "στείλαμε", "στειλαμε", "chat", "μήνυμα", "μηνυμα"
-    ]
-    return any(c in t for c in comms)
+def _recent_user_context_hint(channel: str, limit: int = 4) -> str:
+    """Return a bounded, user-authored context window for pronoun resolution.
 
-def _has_strong_presence(text: str) -> bool:
-    t = _normalize_live_text(text)
-    strong = [
-        "είμαι με", "ειμαι με", "είμαστε μαζί", "ειμαστε μαζι",
-        "είναι μαζί μου", "ειναι μαζι μου", "είμαστε εδώ μαζί",
-        "ειμαστε εδω μαζι", "είμαστε σπίτι μαζί", "ειμαστε σπιτι μαζι",
-        "είμαστε έξω μαζί", "ειμαστε εξω μαζι"
-    ]
-    return any(s in t for s in strong)
-
-def _looks_like_future_departure(text: str) -> bool:
-    t = clean_message(text or "").strip().lower()
-    future_markers = nl_config.CE_IN_A_WHILE
-    return any(marker in t for marker in future_markers)
-
-def _normalize_live_text(text: str) -> str:
-    return clean_message(text or "").strip().lower()
-
-
-def _has_park_live_presence(text: str) -> bool:
-    t = _normalize_live_text(text)
-    park_tokens = nl_config.CE_PARK
-    live_tokens = nl_config.CE_NOW_SITTING
-    return any(p in t for p in park_tokens) and any(l in t for l in live_tokens)
-
-
-def _looks_like_found_them_reply(text: str) -> bool:
-    t = _normalize_live_text(text)
-    markers = nl_config.CE_FOUND_THEM
-    return any(m in t for m in markers)
-
-
-def _looks_like_everyone_together(text: str) -> bool:
-    t = _normalize_live_text(text)
-    markers = nl_config.CE_ALL_TOGETHER
-    return any(m in t for m in markers)
-
-
-def _looks_like_family_return_together(text: str) -> bool:
-    t = _normalize_live_text(text)
-    has_family_group = any(marker in t for marker in nl_config.CE_FAMILY_GROUP)
-    has_return_together = any(
-        marker in t for marker in nl_config.CE_RETURN_TOGETHER
-    )
-    return has_family_group and has_return_together
-
-
-def _recent_family_context_hint(channel: str = "telegram") -> str:
+    Assistant, tool, and external-content messages are deliberately excluded so
+    they cannot alter live-state extraction. The current user message remains
+    the sole authority for whether a state is current.
+    """
     try:
-        entries = load_recent_context(limit=6, channel=channel) or []
+        entries = load_recent_state_messages(now=datetime.now(ZoneInfo("Europe/Athens")))
     except Exception:
-        return ""
+        return "(none)"
 
-    parts = []
-    for item in entries[-6:]:
-        if not isinstance(item, dict):
-            continue
-        content = str(item.get("content") or "").strip()
-        if content:
-            parts.append(content.lower())
-    return "\n".join(parts)
+    messages = [
+        {"at": entry.get("timestamp"), "channel": entry.get("channel"),
+         "text": str(entry.get("content") or "").strip()[:500]}
+        for entry in entries
+        if (
+            entry.get("role") == "user"
+            and not external_content_source_names(entry.get("metadata"))
+        )
+    ]
+    messages = [message for message in messages if message["text"]][-limit:]
+    if not messages:
+        return "(none)"
+    return format_untrusted_tool_result("shared owner history reference",
+                                       json.dumps(messages, ensure_ascii=False))
 
 
-def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel: str = "telegram"):
+@dataclass(frozen=True)
+class ContextExtractionResult:
+    """Confirmed canonical writes, not an inferred acknowledgement of success."""
+
+    relation: str = "uncertain"
+    applied_flags: frozenset[str] = frozenset()
+    continue_conversation: bool = False
+
+
+def extract_and_update_context_flags(
+    user_text: str, ai_text: str = "", channel: str = "telegram", *,
+    clarification_context: dict | None = None,
+    clarification_still_current: Callable[[], bool] | None = None,
+    clarification_commit: Callable[[Callable[[], frozenset[str] | None]], frozenset[str] | None] | None = None,
+    now: datetime | None = None,
+    conversation_db_path: str | None = None,
+    daily_resolution_flags: tuple[str, ...] | None = None,
+) -> ContextExtractionResult | None:
     """
     Calls the LLM to extract context flags based on the user's message,
     and directly updates astakos_routines.db context states.
     """
-    if not user_text or len(user_text.strip()) < 3:
-        return
+    clarification = clarification_context is not None
+    continue_conversation = False
+    empty_result = ContextExtractionResult() if clarification else None
+    if not user_text or (not clarification and len(user_text.strip()) < 3):
+        return empty_result
 
     if "[VISUAL ANALYSIS]" in user_text.upper():
         print("[ContextExtractor] Skipped visual-analysis payload without explicit live-state text")
-        return
+        return empty_result
 
     try:
-        prompt = _CONTEXT_EXTRACTION_PROMPT.format(
-            bot_name=config.BOT_NAME,
-            user_name=config.USER_NAME,
-            partner_name=config.PARTNER_NAME,
-            kid1_name=config.KID1_NAME,
-            user_text=user_text,
-            ai_text=ai_text,
-        )
+        current = now or datetime.now(ZoneInfo("Europe/Athens"))
+        history_options = {"db_path": conversation_db_path or config.CONVERSATION_DB_FILE}
+        source_version = get_latest_trusted_user_rowid(**history_options)
+        try:
+            daily_rows = load_daily_state_messages(now=current, **history_options)
+        except (ValueError, OSError):
+            if daily_resolution_flags is not None:
+                _record_daily_resolution("resolution_error", daily_resolution_flags, channel)
+                return None
+            # A bounded view failure must not disable an explicit current report.
+            # The missing day reference is never permission to infer an old plan.
+            daily_rows = []
+        expected = {key: get_context_state(key) for key in
+                    _CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES) | {"kid1_away_reason"}}
+        if daily_resolution_flags is not None:
+            from services.routine_duration_context import DURATION_KEY, load_daily_schedule_reference
+            expected[DURATION_KEY] = get_context_state(DURATION_KEY)
+            schedule_reference = load_daily_schedule_reference(current)
+        if daily_resolution_flags is not None:
+            prompt = ("Resolve unknown routine context from the dated reference sources below.\n"
+                      f"Owner: {config.USER_NAME}; partner: {config.PARTNER_NAME}; child: {config.KID1_NAME}.\n")
+        else:
+            prompt = _CONTEXT_EXTRACTION_PROMPT.format(
+                bot_name=config.BOT_NAME,
+                user_name=config.USER_NAME,
+                partner_name=config.PARTNER_NAME,
+                kid1_name=config.KID1_NAME,
+                user_text=user_text,
+                recent_user_context=_recent_user_context_hint(channel),
+                ai_text=ai_text,
+            )
+        prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
+                            "daily_context_reference.md").read_text(encoding="utf-8")
+        prompt += "\n" + format_untrusted_tool_result("daily owner context reference", json.dumps({
+            "now": current.isoformat(),
+            "sources": [{"rowid": row["rowid"], "at": row["timestamp"],
+                         "channel": row["channel"], "text": row["content"]} for row in daily_rows],
+            "stored_context": expected,
+            "state_schema": {"boolean_flags": sorted(_CONTEXT_BOOLEAN_FLAGS),
+                             "enum_flags": {key: sorted(values)
+                                            for key, values in _CONTEXT_ENUM_VALUES.items()}},
+        }, ensure_ascii=False))
+        if daily_resolution_flags is not None:
+            from services.routine_context_evidence import VOLATILE_FLAGS
+            if (clarification or not daily_resolution_flags
+                    or not set(daily_resolution_flags) <= set(VOLATILE_FLAGS)):
+                return None
+            prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
+                                "daily_context_resolution.md").read_text(encoding="utf-8")
+            prompt += "\nAllowed flags: " + json.dumps(daily_resolution_flags)
+            prompt += "\n" + format_untrusted_tool_result("daily schedule reference", json.dumps(
+                {"daily_schedule": schedule_reference}, ensure_ascii=False))
+        elif not clarification:
+            prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
+                                "context_state_transition.md").read_text(encoding="utf-8")
+        if clarification:
+            from services.routine_context_evidence import VOLATILE_FLAGS
+
+            context = clarification_context
+            if (not isinstance(context, dict) or set(context) != {"question", "flags"}
+                    or not isinstance(context["question"], str)
+                    or not 1 <= len(context["question"].strip()) <= 500
+                    or not isinstance(context["flags"], list)
+                    or not 1 <= len(context["flags"]) <= 5
+                    or any(not isinstance(flag, str) or flag not in VOLATILE_FLAGS
+                           for flag in context["flags"])
+                    or len(set(context["flags"])) != len(context["flags"])):
+                return empty_result
+            instructions = (Path(__file__).resolve().parents[1] / "prompts" /
+                            "routine_context_answer.md").read_text(encoding="utf-8")
+            prompt += "\n" + instructions + "\n" + format_untrusted_tool_result(
+                "routine clarification reference",
+                json.dumps(context, ensure_ascii=False),
+            )
         response = safe_gemini_call(prompt)
         text = response.text if hasattr(response, "text") else str(response)
         cleaned = clean_message(text).strip()
 
         payload = extract_json_from_text(cleaned)
         if payload is None:
-            return # No valid JSON found
+            if daily_resolution_flags is not None:
+                _record_daily_resolution("invalid_model_output", daily_resolution_flags, channel)
+            return empty_result
+        if daily_resolution_flags is not None:
+            return _commit_daily_resolution(payload, daily_rows, expected,
+                allowed=set(daily_resolution_flags), now=current,
+                schedule_reference=schedule_reference,
+                channel=channel,
+                still_current=lambda: (get_latest_trusted_user_rowid(**history_options) == source_version
+                    and (clarification_still_current is None or clarification_still_current())))
+        source_event_at = None
+        current_source = next((row for row in daily_rows
+                               if row["rowid"] == source_version), None)
+        if not clarification and current_source is not None:
+            if current_source["content"] != user_text:
+                return None
+            if not isinstance(payload, dict) or "flags" not in payload:
+                # Saved reports must never fall back to processing-time writes.
+                return None
+        if not clarification and isinstance(payload, dict) and "flags" in payload:
+            if payload == {"flags": {}, "event_rowid": None, "support_rowids": []}:
+                # No live-state inference must not swallow durable routine requests.
+                if (current_source is not None and current_source["content"] == user_text
+                        and get_latest_trusted_user_rowid(**history_options) == source_version):
+                    reconcile_context_message(user_text, source_version, history_options["db_path"], current)
+                return None
+            # Source IDs validate provenance, never the meaning of a state change.
+            if payload.get("event_rowid") != source_version or not any(
+                row["rowid"] == source_version and row["content"] == user_text
+                for row in daily_rows
+            ):
+                return None
+            # The latest row ID/text prove this ordinary report's identity.
+            # Second-resolution timestamps alone cannot order adjacent reports;
+            # final history freshness and the canonical CAS still guard the write.
+            resolved = _validate_context_resolution(payload, daily_rows, expected,
+                allowed=_CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES),
+                now=current, allow_equal_timestamp=True)
+            if resolved is None:
+                return None
+            payload, source_event_at = resolved
+        if clarification:
+            if (not isinstance(payload, dict)
+                    or set(payload) not in ({"relation", "flags"}, {"relation", "flags", "continue_conversation"})
+                    or not isinstance(payload["relation"], str)
+                    or payload["relation"] not in {"related", "unrelated", "uncertain", "refused"}
+                    or not isinstance(payload["flags"], dict)
+                    or type(payload.get("continue_conversation", False)) is not bool):
+                return empty_result
+            relation = payload["relation"]
+            # Missing routing metadata is not evidence of a standalone answer.
+            continue_conversation = payload.get("continue_conversation", True)
+            if relation != "related":
+                return ContextExtractionResult(relation, continue_conversation=continue_conversation)
+            explicit_mixed = payload.get("continue_conversation") is True
+            payload = payload["flags"]
+            allowed = set(context["flags"])
+            if explicit_mixed:
+                # Additional explicit facts use the existing bounded schema,
+                # never arbitrary model-selected state keys.
+                allowed |= _CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES)
+            enum_values = _CONTEXT_ENUM_VALUES
+            if (not payload or not set(payload) <= allowed
+                    or any((type(value) is not str or value not in enum_values[key])
+                           if key in enum_values else type(value) is not bool
+                           for key, value in payload.items())
+                    or (clarification_still_current is not None
+                        and not clarification_still_current())):
+                return empty_result
         
         # Validate and apply only known flags
-        valid_keys = {
-            "user_out_of_home",
-            "family_at_home",
-            "partner_with_user",
-            "kid1_away_from_home",
-            "user_at_work",
-            "kid1_with_user",
-            "kid1_with_partner",
-        }
+        valid_keys = _CONTEXT_BOOLEAN_FLAGS
+        valid_shifts = _CONTEXT_ENUM_VALUES["current_shift"]
+        valid_partner_work_modes = _CONTEXT_ENUM_VALUES["partner_work_mode"]
+        valid_absence_scopes = _CONTEXT_ENUM_VALUES["kid1_absence_scope"]
         
         # Only update if the payload is a dictionary
         if not isinstance(payload, dict):
@@ -209,145 +369,341 @@ def extract_and_update_context_flags(user_text: str, ai_text: str = "", channel:
         # Get current date for expiration of certain daily flags
         # Usually these states reset the next day, so we could set an expires_at to midnight,
         # but for now, we just set them. The existing rules or nightly reset will clear them.
-        today_str = datetime.now().strftime("%Y-%m-%d")
+        today_str = current.date().isoformat()
             
-        # Derived consistency rules for family presence
-        normalized_user = _normalize_live_text(user_text)
-        has_home_presence = any(
-            marker in normalized_user
-            for marker in nl_config.CE_HOME
-        )
+        current_shift = payload.get("current_shift")
+        if current_shift is not None:
+            normalized_shift = str(current_shift).strip().lower()
+            if normalized_shift in valid_shifts:
+                payload["current_shift"] = normalized_shift
+            else:
+                payload.pop("current_shift", None)
+
+        partner_work_mode = payload.get("partner_work_mode")
+        if partner_work_mode is not None:
+            normalized_work_mode = str(partner_work_mode).strip().lower()
+            if normalized_work_mode in valid_partner_work_modes:
+                payload["partner_work_mode"] = normalized_work_mode
+            else:
+                payload.pop("partner_work_mode", None)
+
+        # Derived consistency rules operate on the LLM's semantic state, rather
+        # than attempting to re-interpret user wording with phrase lists.
+        if payload.get("user_at_work") is True:
+            payload["user_out_of_home"] = True
+            payload["family_at_home"] = False
+            if source_event_at is not None:
+                payload.setdefault("partner_with_user", False)
+                payload.setdefault("kid1_with_user", False)
+            else:
+                payload["partner_with_user"] = False
+                payload["kid1_with_user"] = False
+
+        if payload.get("partner_at_work") is True:
+            if payload.get("partner_work_mode") not in valid_partner_work_modes:
+                payload["partner_work_mode"] = "office"
+            if payload["partner_work_mode"] == "office":
+                payload["family_at_home"] = False
+                if source_event_at is not None:
+                    payload.setdefault("partner_with_user", False)
+                    payload.setdefault("kid1_with_partner", False)
+                else:
+                    payload["partner_with_user"] = False
+                    payload["kid1_with_partner"] = False
 
         if payload.get("kid1_with_user") is True:
             payload["kid1_away_from_home"] = False
             
-        if payload.get("family_at_home") is True:
+        if payload.get("family_at_home") is True and payload.get("user_at_work") is not True:
             payload["kid1_away_from_home"] = False
+            payload["kid1_with_user"] = True
+            payload["partner_with_user"] = True
             payload["user_out_of_home"] = False
             payload["user_at_work"] = False
 
         if payload.get("kid1_with_user") is True and payload.get("partner_with_user") is True:
             payload["kid1_with_partner"] = True
 
-        # Context-aware enrichment for short live follow-up replies like:
-        # "I found them", "we are all together", "we are still at the park"
-        normalized_user = _normalize_live_text(user_text)
+        # The routine decision is one persisted state, not a join of two
+        # independently updated whereabouts/reason flags.
+        if payload.get("kid1_away_from_home") is False:
+            payload["kid1_absence_scope"] = "home"
+        elif payload.get("kid1_absence_scope") == "extended":
+            payload["kid1_away_from_home"] = True
+        elif payload.get("kid1_absence_scope") not in valid_absence_scopes:
+            payload.pop("kid1_absence_scope", None)
 
-        if _has_park_live_presence(user_text):
-            payload.setdefault("user_out_of_home", True)
+        def persist() -> frozenset[str] | None:
+            """Apply the already validated semantic state through canonical writers."""
+            if get_latest_trusted_user_rowid(**history_options) != source_version:
+                return None
+            if source_event_at is not None:
+                return _persist_context_payload(payload, valid_keys, today_str, expected,
+                    recorded_at=source_event_at, allow_equal_timestamp=True)
+            return _persist_context_payload(payload, valid_keys, today_str, expected)
 
-        is_everyone_together = _looks_like_everyone_together(user_text)
-        is_family_return_together = _looks_like_family_return_together(user_text)
-
-        if is_everyone_together or is_family_return_together:
-            payload["partner_with_user"] = True
-            payload["kid1_with_user"] = True
-            payload["kid1_with_partner"] = True
-            payload["kid1_away_from_home"] = False
-            if has_home_presence:
-                payload["family_at_home"] = True
-                payload["user_out_of_home"] = False
-                payload["user_at_work"] = False
-            elif is_everyone_together:
-                payload["user_out_of_home"] = True
-
-        elif _looks_like_found_them_reply(user_text) and _has_park_live_presence(user_text):
-            payload["user_out_of_home"] = True
-            payload["kid1_with_user"] = True
-            payload["kid1_away_from_home"] = False
-
-            recent_hint = _recent_family_context_hint(channel=channel)
-            has_recent_partner = (
-                any(w in normalized_user for w in nl_config.CE_PARTNER_NAMES)
-                or any(w in recent_hint for w in nl_config.CE_PARTNER_NAMES)
-            )
-            has_recent_kid1 = (
-                any(w in normalized_user for w in nl_config.CE_KID1_NAMES)
-                or any(w in recent_hint for w in nl_config.CE_KID1_NAMES)
-            )
-
-            if has_recent_partner:
-                payload["partner_with_user"] = True
-
-            if has_recent_partner and has_recent_kid1:
-                payload["kid1_with_partner"] = True
-
-
-        has_comm = _has_communication_verb(user_text)
-        has_strong = _has_strong_presence(user_text)
-        is_explicit_family = (
-            _looks_like_everyone_together(user_text)
-            or _looks_like_family_return_together(user_text)
+        applied_flags = (
+            clarification_commit(persist)
+            if clarification and clarification_commit is not None else persist()
         )
+        if applied_flags is None:
+            # Interpretation owns this reply even if another worker resolved
+            # the question or it expired before this worker could commit it.
+            return ContextExtractionResult("related", continue_conversation=continue_conversation) if clarification else None
 
-        # 1. Precedence guard: user_at_work beats weak presence
-        current_work = get_context_state("user_at_work")
-        is_at_work = current_work and current_work.get("value") == "true"
-        if is_at_work and not has_strong:
-            if payload.get("partner_with_user"):
-                print("[ContextExtractor] Ignored partner_with_user=true due to existing user_at_work=true and weak presence")
-                payload["partner_with_user"] = False
+        if clarification:
+            # No second reconciler interpretation of a short answer. Existing
+            # consistency rules and the canonical writer above remain authoritative.
+            return ContextExtractionResult("related", frozenset(applied_flags), continue_conversation)
 
-        # Draft or communication wording alone cannot mutate relationship presence.
-        if has_comm and not has_strong and not is_at_work:
-            for key in (
-                "partner_with_user",
-                "kid1_with_user",
-                "kid1_with_partner",
-            ):
-                payload.pop(key, None)
-
-        # 3. Subject propagation logic cutoff for kid1
-        kid1_names = nl_config.CE_KID1_NAMES
-        recent_hint_str = _recent_family_context_hint(channel=channel)
-        has_kid_in_recent = any(k in recent_hint_str for k in kid1_names)
-        
-        has_kid_explicit = (
-            any(k in normalized_user for k in kid1_names) or 
-            is_explicit_family or 
-            (_looks_like_found_them_reply(user_text) and has_kid_in_recent)
-        )
-        
-        if not has_kid_explicit:
-            if payload.get("kid1_with_user"):
-                print("[ContextExtractor] Ignored kid1_with_user cascade due to lack of explicit mention")
-                payload.pop("kid1_with_user", None)
-            if payload.get("kid1_with_partner"):
-                print("[ContextExtractor] Ignored kid1_with_partner cascade due to lack of explicit mention")
-                payload.pop("kid1_with_partner", None)
-
-        for key, value in payload.items():
-            if key in valid_keys and isinstance(value, bool):
-                if key == "user_out_of_home" and value is True:
-                    if _looks_like_future_departure(user_text):
-                        print("[ContextExtractor] Ignored user_out_of_home=true due to future departure phrasing")
-                        continue
-                
-                # Save to database
-                str_val = "true" if value else "false"
-                set_context_state(key, str_val, expires_at=today_str)
-                print(f"[ContextExtractor] Updated {key} = {str_val}")
-
-        recon = reconcile_fact_to_routines(
-            user_text,
-            category="family",
-            reason="live_message_context",
-            now=datetime.now(),
-        )
-
-        directives = []
-        for item in recon.get("scored_directives", []):
-            if item.get("decision") == "auto_apply":
-                directive = item.get("directive")
-                if directive:
-                    directives.append(directive)
-
-        if directives:
-            apply_routine_reconciliation_directives(directives)
-            print(
-                f"[ContextExtractor] Applied {len(directives)} reconciler directive(s) "
-                f"from live message"
-            )
+        reconcile_context_message(user_text, source_version, history_options["db_path"], current)
 
     except Exception as exc:
+        if daily_resolution_flags is not None:
+            _record_daily_resolution("resolution_error", daily_resolution_flags, channel)
         print(f"[ContextExtractor Error]: {exc!r}")
+        return empty_result
+
+
+def reconcile_context_message(
+    user_text: str, source_rowid: int | None = None,
+    conversation_db_path: str | None = None, now: datetime | None = None,
+) -> None:
+    """Apply durable routine updates without reinterpreting guarded live flags."""
+    try:
+        from memory.conversation_history import guard_owner_history_version
+        from memory.event_log import log_event
+
+        current = now or datetime.now(ZoneInfo("Europe/Athens"))
+        options = {"db_path": conversation_db_path or config.CONVERSATION_DB_FILE}
+        marker = get_latest_trusted_user_rowid(**options)
+        rows = load_daily_state_messages(now=current, **options)
+        identity = source_rowid if source_rowid is not None else marker
+        source = next((row for row in rows if row["rowid"] == identity), None)
+        if source is None or source["content"] != user_text:
+            return
+        expected_shift = get_context_state("current_shift")
+        reference = {"source_rowid": identity, "source_at": source["timestamp"],
+                     "source_text": user_text,
+                     "later_owner_reports": [{"rowid": row["rowid"], "at": row["timestamp"],
+                                               "text": row["content"]}
+                                              for row in rows if row["rowid"] > identity]}
+        inferred = infer_routine_reconciliation_directives(
+            user_text, category="family", reason="live_message_context", now=current,
+            shift_reference=reference,
+        )
+        if get_latest_trusted_user_rowid(**options) != marker:
+            return
+        live_keys = _CONTEXT_BOOLEAN_FLAGS | {"kid1_absence_scope", "state:kid1:outing"}
+        directives = [item for item in inferred if not (
+            item.get("kind") == "context_state_set" and item.get("key") in live_keys)]
+        if identity != marker:
+            # Only the semantic shift decision has considered later reports.
+            # Do not apply historical lexical routine changes from this turn.
+            directives = [item for item in directives if item.get("kind") == "context_state_set"
+                          and item.get("key") == "current_shift"]
+        shifts = [item for item in directives if item.get("kind") == "context_state_set"
+                  and item.get("key") == "current_shift"]
+        if shifts:
+            # The semantic date/value contract is validated by the reconciler.
+            # Its live caller adds the same history/state concurrency guards as
+            # ordinary context extraction instead of using an unguarded writer.
+            if len(shifts) != 1:
+                return
+            shift = shifts[0]
+            recorded_at = datetime.fromisoformat(source["timestamp"])
+            if recorded_at.tzinfo is None:
+                recorded_at = recorded_at.replace(tzinfo=current.tzinfo)
+            from services.routine_context_evidence import _recorded_time
+            previous_at = _recorded_time((expected_shift or {}).get("updated_at"), current)
+            if expected_shift and (previous_at is None or previous_at > recorded_at):
+                return
+            value = "" if shift.get("context_operation") == "clear" else shift["value"]
+            expiry = observed_shift_expiry(value, shift.get("until_date"), expected_shift,
+                revision=shift.get("context_operation") == "clear" or shift.get("schedule_revision") is True)
+            with guard_owner_history_version(marker, **options) as valid:
+                saved = valid and set_context_states_if_unchanged(
+                    {"current_shift": (value, expiry)},
+                    {"current_shift": expected_shift}, recorded_at=recorded_at)
+            log_event("routines", "live_shift_reconciliation",
+                      outcome="applied" if saved else "state_changed",
+                      debug_type="reconciler_applied", debug_source="context_extractor")
+            directives = [item for item in directives if item not in shifts]
+        if directives:
+            with guard_owner_history_version(marker, **options) as valid:
+                if valid:
+                    apply_routine_reconciliation_directives(directives)
+                    print(f"[ContextExtractor] Applied {len(directives)} reconciler directive(s) from live message")
+    except Exception as exc:
+        print(f"[ContextReconciler Error]: {type(exc).__name__}")
+
+
+def _validate_context_resolution(
+    payload: object, rows: list[dict], expected: dict, *, allowed: set[str],
+    now: datetime, allow_equal_timestamp: bool = False,
+) -> tuple[dict, datetime] | None:
+    """Validate typed state/time; equality requires a caller-verified latest source.
+
+    Pre-question historical resolution retains strict timestamp ordering because
+    its selected event need not be the latest source. Ordinary callers verify the
+    latest row/text before permitting equality and recheck freshness before CAS.
+    """
+    from services.routine_context_evidence import STORED_VALIDITY, _recorded_time
+    if not isinstance(payload, dict) or set(payload) != {"flags", "event_rowid", "support_rowids"}:
+        return None
+    flags, event_id, support = payload["flags"], payload["event_rowid"], payload["support_rowids"]
+    sources = {row["rowid"]: row for row in rows}
+    if (not isinstance(flags, dict) or not flags or not set(flags) <= allowed
+            or any(not _valid_context_flag_value(key, value) for key, value in flags.items())
+            or type(event_id) is not int or event_id not in sources
+            or not isinstance(support, list) or not support or len(support) > 12
+            or any(type(value) is not int or value not in sources for value in support)
+            or len(set(support)) != len(support) or event_id not in support):
+        return None
+    event_at = datetime.fromisoformat(sources[event_id]["timestamp"])
+    if not 0 <= now.timestamp() - event_at.timestamp() < STORED_VALIDITY.total_seconds():
+        return None
+    # Do not replace newer canonical evidence with an older interpreted event.
+    for key in flags:
+        previous = expected.get(key)
+        if previous:
+            previous_at = _recorded_time(previous.get("updated_at"), now)
+            agreeing_refresh = (allow_equal_timestamp and previous_at is not None
+                and previous.get("value") == str(flags[key]).lower())
+            if (previous_at is None or (previous_at.timestamp() > event_at.timestamp()
+                                       and not agreeing_refresh)
+                    or (not allow_equal_timestamp
+                        and previous_at.timestamp() == event_at.timestamp())):
+                return None
+    return flags, event_at
+
+
+def _valid_context_flag_value(key: str, value: object) -> bool:
+    """Check canonical schema types without inferring any language meaning."""
+    if key in _CONTEXT_ENUM_VALUES:
+        return type(value) is str and value in _CONTEXT_ENUM_VALUES[key]
+    return type(value) is bool
+
+
+def _record_daily_resolution(outcome: str, flags: Iterable[str], channel: str) -> None:
+    """Record bounded decision metadata without conversation text or locations."""
+    from memory.event_log import log_event
+    log_event("routines", "daily_context_resolution", outcome=outcome,
+              requested_flags=sorted(flags), channel=channel)
+
+
+def _commit_daily_resolution(
+    payload: object, rows: list[dict], expected: dict, *, allowed: set[str],
+    now: datetime, still_current: Callable[[], bool],
+    schedule_reference: list[dict] | None = None,
+    channel: str = "unknown",
+) -> ContextExtractionResult | None:
+    """Reuse shared source validation and the canonical conditional writer."""
+    if isinstance(payload, dict) and "valid_until" in payload:
+        from services.routine_duration_context import commit_duration_resolution
+        applied = commit_duration_resolution(payload, rows, expected, allowed=allowed,
+            now=now, still_current=still_current, schedule_reference=schedule_reference)
+        _record_daily_resolution("applied_duration" if applied else "duration_rejected_or_superseded", allowed, channel)
+        return ContextExtractionResult("related", applied) if applied else None
+    if payload == {"flags": {}, "event_rowid": None, "support_rowids": []}:
+        _record_daily_resolution("model_unknown", allowed, channel)
+        return None
+    resolved = _validate_context_resolution(payload, rows, expected, allowed=allowed, now=now)
+    if resolved is None or not still_current():
+        _record_daily_resolution("observation_rejected_or_superseded", allowed, channel)
+        return None
+    flags, event_at = resolved
+    updates = {key: (str(value).lower(), event_at.date().isoformat()) for key, value in flags.items()}
+    if not set_context_states_if_unchanged(updates, expected, recorded_at=event_at):
+        _record_daily_resolution("state_changed", allowed, channel)
+        return None
+    _record_daily_resolution("applied_observation", allowed, channel)
+    return ContextExtractionResult("related", frozenset(flags))
+
+
+def resolve_daily_context_before_question(
+    flags: tuple[str, ...], *, now: datetime, still_current: Callable[[], bool],
+    channel: str, conversation_db_path: str | None = None,
+) -> bool:
+    """Resolve unknown flags from owner-day sources without replaying conversation."""
+    path = conversation_db_path or config.CONVERSATION_DB_FILE
+    try:
+        rows = load_daily_state_messages(now=now, db_path=path)
+        if not rows:
+            _record_daily_resolution("no_sources", flags, channel)
+            return False
+        result = extract_and_update_context_flags(rows[-1]["content"], channel=channel,
+            now=now, conversation_db_path=path, daily_resolution_flags=flags,
+            clarification_still_current=still_current)
+        return isinstance(result, ContextExtractionResult) and bool(result.applied_flags)
+    except Exception:
+        _record_daily_resolution("resolution_error", flags, channel)
+        return False
+
+
+def _persist_context_payload(
+    payload: dict, valid_keys: set[str], today: str, expected: dict[str, dict | None],
+    *, recorded_at: datetime | None = None, allow_equal_timestamp: bool = False,
+) -> frozenset[str] | None:
+    """Preserve the shared flag-writing path for ordinary and clarification turns."""
+    updates = {}
+    for key, value in payload.items():
+        if key in valid_keys and isinstance(value, bool):
+            str_val = "true" if value else "false"
+            updates[key] = (str_val, today)
+    if "kid1_absence_scope" in payload:
+        expiry = None if payload["kid1_absence_scope"] == "extended" else today
+        updates["kid1_absence_scope"] = (payload["kid1_absence_scope"], expiry)
+        updates["kid1_away_reason"] = ("", today)
+    for key in _CONTEXT_ENUM_VALUES:
+        if key in payload and key != "kid1_absence_scope":
+            expiry = today
+            if key == "current_shift":
+                expiry = observed_shift_expiry(payload[key], today, expected.get(key))
+            updates[key] = (payload[key], expiry)
+    if recorded_at is not None:
+        from services.routine_context_evidence import _recorded_time
+
+        # Same-value observations may refresh while the model is running. They
+        # change evidence time, not meaning; retain their timestamp and keep the
+        # atomic guard against any actual state/expiry change.
+        refreshed_expected = dict(expected)
+        for key, previous in expected.items():
+            latest = get_context_state(key)
+            if latest == previous:
+                continue
+            old_at = _recorded_time((previous or {}).get("updated_at"), recorded_at)
+            new_at = _recorded_time((latest or {}).get("updated_at"), recorded_at)
+            if (not allow_equal_timestamp or not previous or not latest
+                    or latest["value"] != previous["value"]
+                    or latest["expires_at"] != previous["expires_at"]
+                    or old_at is None or new_at is None
+                    or new_at.timestamp() < old_at.timestamp()):
+                return None
+            refreshed_expected[key] = latest
+        expected = refreshed_expected
+        # Consistency-derived updates must also respect newer canonical evidence.
+        redundant = []
+        for key in updates:
+            previous = expected.get(key)
+            if previous:
+                previous_at = _recorded_time(previous.get("updated_at"), recorded_at)
+                if (allow_equal_timestamp and previous_at is not None
+                        and previous_at.timestamp() > recorded_at.timestamp()
+                        and previous["value"] == updates[key][0]):
+                    redundant.append(key)
+                    continue
+                if (previous_at is None or previous_at.timestamp() > recorded_at.timestamp()
+                        or (not allow_equal_timestamp
+                            and previous_at.timestamp() == recorded_at.timestamp())):
+                    return None
+        for key in redundant:
+            updates.pop(key)
+        saved = set_context_states_if_unchanged(updates, expected, recorded_at=recorded_at)
+    else:
+        saved = set_context_states_if_unchanged(updates, expected)
+    if not saved:
+        return None
+    for key, (value, _) in updates.items():
+        print(f"[ContextExtractor] Updated {key} = {value}")
+    return frozenset(set(updates) - {"kid1_away_reason"})

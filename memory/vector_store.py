@@ -1,10 +1,11 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
-from core.i18n import t
+from core.i18n import t, load_prompt
 import os
 import json
 import threading
@@ -16,12 +17,21 @@ import sqlite3
 from langchain_chroma import Chroma
 from config import CHROMA_DB_DIR, PHOTOS_INDEX_FILE, SIM_THRESHOLD_DISTANCE, MEMORY_AUDIT_DIR, STATE_DB
 from services.embeddings import embeddings
+from core.ai_provider import (
+    EmbeddingsProviderSetupRequired,
+    ProviderAuthError,
+    get_embeddings_collection_name,
+)
 
 _audit_lock = threading.Lock()
 
 
-def _audit_log(op: str, **kwargs):
-    """Writes an entry to the daily memory audit log (logs/memory_audit/YYYY-MM-DD.json)."""
+def _audit_log(op: str, *, require_valid_log: bool = False, **kwargs: object) -> bool:
+    """Atomically append an audit entry; report failure without raising.
+
+    Strict maintenance callers reject corrupt journals instead of replacing
+    them. Existing best-effort callers retain their previous behavior.
+    """
     try:
         today    = datetime.now().strftime("%Y-%m-%d")
         log_file = os.path.join(MEMORY_AUDIT_DIR, f"{today}.json")
@@ -34,8 +44,12 @@ def _audit_log(op: str, **kwargs):
                 with open(log_file, "r", encoding="utf-8") as f:
                     try:
                         loaded = json.load(f)
+                        if require_valid_log and not isinstance(loaded, list):
+                            raise ValueError("Invalid memory audit journal")
                         entries = loaded if isinstance(loaded, list) else []
                     except Exception:
+                        if require_valid_log:
+                            raise
                         entries = []
             entries.append(entry)
             with open(tmp_file, "w", encoding="utf-8") as f:
@@ -43,8 +57,16 @@ def _audit_log(op: str, **kwargs):
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_file, log_file)
+            if require_valid_log and os.name != "nt":
+                directory_fd = os.open(MEMORY_AUDIT_DIR, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+        return True
     except Exception as _e:
         print(f"\033[90m[AuditLog]: {_e}\033[0m")
+        return False
 
 vector_lock = threading.Lock()
 memory_lock = threading.Lock()
@@ -103,8 +125,28 @@ def _cross_process_lock():
         _release_cross_process_lock(f)
 
 
+def _resolve_collection_name() -> str:
+    """Choose an isolated collection without preventing startup on incomplete setup."""
+    try:
+        name = get_embeddings_collection_name()
+    except EmbeddingsProviderSetupRequired as exc:
+        # The actual semantic request re-raises this typed error.  An empty
+        # placeholder namespace lets chat and structured memory still start.
+        print(f"\033[93m[MemoryManager]: {exc}\033[0m")
+        return "astakos_vec_unconfigured"
+    if name != "astakos_long_term":
+        print(
+            "\033[93m[MemoryManager]: Semantic memory uses a new embeddings namespace "
+            f"({name}); existing semantic memories remain untouched and require "
+            "an optional re-index to be searched again.\033[0m"
+        )
+    return name
+
+
+_collection_name = _resolve_collection_name()
+
 vector_store = Chroma(
-    collection_name="astakos_long_term",
+    collection_name=_collection_name,
     embedding_function=embeddings,
     persist_directory=CHROMA_DB_DIR
 )
@@ -122,7 +164,7 @@ def _refresh_vector_store(reason: str = "") -> bool:
     global vector_store
     try:
         vector_store = Chroma(
-            collection_name="astakos_long_term",
+            collection_name=_collection_name,
             embedding_function=embeddings,
             persist_directory=CHROMA_DB_DIR,
         )
@@ -132,6 +174,48 @@ def _refresh_vector_store(reason: str = "") -> bool:
     except Exception as e:
         print(f"\033[93m[MemoryManager]: Chroma refresh failed: {e}\033[0m")
         return False
+
+
+def close_vector_store():
+    """Properly close ChromaDB client to ensure HNSW vectors are flushed."""
+    acquired = vector_lock.acquire(timeout=5)
+    if not acquired:
+        print("\033[93m[VectorStore]: Timeout acquiring lock during shutdown. Skipping close to prevent corruption.\033[0m")
+        return
+
+    try:
+        if vector_store is not None and hasattr(vector_store, "_client"):
+            try:
+                vector_store._client.close()
+                print("\033[90m[VectorStore]: ChromaDB client closed gracefully.\033[0m")
+            except Exception as e:
+                print(f"\033[91m[VectorStore]: Error closing ChromaDB: {e}\033[0m")
+    finally:
+        vector_lock.release()
+
+
+def get_collections_inventory(chroma_dir: str | None = None) -> dict[str, int] | None:
+    """
+    Safely inspects Chroma database collections and their document counts in read-only mode,
+    reusing the existing managed Chroma handle and thread lock when active.
+    """
+    if vector_store is not None and hasattr(vector_store, "_client") and vector_store._client is not None:
+        try:
+            with vector_lock:
+                collections = vector_store._client.list_collections()
+                inventory: dict[str, int] = {}
+                for col in collections:
+                    try:
+                        inventory[col.name] = col.count()
+                    except Exception:
+                        inventory[col.name] = 0
+                return inventory
+        except Exception:
+            pass
+
+    return None
+
+
 
 
 def _should_retry_chroma_error(exc: Exception) -> bool:
@@ -151,6 +235,8 @@ def _safe_chroma_query(*, query_embeddings, n_results, where=None, include=None)
     for attempt in range(2):
         try:
             return vector_store._collection.query(**kwargs)
+        except (EmbeddingsProviderSetupRequired, ProviderAuthError):
+            raise
         except Exception as e:
             if attempt == 0 and _should_retry_chroma_error(e) and _refresh_vector_store("query retry"):
                 continue
@@ -162,6 +248,79 @@ def _safe_chroma_query(*, query_embeddings, n_results, where=None, include=None)
                 "distances": [[]],
                 "_error": str(e),
             }
+
+
+def safe_similarity_search(
+    query: str,
+    *,
+    k: int,
+    filter: dict | None = None,
+    query_embedding: list[float] | None = None,
+) -> list:
+    """Search Chroma through the current handle and retry once after a refresh.
+
+    Consumers must use this helper instead of retaining an imported ``vector_store``
+    reference: a refresh replaces that module-level handle after a recoverable
+    Chroma error.
+    """
+    for attempt in range(2):
+        try:
+            kwargs = {"k": k}
+            if filter is not None:
+                kwargs["filter"] = filter
+            if query_embedding is not None:
+                return vector_store.similarity_search_by_vector(query_embedding, **kwargs)
+            return vector_store.similarity_search(query, **kwargs)
+        except (EmbeddingsProviderSetupRequired, ProviderAuthError):
+            raise
+        except Exception as e:
+            if attempt == 0 and _should_retry_chroma_error(e) and _refresh_vector_store("similarity retry"):
+                continue
+            print(f"\033[93m[MemoryManager]: Chroma similarity error (graceful skip): {e}\033[0m")
+            return []
+
+
+def _safe_chroma_add_texts(
+    texts: list[str],
+    *,
+    metadatas: list[dict] | None = None,
+    embeddings: list[list[float]] | None = None,
+    ids: list[str] | None = None,
+) -> list[str]:
+    """Safely add or upsert texts and embeddings into Chroma with refresh/retry handling.
+
+    Matches LangChain Chroma add_texts semantics (UUID generation, upsert) while
+    allowing precomputed embedding vectors to bypass redundant network roundtrips.
+    """
+    if not texts:
+        return []
+    if ids is None:
+        ids = [str(uuid.uuid4()) for _ in texts]
+    else:
+        ids = [id_ if id_ is not None else str(uuid.uuid4()) for id_ in ids]
+
+    if metadatas:
+        length_diff = len(texts) - len(metadatas)
+        if length_diff > 0:
+            metadatas = metadatas + [{}] * length_diff
+
+    for attempt in range(2):
+        try:
+            vector_store._collection.upsert(
+                ids=ids,
+                documents=texts,
+                embeddings=embeddings,
+                metadatas=metadatas,
+            )
+            return ids
+        except (EmbeddingsProviderSetupRequired, ProviderAuthError):
+            raise
+        except Exception as e:
+            if attempt == 0 and _should_retry_chroma_error(e) and _refresh_vector_store("upsert retry"):
+                continue
+            print(f"\033[93m[MemoryManager]: Chroma upsert error: {e}\033[0m")
+            raise
+
 
 def _safe_chroma_delete(ids: list[str]) -> bool:
     if not ids:
@@ -295,19 +454,19 @@ def memory_has_date(text: str) -> bool:
     low = text_str.lower()
     if t("prompts.ext_str_730") in low:
         return True
-    
+
     # We are looking for years e.g. 2024, 1998
     if re.search(r"\b(19|20)\d{2}\b", text_str):
         return True
-        
+
     # Looking for dates e.g. 12/05, 12/05/2024, 12-05
     if re.search(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", text_str):
         return True
-        
+
     # Keywords
     if any(word in low for word in [t("prompts.ext_str_524"), t("prompts.ext_str_588"), t("prompts.ext_str_655"), t("prompts.ext_str_727"), t("prompts.ext_str_679"), t("prompts.ext_str_565"), t("prompts.ext_str_606"), t("prompts.ext_str_627"), t("prompts.ext_str_443")]):
         return True
-        
+
     return False
 
 
@@ -513,15 +672,130 @@ def decide_memory_overwrite(
     }
 
 
+def _fact_duplicate_model_response(prompt: str) -> str:
+    """Call the helper model once, without holding database locks."""
+    from services.gemini import safe_gemini_call
+
+    return safe_gemini_call(prompt, retries=1).text
+
+
+def _semantic_fact_duplicate(candidate: dict, query_emb: list[float]) -> tuple | None:
+    """Classify nearby fact equivalence outside storage locks; never delete records."""
+    from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+    fact = str(candidate.get("fact") or "")
+    if ("[USER_FACT]" not in fact or len(fact) > 2000
+            or candidate.get("external_content_sources") or candidate.get("photo_path")):
+        return None
+    try:
+        with vector_lock, _cross_process_lock():
+            result = _safe_chroma_query(
+                query_embeddings=[query_emb], n_results=5,
+                include=["documents", "metadatas", "distances"],
+            )
+        if result.get("_error"):
+            return None
+        nearby = []
+        snapshots = {}
+        for record_id, document, metadata, distance in zip(
+            (result.get("ids") or [[]])[0], (result.get("documents") or [[]])[0],
+            (result.get("metadatas") or [[]])[0], (result.get("distances") or [[]])[0],
+        ):
+            metadata = dict(metadata or {})
+            if (distance >= SIM_THRESHOLD_DISTANCE or "[USER_FACT]" not in document or len(document) > 2000
+                    or metadata.get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY) or metadata.get("photo_path")):
+                continue
+            snapshots[record_id] = (record_id, document, metadata)
+            nearby.append({"id": record_id, "fact": document[:2000],
+                           "date": metadata.get("date"), "time_scope": metadata.get("time_scope"),
+                           "category": metadata.get("category")})
+        if not nearby:
+            return None
+        data = {"proposed": {"fact": fact[:2000], "date": datetime.now().strftime("%Y-%m-%d"),
+                             "time_scope": candidate.get("time_scope"), "category": candidate.get("category")},
+                "recorded": nearby}
+        prompt = load_prompt("memory_fact_duplicate.md").replace("{{data}}", json.dumps(data, ensure_ascii=False))
+        answer = json.loads(_fact_duplicate_model_response(prompt))
+        record_id = answer.get("duplicate_id") if isinstance(answer, dict) else None
+        return snapshots.get(record_id) if isinstance(record_id, str) else None
+    except Exception:
+        # Provider/parse failures cannot authorize suppressing a new fact.
+        return None
+
+
 class AstakosMemoryManager:
     """Central Memory Manager — the ONE and ONLY write point."""
 
     def save(self, memory_type: str, **kwargs):
+        if memory_type == "fact":
+            fact = kwargs.get("fact", "")
+            query_emb = None
+            doc_emb = None
+            try:
+                # Precompute both query and document embeddings outside all locks to avoid holding locks during network calls
+                query_emb = embeddings.embed_query(fact)
+                doc_embs = embeddings.embed_documents([fact])
+                doc_emb = doc_embs[0] if doc_embs else None
+            except (EmbeddingsProviderSetupRequired, ProviderAuthError) as exc:
+                print(
+                    "\033[93m[MemoryManager]: Semantic save unavailable; "
+                    f"preserving structured fact only ({exc})\033[0m",
+                )
+                with memory_lock, _cross_process_lock():
+                    saved = self._save_fact_profile_only(**kwargs)
+                    self._trigger_routine_reconciler(
+                        kwargs["fact"],
+                        kwargs["category"],
+                        kwargs.get("reason", "agent_inferred"),
+                        external_content_sources=kwargs.get("external_content_sources"),
+                    )
+                return saved
+            except Exception as e:
+                import traceback
+                print(f"\033[91m[MemoryManager Error]: {e}\033[0m")
+                traceback.print_exc()
+                return False
+
+            semantic_duplicate = _semantic_fact_duplicate(kwargs, query_emb)
+            with vector_lock, memory_lock, _cross_process_lock():
+                try:
+                    if semantic_duplicate is not None:
+                        record_id, document, metadata = semantic_duplicate
+                        current = _safe_chroma_get(ids=[record_id])
+                        current_meta = (current.get("metadatas") or [{}])[0]
+                        fields = ("date", "time_scope", "category", "untrusted_external_tool_names", "photo_path")
+                        if (current.get("ids") == [record_id] and current.get("documents") == [document]
+                                and all(current_meta.get(key) == metadata.get(key) for key in fields)):
+                            _audit_log("skip_duplicate", category=kwargs["category"], fact=fact[:100],
+                                       existing=document[:100], comparison="semantic_same_period")
+                            self._trigger_routine_reconciler(
+                                fact, kwargs["category"], kwargs.get("reason", "agent_inferred"),
+                                external_content_sources=kwargs.get("external_content_sources"),
+                            )
+                            return False
+                    return self._save_fact(query_emb=query_emb, doc_emb=doc_emb, **kwargs)
+                except (EmbeddingsProviderSetupRequired, ProviderAuthError) as exc:
+                    print(
+                        "\033[93m[MemoryManager]: Semantic save unavailable; "
+                        f"preserving structured fact only ({exc})\033[0m",
+                    )
+                    saved = self._save_fact_profile_only(**kwargs)
+                    self._trigger_routine_reconciler(
+                        kwargs["fact"],
+                        kwargs["category"],
+                        kwargs.get("reason", "agent_inferred"),
+                        external_content_sources=kwargs.get("external_content_sources"),
+                    )
+                    return saved
+                except Exception as e:
+                    import traceback
+                    print(f"\033[91m[MemoryManager Error]: {e}\033[0m")
+                    traceback.print_exc()
+                    return False
+
         with vector_lock, memory_lock, _cross_process_lock():
             try:
-                if memory_type == "fact":
-                    return self._save_fact(**kwargs)
-                elif memory_type == "photo":
+                if memory_type == "photo":
                     return self._save_photo(**kwargs)
                 elif memory_type == "document":
                     return self._save_document(**kwargs)
@@ -535,6 +809,20 @@ class AstakosMemoryManager:
                     return self._save_event(**kwargs)
                 else:
                     print(f"⚠️ [MemoryManager]: Unknown memory type '{memory_type}'")
+            except (EmbeddingsProviderSetupRequired, ProviderAuthError) as exc:
+                if memory_type == "photo":
+                    print(
+                        "\033[93m[MemoryManager]: Semantic photo indexing unavailable; "
+                        f"preserving photo archive only ({exc})\033[0m",
+                    )
+                    return self._append_photo_archive(**kwargs)
+                if memory_type == "document":
+                    print(
+                        "\033[93m[MemoryManager]: Semantic document indexing unavailable; "
+                        f"preserving document archive only ({exc})\033[0m",
+                    )
+                    return self._append_document_archive(**kwargs)
+                raise
             except Exception as e:
                 import traceback
                 print(f"\033[91m[MemoryManager Error]: {e}\033[0m")
@@ -566,6 +854,114 @@ class AstakosMemoryManager:
         os.replace(tmp_file, WORKING_MEMORY_FILE)
         return True
 
+    def _save_fact_profile_only(
+        self,
+        *,
+        fact: str,
+        category: str,
+        agent_name: str,
+        photo_path: str = None,
+        source: str = "unknown",
+        reason: str = "agent_inferred",
+        confidence: float = 0.7,
+        tags: list[str] | None = None,
+        entities: list[str] | None = None,
+        topic: str = "",
+        topic_detail: str = "",
+        state_markers: list[str] | None = None,
+        time_scope: str = "",
+        relation_type: str = "",
+        external_content_sources: list[str] | None = None,
+        replace_old_fact_text: str | None = None,
+    ) -> bool:
+        """Persist a fact in structured storage when semantic indexing is unavailable."""
+        if category == "photos":
+            return False
+
+        from config import PROFILE_DB
+
+        tags = tags or []
+        entities = entities or []
+        state_markers = state_markers or []
+        external_content_sources = external_content_sources or []
+        conn = None
+        try:
+            conn = sqlite3.connect(PROFILE_DB)
+            cursor = conn.cursor()
+            _ensure_profile_fact_schema(cursor)
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            profile_metadata = {
+                "tags": tags,
+                "entities": entities,
+                "topic": topic or "",
+                "topic_detail": topic_detail or "",
+                "state_markers": state_markers,
+                "time_scope": time_scope or "",
+                "relation_type": relation_type or "",
+                "confidence": confidence,
+                "source": source,
+                "reason": reason,
+                "agent_name": agent_name,
+            }
+            if external_content_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+                profile_metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = external_content_sources
+            metadata_json = json.dumps(profile_metadata, ensure_ascii=False)
+
+            if replace_old_fact_text is not None:
+                cursor.execute(
+                    "SELECT id FROM profile_facts WHERE category=? AND fact=?",
+                    (category, replace_old_fact_text),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    normalized_old_fact = replace_old_fact_text.strip().lower()
+                    cursor.execute(
+                        "SELECT id, fact FROM profile_facts WHERE category=?",
+                        (category,),
+                    )
+                    for candidate_id, candidate_fact in cursor.fetchall():
+                        if candidate_fact.strip().lower() == normalized_old_fact:
+                            row = (candidate_id,)
+                            break
+                if row:
+                    cursor.execute(
+                        "UPDATE profile_facts SET fact=?, photo_path=?, date=?, metadata_json=?, "
+                        "created_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (fact, photo_path, date_str, metadata_json, row[0]),
+                    )
+                    print("\033[94m[DB Profile]: Replacing old entry (same as Chroma)\033[0m")
+                else:
+                    cursor.execute(
+                        "INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (category, fact, photo_path, date_str, metadata_json),
+                    )
+                    print("\033[92m[DB Profile]: New record added.\033[0m")
+            else:
+                cursor.execute(
+                    "SELECT 1 FROM profile_facts WHERE category=? AND fact=? LIMIT 1",
+                    (category, fact),
+                )
+                if cursor.fetchone():
+                    print("\033[90m[DB Profile]: Exact duplicate skipped.\033[0m")
+                else:
+                    cursor.execute(
+                        "INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (category, fact, photo_path, date_str, metadata_json),
+                    )
+                    print("\033[92m[DB Profile]: New record added.\033[0m")
+            conn.commit()
+            return True
+        except Exception as db_err:
+            print(f"\033[91m[DB Profile Error]: {db_err}\033[0m")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
     def _save_fact(
         self,
         fact: str,
@@ -582,8 +978,15 @@ class AstakosMemoryManager:
         state_markers: list[str] | None = None,
         time_scope: str = "",
         relation_type: str = "",
+        external_content_sources: list[str] | None = None,
+        query_emb: list[float] | None = None,
+        doc_emb: list[float] | None = None,
     ):
-        from config import PROFILE_DB
+        if query_emb is None:
+            query_emb = embeddings.embed_query(fact)
+        if doc_emb is None:
+            doc_embs = embeddings.embed_documents([fact])
+            doc_emb = doc_embs[0] if doc_embs else None
 
         # ── Threshold per fact type ──────────────────────────────
         if "[LESSON]" in fact:
@@ -603,8 +1006,6 @@ class AstakosMemoryManager:
 
         # 1. Semantic Overwrite for [LESSON] / [USER_FACT] — category-safe first
         if "[LESSON]" in fact or "[USER_FACT]" in fact:
-            query_emb = embeddings.embed_query(fact)
-
             def _meta_of(res):
                 try:
                     return (res.get('metadatas') or [[]])[0][0] or {}
@@ -644,13 +1045,13 @@ class AstakosMemoryManager:
                 cross_documents = cross.get("documents") or [[]]
 
                 if (
-                    cross_ids and cross_ids[0] 
-                    and cross_distances and cross_distances[0] 
+                    cross_ids and cross_ids[0]
+                    and cross_distances and cross_distances[0]
                     and cross_distances[0][0] < 0.20
                 ):
                     c_meta = _meta_of(cross)
                     c_doc = cross_documents[0][0]
-                    
+
                     if memory_has_meaningful_overlap(fact, c_doc):
                         print(
                             f"\033[93m[MemoryManager]: ⚠️ Close memory in another category "
@@ -697,7 +1098,12 @@ class AstakosMemoryManager:
                                new_richness=round(decision["new_richness"], 1),
                                distance=round(float(dist), 3) if dist is not None else None,
                                overlap=round(float(storage["overlap"]), 3))
-                    self._trigger_routine_reconciler(fact, category, reason)
+                    self._trigger_routine_reconciler(
+                        fact,
+                        category,
+                        reason,
+                        external_content_sources=external_content_sources,
+                    )
                     return False
                 elif storage["action"] == "add_alongside":
                     add_alongside_old_text = old_content
@@ -740,7 +1146,32 @@ class AstakosMemoryManager:
                     replace_old_fact_text = old_content
 
         # 2. Duplicate check with dynamic threshold
-        results = vector_store.similarity_search_with_score(fact, k=1)
+        results = []
+        dup_results = _safe_chroma_query(
+            query_embeddings=[query_emb],
+            n_results=1,
+            include=["documents", "metadatas", "distances"],
+        )
+        if dup_results.get("_error"):
+            print(
+                f"\033[93m[MemoryManager]: Duplicate check query failed ({dup_results['_error']}); "
+                "aborting fact save (fail-closed).\033[0m"
+            )
+            return False
+
+        if (
+            dup_results.get("ids")
+            and dup_results["ids"][0]
+            and dup_results.get("distances")
+            and dup_results["distances"][0]
+        ):
+            from langchain_core.documents import Document
+
+            doc_text = dup_results["documents"][0][0]
+            doc_meta = dup_results["metadatas"][0][0] or {}
+            score = dup_results["distances"][0][0]
+            results.append((Document(page_content=doc_text, metadata=doc_meta), score))
+
         for doc, score in results:
             if score >= SIM_THRESHOLD_DISTANCE:
                 continue
@@ -793,7 +1224,12 @@ class AstakosMemoryManager:
                 existing=doc.page_content[:100],
                 distance=round(float(score), 3),
             )
-            self._trigger_routine_reconciler(fact, category, reason)
+            self._trigger_routine_reconciler(
+                fact,
+                category,
+                reason,
+                external_content_sources=external_content_sources,
+            )
             return False
 
         # 3. Chroma Storage
@@ -812,6 +1248,7 @@ class AstakosMemoryManager:
         tags = tags or []
         entities = entities or []
         state_markers = state_markers or []
+        external_content_sources = external_content_sources or []
         now_ts = datetime.now().timestamp()
         metadata = {
             "category": category, "agent": agent_name,
@@ -830,12 +1267,19 @@ class AstakosMemoryManager:
             "time_scope": time_scope or "",
             "relation_type": relation_type or "",
         }
+        if external_content_sources:
+            from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+            metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                external_content_sources,
+            )
         if photo_path:
             if not os.path.isabs(photo_path):
                 photo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", photo_path)
             metadata["photo_path"] = photo_path
 
-        vector_store.add_texts([fact], metadatas=[metadata])
+        embeddings_list = [doc_emb] if doc_emb is not None else None
+        _safe_chroma_add_texts([fact], metadatas=[metadata], embeddings=embeddings_list)
         _audit_log(
             "add",
             category=category,
@@ -852,66 +1296,49 @@ class AstakosMemoryManager:
             relation_type=relation_type or "",
         )
 
-# 4. Save DB Profile — with smart OVERWRITE
-        if category != "photos":
-            import sqlite3
-            conn = None
-            try:
-                conn = sqlite3.connect(PROFILE_DB)
-                c = conn.cursor()
-                _ensure_profile_fact_schema(c)
-
-                date_str = datetime.now().strftime("%Y-%m-%d")
-                profile_metadata_json = json.dumps({
-                    "tags": tags,
-                    "entities": entities,
-                    "topic": topic or "",
-                    "topic_detail": topic_detail or "",
-                    "state_markers": state_markers,
-                    "time_scope": time_scope or "",
-                    "relation_type": relation_type or "",
-                    "confidence": confidence,
-                    "source": source,
-                    "reason": reason,
-                    "agent_name": agent_name,
-                }, ensure_ascii=False)
-                
-                if replace_old_fact_text is not None:
-                    c.execute("SELECT id FROM profile_facts WHERE category=? AND fact=?", (category, replace_old_fact_text))
-                    row = c.fetchone()
-                    
-                    if not row:
-                        # Fallback normalized match
-                        trimmed_old = replace_old_fact_text.strip().lower()
-                        c.execute("SELECT id, fact FROM profile_facts WHERE category=?", (category,))
-                        for r in c.fetchall():
-                            if r[1].strip().lower() == trimmed_old:
-                                row = (r[0],)
-                                break
-
-                    if row:
-                        print(f"\033[94m[DB Profile]: Replacing old entry (same as Chroma)\033[0m")
-                        c.execute("UPDATE profile_facts SET fact=?, photo_path=?, date=?, metadata_json=?, created_at=CURRENT_TIMESTAMP WHERE id=?", (fact, photo_path, date_str, profile_metadata_json, row[0]))
-                    else:
-                        print(f"\033[93m[DB Profile]: No matching old record found for replacement '{replace_old_fact_text}' — adding new to avoid silent loss.\033[0m")
-                        c.execute("INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) VALUES (?, ?, ?, ?, ?)", (category, fact, photo_path, date_str, profile_metadata_json))
-                else:
-                    print(f"\033[92m[DB Profile]: New record added.\033[0m")
-                    c.execute("INSERT INTO profile_facts (category, fact, photo_path, date, metadata_json) VALUES (?, ?, ?, ?, ?)", (category, fact, photo_path, date_str, profile_metadata_json))
-                
-                conn.commit()
-            except Exception as db_err:
-                print(f"\033[91m[DB Profile Error]: {db_err}\033[0m")
-            finally:
-                if conn:
-                    conn.close()
+# 4. Save DB Profile — with the same overwrite decision as semantic storage.
+        self._save_fact_profile_only(
+            fact=fact,
+            category=category,
+            agent_name=agent_name,
+            photo_path=photo_path,
+            source=source,
+            reason=reason,
+            confidence=confidence,
+            tags=tags,
+            entities=entities,
+            topic=topic,
+            topic_detail=topic_detail,
+            state_markers=state_markers,
+            time_scope=time_scope,
+            relation_type=relation_type,
+            external_content_sources=external_content_sources,
+            replace_old_fact_text=replace_old_fact_text,
+        )
 
         # 5. Automatic fact -> routine reconciliation
-        self._trigger_routine_reconciler(fact, category, reason)
+        self._trigger_routine_reconciler(
+            fact,
+            category,
+            reason,
+            external_content_sources=external_content_sources,
+        )
         return True
 
-    def _trigger_routine_reconciler(self, fact: str, category: str, reason: str):
-        # Runs to evaluate facts against routines, EVEN IF the memory wasn't saved 
+    def _trigger_routine_reconciler(
+        self,
+        fact: str,
+        category: str,
+        reason: str,
+        *,
+        external_content_sources: list[str] | None = None,
+    ) -> None:
+        """Reconcile trusted facts with routines without extending external approval scope."""
+        if external_content_sources:
+            print("\033[90m[RoutineReconciler]: skip untrusted external fact\033[0m")
+            return
+
+        # Runs to evaluate facts against routines, EVEN IF the memory wasn't saved
         # (e.g. because it was already known/duplicate). We still want to act on the fact today.
         try:
             from services.routine_reconciler import reconcile_fact_to_routines
@@ -934,7 +1361,14 @@ class AstakosMemoryManager:
         except Exception as reconcile_err:
             print(f"\033[90m[RoutineReconciler]: skip ({reconcile_err})\033[0m")
 
-    def _save_photo(self, file_path: str, analysis: str, caption: str):
+    def _save_photo(
+        self,
+        file_path: str,
+        analysis: str,
+        caption: str,
+        external_content_sources: list[str] | None = None,
+    ):
+        """Store a photo archive while retaining any untrusted-source provenance."""
         fact = t("memory.vector_store.photo_fact", caption=caption or t("memory.vector_store.photo_default"), analysis=analysis[:350])
         metadata = {
             "category": "photos", "agent": "Direct_Index", "photo_path": file_path,
@@ -943,12 +1377,36 @@ class AstakosMemoryManager:
             "importance": 4, "confidence": 0.8,
             "last_accessed": datetime.now().timestamp(),
         }
+        if external_content_sources:
+            from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+            metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                external_content_sources,
+            )
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Photo 'pinned' ({os.path.basename(file_path)})\033[0m")
 
+        self._append_photo_archive(
+            file_path=file_path,
+            analysis=analysis,
+            caption=caption,
+            external_content_sources=external_content_sources,
+        )
+        return True
+
+    def _append_photo_archive(
+        self,
+        *,
+        file_path: str,
+        analysis: str,
+        caption: str,
+        external_content_sources: list[str] | None = None,
+    ) -> bool:
+        """Append a confirmed photo to its non-semantic archive."""
         entry = {
             "file_path": file_path, "analysis": analysis, "caption": caption,
             "date": datetime.now().strftime("%Y-%m-%d"), "timestamp": datetime.now().isoformat(),
+            "external_content_sources": external_content_sources or [],
         }
         index = []
         if os.path.exists(PHOTOS_INDEX_FILE):
@@ -962,7 +1420,14 @@ class AstakosMemoryManager:
             json.dump(index, f, ensure_ascii=False, indent=2)
         return True
 
-    def _save_document(self, file_path: str, analysis: str, caption: str):
+    def _save_document(
+        self,
+        file_path: str,
+        analysis: str,
+        caption: str,
+        external_content_sources: list[str] | None = None,
+    ):
+        """Store a document archive while retaining any untrusted-source provenance."""
         fact = t("memory.vector_store.doc_fact", caption=caption or t("memory.vector_store.doc_default"), analysis=analysis[:1000])
         metadata = {
             "category": "documents", "agent": "Direct_Index", "file_path": file_path,
@@ -971,25 +1436,62 @@ class AstakosMemoryManager:
             "importance": 5, "confidence": 0.8,
             "last_accessed": datetime.now().timestamp(),
         }
+        if external_content_sources:
+            from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+            metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                external_content_sources,
+            )
         vector_store.add_texts([fact], metadatas=[metadata])
         print(f"\033[92m[ChromaDB]: Document 'pinned' ({os.path.basename(file_path)})\033[0m")
 
+        self._append_document_archive(
+            file_path=file_path,
+            analysis=analysis,
+            caption=caption,
+            external_content_sources=external_content_sources,
+        )
+        return True
+
+    def _append_document_archive(
+        self,
+        *,
+        file_path: str,
+        analysis: str,
+        caption: str,
+        external_content_sources: list[str] | None = None,
+    ) -> bool:
+        """Append a confirmed document to its non-semantic archive."""
         from config import DOCS_INDEX_FILE
-        docs_index_file = DOCS_INDEX_FILE
+
         entry = {
             "file_path": file_path, "summary": analysis, "caption": caption,
             "date": datetime.now().strftime("%Y-%m-%d"), "timestamp": datetime.now().isoformat(),
+            "external_content_sources": external_content_sources or [],
         }
         index = []
-        if os.path.exists(docs_index_file):
-            with open(docs_index_file, "r", encoding="utf-8") as f:
+        if os.path.exists(DOCS_INDEX_FILE):
+            with open(DOCS_INDEX_FILE, "r", encoding="utf-8") as f:
                 try:
-                    index = json.load(f)
-                except:
-                    pass
+                    loaded = json.load(f)
+                    if not isinstance(loaded, list):
+                        raise ValueError("Document archive index must contain a list")
+                except (json.JSONDecodeError, ValueError):
+                    loaded = []
+                index = loaded
         index.append(entry)
-        with open(docs_index_file, "w", encoding="utf-8") as f:
-            json.dump(index, f, ensure_ascii=False, indent=2)
+        index_path = os.path.abspath(DOCS_INDEX_FILE)
+        os.makedirs(os.path.dirname(index_path), exist_ok=True)
+        temporary_path = f"{index_path}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        try:
+            with open(temporary_path, "w", encoding="utf-8") as f:
+                json.dump(index, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary_path, index_path)
+        finally:
+            if os.path.exists(temporary_path):
+                os.unlink(temporary_path)
         return True
 
     def _save_session(self, summary: dict, session_text: str):
@@ -1006,10 +1508,10 @@ class AstakosMemoryManager:
         try:
             conn = sqlite3.connect(STATE_DB)
             cursor = conn.cursor()
-            
+
             completed = json.dumps(summary.get("completed", []), ensure_ascii=False)
             pending = json.dumps(summary.get("pending", []), ensure_ascii=False)
-            
+
             cursor.execute('''
                 INSERT INTO sessions (session_date, channel, summary, completed, pending, next_session_hint, mood)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1022,19 +1524,19 @@ class AstakosMemoryManager:
                 summary.get("next_session_hint", ""),
                 summary.get("mood", "")
             ))
-            
+
             cursor.execute("SELECT id FROM sessions ORDER BY id DESC LIMIT -1 OFFSET 30")
             old_ids = cursor.fetchall()
             for (old_id,) in old_ids:
                 cursor.execute("DELETE FROM sessions WHERE id=?", (old_id,))
-                
+
             conn.commit()
         except Exception as e:
             print(f"Error saving session to DB: {e}")
         finally:
             if conn:
                 conn.close()
-            
+
         return True
 
 
@@ -1113,22 +1615,120 @@ def save_photo_to_index(file_path: str, analysis: str, caption: str = ""):
 # Long-Term Goals
 # ================================================================
 
-def save_goal(project: str, description: str, status: str = "active", progress: int = 0, milestones: str = "") -> bool:
-    """Saves or updates a goal. Overwrites if it already exists."""
+def _merged_goal_external_content_sources(
+    metadata: dict | None,
+    new_sources: list[str] | None,
+) -> list[str]:
+    """Merge existing goal provenance with an approved external goal update."""
+    from core.untrusted_content import (
+        EXTERNAL_CONTENT_HISTORY_METADATA_KEY,
+        external_content_sources_from_json,
+    )
+
+    existing_sources = external_content_sources_from_json(
+        (metadata or {}).get(EXTERNAL_CONTENT_HISTORY_METADATA_KEY, ""),
+    )
+    return sorted(set(existing_sources) | set(new_sources or []))
+
+
+def _goal_temporal_metadata(
+    old_meta: dict | None,
+    *,
+    now_ts: float,
+    changed: bool,
+    kind: str,
+    detail: str,
+) -> dict:
+    """Keep creation, activity, and a bounded record of actual goal changes."""
+    previous = old_meta or {}
+    temporal = {
+        "timestamp": now_ts,
+        "last_activity_at": now_ts,
+    }
+    if old_meta is None:
+        temporal["created_at"] = now_ts
+    elif previous.get("created_at"):
+        temporal["created_at"] = previous["created_at"]
+    if changed:
+        temporal["updated_at"] = now_ts
+        try:
+            events = json.loads(previous.get("goal_events_json") or "[]")
+        except (TypeError, ValueError):
+            events = []
+        if not isinstance(events, list):
+            events = []
+        events.append({"at": now_ts, "kind": kind, "detail": detail[:300]})
+        temporal["goal_events_json"] = json.dumps(events[-10:], ensure_ascii=False)
+    else:
+        for key in ("updated_at", "goal_events_json"):
+            if previous.get(key):
+                temporal[key] = previous[key]
+    return temporal
+
+
+def _lookup_goal_record(project: str) -> dict:
+    """Resolve an exact project across every status under the caller's locks."""
+    return _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+
+
+def save_goal(
+    project: str,
+    description: str,
+    status: str = "active",
+    progress: int = 0,
+    milestones: str = "",
+    external_content_sources: list[str] | None = None,
+    *,
+    create_only: bool = False,
+) -> bool:
+    """Save or update a goal while retaining any untrusted-source provenance."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            existing = _lookup_goal_record(project)
+            if create_only and existing["ids"]:
+                return False
+            existing_metadata = None
+            old_doc = None
             if existing["ids"]:
+                existing_metadata = dict(existing["metadatas"][0])
+                old_doc = existing["documents"][0]
                 vector_store._collection.delete(ids=existing["ids"])
                 print(f"\033[94m[Goals]: Overwrite '{project}'\033[0m")
+            merged_sources = _merged_goal_external_content_sources(
+                existing_metadata,
+                external_content_sources,
+            )
             text = f"[GOAL] {project}: {description}"
+            now_ts = datetime.now().timestamp()
+            changes = []
+            if existing_metadata is None:
+                changes.append("Goal created")
+            else:
+                if old_doc != text:
+                    changes.append(f"description: {description}")
+                for key, value in (("status", status), ("progress", progress), ("milestones", milestones)):
+                    if existing_metadata.get(key) != value:
+                        changes.append(f"{key}: {existing_metadata.get(key)} → {value}")
             metadata = {
                 "category": "goal", "project": project, "status": status,
                 "progress": progress, "milestones": milestones,
-                "agent": "GoalTracker", "timestamp": datetime.now().timestamp(),
+                "agent": "GoalTracker", "timestamp": now_ts,
                 "date": datetime.now().strftime("%Y-%m-%d"), "retrieval_count": 0,
-                "importance": 10, "confidence": 0.95, "last_accessed": datetime.now().timestamp(),
+                "importance": 10, "confidence": 0.95, "last_accessed": now_ts,
             }
+            metadata.update(_goal_temporal_metadata(
+                existing_metadata,
+                now_ts=now_ts,
+                changed=bool(changes),
+                kind="created" if existing_metadata is None else "updated",
+                detail="; ".join(changes),
+            ))
+            if merged_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+                metadata[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                    merged_sources,
+                )
             vector_store.add_texts([text], metadatas=[metadata])
             print(f"\033[92m[Goals]: '{project}' ({status}, {progress}%)\033[0m")
             return True
@@ -1137,16 +1737,27 @@ def save_goal(project: str, description: str, status: str = "active", progress: 
         return False
 
 
-def update_goal_status(project: str, status: str) -> bool:
+def update_goal_status(
+    project: str, status: str, external_content_sources: list[str] | None = None,
+) -> bool:
     """Changes the status of a goal."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            existing = _lookup_goal_record(project)
             if not existing["ids"]:
                 return False
             old_meta = dict(existing["metadatas"][0])
             vector_store._collection.delete(ids=existing["ids"])
-            new_meta = {**old_meta, "status": status, "timestamp": datetime.now().timestamp()}
+            now_ts = datetime.now().timestamp()
+            new_meta = {**old_meta, "status": status}
+            new_meta.update(_goal_temporal_metadata(
+                old_meta, now_ts=now_ts, changed=old_meta.get("status") != status,
+                kind="status", detail=f"status: {old_meta.get('status')} → {status}",
+            ))
+            merged_sources = _merged_goal_external_content_sources(old_meta, external_content_sources)
+            if merged_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+                new_meta[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(merged_sources)
             vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
             print(f"\033[92m[Goals]: '{project}' → {status}\033[0m")
             return True
@@ -1155,16 +1766,28 @@ def update_goal_status(project: str, status: str) -> bool:
         return False
 
 
-def update_goal_progress(project: str, progress: int) -> bool:
+def update_goal_progress(
+    project: str, progress: int, external_content_sources: list[str] | None = None,
+) -> bool:
     """Updates the progress percentage of a goal (0-100)."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            existing = _lookup_goal_record(project)
             if not existing["ids"]:
                 return False
             old_meta = dict(existing["metadatas"][0])
             vector_store._collection.delete(ids=existing["ids"])
-            new_meta = {**old_meta, "progress": max(0, min(100, progress)), "timestamp": datetime.now().timestamp()}
+            now_ts = datetime.now().timestamp()
+            bounded_progress = max(0, min(100, progress))
+            new_meta = {**old_meta, "progress": bounded_progress}
+            new_meta.update(_goal_temporal_metadata(
+                old_meta, now_ts=now_ts, changed=old_meta.get("progress") != bounded_progress,
+                kind="progress", detail=f"progress: {old_meta.get('progress')}% → {bounded_progress}%",
+            ))
+            merged_sources = _merged_goal_external_content_sources(old_meta, external_content_sources)
+            if merged_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+                new_meta[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(merged_sources)
             vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
             print(f"\033[92m[Goals]: '{project}' progress → {progress}%\033[0m")
             return True
@@ -1173,16 +1796,35 @@ def update_goal_progress(project: str, progress: int) -> bool:
         return False
 
 
-def update_goal_milestones(project: str, milestones: str) -> bool:
-    """Updates the milestones of a goal."""
+def update_goal_milestones(
+    project: str,
+    milestones: str,
+    external_content_sources: list[str] | None = None,
+) -> bool:
+    """Update goal milestones while retaining any external-source provenance."""
     try:
         with vector_lock, _cross_process_lock():
-            existing = _safe_chroma_get(where={"$and": [{"category": "goal"}, {"project": project}]})
+            existing = _lookup_goal_record(project)
             if not existing["ids"]:
                 return False
             old_meta = dict(existing["metadatas"][0])
             vector_store._collection.delete(ids=existing["ids"])
-            new_meta = {**old_meta, "milestones": milestones, "timestamp": datetime.now().timestamp()}
+            now_ts = datetime.now().timestamp()
+            new_meta = {**old_meta, "milestones": milestones}
+            new_meta.update(_goal_temporal_metadata(
+                old_meta, now_ts=now_ts, changed=old_meta.get("milestones") != milestones,
+                kind="milestones", detail=f"milestones: {milestones}",
+            ))
+            merged_sources = _merged_goal_external_content_sources(
+                old_meta,
+                external_content_sources,
+            )
+            if merged_sources:
+                from core.untrusted_content import EXTERNAL_CONTENT_HISTORY_METADATA_KEY
+
+                new_meta[EXTERNAL_CONTENT_HISTORY_METADATA_KEY] = _json_meta_list(
+                    merged_sources,
+                )
             vector_store.add_texts([existing["documents"][0]], metadatas=[new_meta])
             print(f"\033[92m[Goals]: '{project}' milestones updated\033[0m")
             return True
@@ -1206,6 +1848,7 @@ def get_active_goals() -> list[dict]:
                     "date":        meta.get("date", ""),
                     "progress":    meta.get("progress", 0),
                     "milestones":  meta.get("milestones", ""),
+                    "metadata": meta,
                 })
         return goals
     except Exception as e:

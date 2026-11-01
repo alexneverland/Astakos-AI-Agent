@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from core import nl_config
 import memory.working_memory as wm
 
 
@@ -54,3 +55,184 @@ def test_update_working_memory_skips_operational_routine_exchange_before_llm():
 
     llm_mock.assert_not_called()
     save_mock.assert_not_called()
+
+
+def test_operational_guard_uses_external_routine_admin_markers(monkeypatch) -> None:
+    """Ensure routine administration detection follows configured marker lists."""
+    monkeypatch.setattr(
+        "memory.working_memory.nl_config.WM_ROUTINE_REFERENCE_MARKERS",
+        ("configured routine",),
+    )
+    monkeypatch.setattr(
+        "memory.working_memory.nl_config.WM_ROUTINE_ADMIN_MARKERS",
+        ("configured admin",),
+    )
+    monkeypatch.setattr(
+        "memory.working_memory.nl_config.WM_OPERATIONAL_AI_MARKERS",
+        ("configured ai marker",),
+    )
+
+    assert wm._looks_like_operational_working_memory_exchange(
+        "configured routine configured admin",
+        "normal response",
+    ) is True
+    assert wm._looks_like_operational_working_memory_exchange(
+        "normal user message",
+        "configured ai marker",
+    ) is True
+
+
+def test_operational_guard_lists_include_both_external_languages() -> None:
+    """Ensure working-memory operational guards retain markers from both language files."""
+    for language_code in ("el", "en"):
+        language_intents = nl_config._load_base_intents(language_code)
+        working_memory_intents = language_intents["working_memory"]
+        reference_markers = working_memory_intents["routine_reference_markers"]
+        admin_markers = working_memory_intents["routine_admin_markers"]
+        ai_markers = working_memory_intents["operational_ai_markers"]
+
+        assert set(reference_markers).issubset(nl_config.WM_ROUTINE_REFERENCE_MARKERS)
+        assert set(admin_markers).issubset(nl_config.WM_ROUTINE_ADMIN_MARKERS)
+        assert set(ai_markers).issubset(nl_config.WM_OPERATIONAL_AI_MARKERS)
+        assert all(
+            wm._looks_like_operational_working_memory_exchange(
+                f"{reference_marker} {admin_marker}",
+                "normal response",
+            )
+            for reference_marker in reference_markers
+            for admin_marker in admin_markers
+        )
+        assert all(
+            wm._looks_like_operational_working_memory_exchange(
+                "normal user message",
+                ai_marker,
+            )
+            for ai_marker in ai_markers
+        )
+
+
+def test_operational_guard_rejects_marker_substrings_inside_normal_words() -> None:
+    """Ensure bilingual admin markers do not classify ordinary compound words as commands."""
+    assert wm._looks_like_operational_working_memory_exchange(
+        "I changed my workout routine today",
+        "normal response",
+    ) is False
+
+
+def test_operational_guard_preserves_ordinary_routine_and_work_context() -> None:
+    """Ensure routine mentions with ordinary work context remain eligible for memory extraction."""
+    ordinary_messages = (
+        "I changed my morning routine after work",
+        "Άλλαξα τη ρουτίνα μου μετά τη δουλειά",
+    )
+
+    assert all(
+        not wm._looks_like_operational_working_memory_exchange(
+            message,
+            "normal response",
+        )
+        for message in ordinary_messages
+    )
+
+
+# ════════════════════════════════════════════════════════════════
+# Regression tests for colon-in-tags bug fix (2026-07-25)
+# The banned marker `": "` was removed because it rejected valid
+# tags like "Shopping: Apple Watch". These tests lock the fix.
+# ════════════════════════════════════════════════════════════════
+
+def test_validate_tags_accepts_colon_in_tag():
+    """Tags with colons (e.g. 'Shopping: Apple Watch') must pass.
+    This was the exact bug — the `': '` banned marker rejected them."""
+    result = wm._validate_working_memory_tags("Shopping: Apple Watch, Checking store hours")
+    assert result == "Shopping: Apple Watch, Checking store hours"
+
+
+def test_validate_tags_accepts_multiple_colon_tags():
+    """Multiple colon-containing tags must pass."""
+    result = wm._validate_working_memory_tags("Task: coding, Mood: focused")
+    assert result == "Task: coding, Mood: focused"
+
+
+def test_validate_tags_accepts_single_colon_tag():
+    """A single colon tag must pass."""
+    result = wm._validate_working_memory_tags("Activity: walking")
+    assert result == "Activity: walking"
+
+
+# ════════════════════════════════════════════════════════════════
+# Rejection rule regression — ensure all other guards still work
+# ════════════════════════════════════════════════════════════════
+
+def test_validate_tags_rejects_empty():
+    assert wm._validate_working_memory_tags("") == ""
+
+
+def test_validate_tags_returns_empty_keyword():
+    assert wm._validate_working_memory_tags("EMPTY") == "EMPTY"
+
+
+def test_validate_tags_rejects_newlines():
+    assert wm._validate_working_memory_tags("Shopping\nWalking") == ""
+
+
+def test_validate_tags_rejects_because():
+    assert wm._validate_working_memory_tags("Shopping because he mentioned it") == ""
+
+
+def test_validate_tags_rejects_the_user():
+    assert wm._validate_working_memory_tags("the user is shopping") == ""
+
+
+def test_validate_tags_rejects_here_are():
+    assert wm._validate_working_memory_tags("Here are the tags") == ""
+
+
+def test_validate_tags_rejects_tags_label():
+    assert wm._validate_working_memory_tags("Tags: shopping, walking") == ""
+
+
+def test_validate_tags_rejects_numbered_list():
+    assert wm._validate_working_memory_tags("1. Shopping") == ""
+
+
+def test_validate_tags_rejects_bullet_list():
+    assert wm._validate_working_memory_tags("- Shopping") == ""
+
+
+def test_validate_tags_rejects_markdown():
+    assert wm._validate_working_memory_tags("```code block```") == ""
+
+
+def test_validate_tags_rejects_more_than_three_tags():
+    assert wm._validate_working_memory_tags("a, b, c, d") == ""
+
+
+def test_validate_tags_rejects_tag_with_too_many_words():
+    """Each tag must be ≤ 4 words."""
+    assert wm._validate_working_memory_tags("this is a very long tag") == ""
+
+
+def test_validate_tags_rejects_tag_over_40_chars():
+    assert wm._validate_working_memory_tags("a" * 41) == ""
+
+
+def test_validate_tags_rejects_special_characters():
+    assert wm._validate_working_memory_tags("Shopping; walking") == ""
+    assert wm._validate_working_memory_tags("Shopping {now}") == ""
+    assert wm._validate_working_memory_tags("Shopping [later]") == ""
+
+
+def test_update_working_memory_saves_colon_tags():
+    """End-to-end: tags with colons should be saved to working memory."""
+    fake_response = _FakeResponse("Shopping: Apple Watch, Checking store hours")
+
+    with patch("memory.working_memory.safe_llm_invoke", return_value=fake_response), \
+         patch("memory.working_memory.memory.save") as save_mock, \
+         patch("memory.working_memory.load_agent_prompt", return_value="{user_context}\n{ai_context}"):
+        wm.update_working_memory("πάμε για ρολόι Apple Watch", "Πάμε!")
+
+    save_mock.assert_called_once_with(
+        memory_type="working",
+        new_tags="Shopping: Apple Watch, Checking store hours",
+    )

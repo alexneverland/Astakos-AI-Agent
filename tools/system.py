@@ -1,13 +1,16 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: User
+# Developer: Lazaros Avramidis (alexneverland)
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 import os
 import re
 import json
+import ast
+import tempfile
 from core.i18n import t
 import sys
 import math
@@ -21,29 +24,35 @@ from config import NLP_CONFIG
 from services.routine_intent import classify_routine_intent
 from langchain_core.tools import tool
 from pypdf import PdfReader
-from google.oauth2.credentials import Credentials
-from google.auth.exceptions import RefreshError
 from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
 import spotipy
+
+
 from spotipy.oauth2 import SpotifyOAuth
 import docx
 import pandas as pd
 import sqlite3
 from config import (
-    STATE_DB, WORKSPACE_DIR, PHOTOS_INDEX_FILE, PHOTOS_DIR,
+    STATE_DB, WORKSPACE_DIR, PHOTOS_INDEX_FILE, DOCS_INDEX_FILE, PHOTOS_DIR,
     EMAIL_ADDRESS, EMAIL_PASSWORD, GITHUB_TOKEN, VACUUM_IP, VACUUM_TOKEN, GPS_STORAGE_FILE
 )
 from astakos_skills.linkedin_state_manager import update_pending_linkedin_post, process_and_clear_linkedin_post
 from astakos_skills.research_last30days import research_last30days
-from memory.vector_store import vector_store, vector_lock, memory, delete_profile_facts_by_exact_fact
+import memory.vector_store as vector_memory
+from memory.vector_store import (
+    vector_lock,
+    memory,
+    delete_profile_facts_by_exact_fact,
+    get_profile_facts,
+)
 _lexical_cache: dict = {}  # {cache_key: (timestamp, data)} — TTL 60s
 from services.embeddings import embeddings
 from tools.web import (
     get_news, get_weather_forecast, search_supermarket_prices,
     search_goldmall_offers, execute_local_pipeline, get_navigation_info,
-    relay_local_payload, search_google_places, browse_url, duckduckgo_search
+    relay_local_payload, search_google_places, browse_url, duckduckgo_search,
 )
+from astakos_skills.research_web import research_web
 from astakos_skills.morning_briefing import morning_briefing
 from astakos_skills.hn_briefing import hn_briefing
 from astakos_skills.search_flights import search_flights
@@ -63,6 +72,8 @@ from astakos_skills.file_generator import (
     generate_excel, generate_word_doc, generate_pdf, generate_csv,
 )
 from astakos_skills.register_tool import register_tool
+from astakos_skills.get_world_time import get_world_time
+from astakos_skills.known_places import manage_known_places
 from astakos_skills.manage_context_flag import manage_context_flag
 from astakos_skills.text_stats import text_stats
 from astakos_skills.scan_receipt import scan_receipt
@@ -101,6 +112,7 @@ def archive_file(filename: str, content_summary: str) -> str:
         import os
         from config import BASE_DIR, PHOTOS_DIR
         from memory.vector_store import memory
+        from services.pending_asset_confirmation import save_confirmed_asset
 
         search_dirs = [
             PHOTOS_DIR,
@@ -123,11 +135,15 @@ def archive_file(filename: str, content_summary: str) -> str:
         ext = os.path.splitext(full_path)[1].lower()
         m_type = "photo" if ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"] else "document"
 
-        memory.save(
-            memory_type=m_type,
-            file_path=full_path,
-            analysis=content_summary,
-            caption=f"Archive ({m_type}): {filename}"
+        save_confirmed_asset(
+            memory,
+            {
+                "asset_type": m_type,
+                "file_path": full_path,
+                "filename": filename,
+                "analysis": content_summary,
+                "caption": f"Archive ({m_type}): {filename}",
+            },
         )
         return t("tools.system.archive_success", filename=filename, m_type=m_type)
     except Exception as e:
@@ -222,7 +238,12 @@ def _lexical_memory_matches(query: str, category: str = "", limit: int = 4) -> l
             kwargs = {"include": ["documents", "metadatas"]}
             if category:
                 kwargs["where"] = {"category": category}
-            data = vector_store._collection.get(**kwargs)
+            data = vector_memory._safe_chroma_get(
+                where=kwargs.get("where"),
+                include=kwargs["include"],
+            )
+            if data.get("_error"):
+                return []
             _lexical_cache[cache_key] = (_time.monotonic(), data)
     except Exception:
         return []
@@ -259,7 +280,7 @@ def search_memory(query: str, category: str = "") -> str:
         query: Keywords (e.g., 'kid food', 'project backend')
         category: Optional filter: 'lazaros', 'family', 'projects', 'home', 'lesson', 'photos'
     """
-    VALID_CATS = {"lazaros", "family", "projects", "home", "lesson", "session", "photos"}
+    VALID_CATS = {"lazaros", "family", "projects", "home", "lesson", "session", "photos", "documents"}
     try:
         search_queries, inferred_category = _expand_memory_query(query)
         primary_query = search_queries[-1]
@@ -277,6 +298,18 @@ def search_memory(query: str, category: str = "") -> str:
         except Exception:
             sql_lines = []
 
+        query_embeddings_map = {}
+        for search_query in search_queries[:1]:
+            try:
+                query_embeddings_map[search_query] = embeddings.embed_query(search_query)
+            except Exception as exc:
+                from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+                if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                    print(f"\033[93m[search_memory]: Query embedding error (graceful skip): {exc}\033[0m")
+                else:
+                    print(f"\033[93m[search_memory]: semantic search unavailable; using structured memory ({exc})\033[0m")
+
         with vector_lock:
             merged_results = []
             seen_docs = set()
@@ -287,17 +320,36 @@ def search_memory(query: str, category: str = "") -> str:
                 seen_docs.add(key)
                 merged_results.append(doc)
             # [PERF]: 1 similarity_search instead of 3 — primary_query is sufficient (expanded queries do not improve significantly)
-            for search_query in search_queries[:1]:
-                if effective_category:
-                    batch = vector_store.similarity_search(search_query, k=6, filter={"category": effective_category})
-                else:
-                    batch = vector_store.similarity_search(search_query, k=6)
-                for doc in batch:
-                    key = getattr(doc, "page_content", str(doc))
-                    if key in seen_docs:
+            try:
+                for search_query in search_queries[:1]:
+                    query_emb = query_embeddings_map.get(search_query)
+                    if query_emb is None:
                         continue
-                    seen_docs.add(key)
-                    merged_results.append(doc)
+                    if effective_category:
+                        batch = vector_memory.safe_similarity_search(
+                            search_query,
+                            k=6,
+                            filter={"category": effective_category},
+                            query_embedding=query_emb,
+                        )
+                    else:
+                        batch = vector_memory.safe_similarity_search(
+                            search_query,
+                            k=6,
+                            query_embedding=query_emb,
+                        )
+                    for doc in batch:
+                        key = getattr(doc, "page_content", str(doc))
+                        if key in seen_docs:
+                            continue
+                        seen_docs.add(key)
+                        merged_results.append(doc)
+            except Exception as exc:
+                from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+                if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                    raise
+                print(f"\033[93m[search_memory]: semantic search unavailable; using structured memory ({exc})\033[0m")
             results = merged_results[:8 if effective_category else 6]
 
         from memory.vector_store import (
@@ -320,12 +372,16 @@ def search_memory(query: str, category: str = "") -> str:
             def _bump_async():
                 try:
                     from memory.vector_store import bump_retrieval_count
+                    bump_emb = query_embeddings_map.get(primary_query)
+                    if bump_emb is None:
+                        bump_emb = embeddings.embed_query(primary_query)
                     with vector_lock:
                         kwargs = {"n_results": min(6, len(results))}
                         if effective_category:
                             kwargs["where"] = {"category": effective_category}
-                        raw = vector_store._collection.query(
-                            query_embeddings=[embeddings.embed_query(primary_query)], **kwargs
+                        raw = vector_memory._safe_chroma_query(
+                            query_embeddings=[bump_emb],
+                            **kwargs,
                         )
                     if raw.get("ids") and raw["ids"][0]:
                         bump_retrieval_count(raw["ids"][0])
@@ -428,13 +484,22 @@ def run_terminal_command(command: str, already_approved: bool = False) -> str:
     return result.get("output", "")
 
 @tool
-def save_to_memory(fact: str, entities: str = "", category: str = "other", reason: str = "agent_inferred") -> str:
+def save_to_memory(
+    fact: str = "",
+    content: str = "",
+    entities: str = "",
+    category: str = "other",
+    reason: str = "agent_inferred",
+    external_content_sources_json: str = "",
+) -> str:
     """
     Saves information SEMANTICALLY.
-    fact: The fact (e.g., "Kid1 only eats lentils").
+    fact: The fact to save (e.g., "Kid1 only eats lentils").
+    content: Alias for fact (if the agent provides content instead of fact).
     entities: Keywords separated by commas (e.g., "Kid1, Food, Preference").
     category: The category (e.g., 'family', 'home', 'lazaros', 'tech', 'work').
     reason: Why it is being saved — 'user_stated' if explicitly said by the user, 'agent_inferred' otherwise.
+    external_content_sources_json: Internal approval provenance. Do not set this manually.
 
     ⚡ Fire-and-forget: ChromaDB/Vertex AI work is done in a background thread.
     Returns immediately so that the agent does not block the user for ~11s.
@@ -442,6 +507,10 @@ def save_to_memory(fact: str, entities: str = "", category: str = "other", reaso
     import datetime
     import threading
     from tools import system as _self
+
+    resolved_fact = (fact or content).strip()
+    if not resolved_fact:
+        return "⚠️ Error: No fact or content provided to save_to_memory."
 
     # Capture channel context BEFORE the thread (module-level var, thread-unsafe if read later)
     _source = _self._CURRENT_CHANNEL
@@ -451,11 +520,16 @@ def save_to_memory(fact: str, entities: str = "", category: str = "other", reaso
             from memory.vector_store import memory
             from memory.session_memory import build_canonical_memory_candidate
 
-            canonical_fact = fact.strip()
+            canonical_fact = resolved_fact
             if not canonical_fact.startswith(("[USER_FACT]", "[LESSON]", "[CAPABILITY]")):
                 canonical_fact = f"[USER_FACT]: {canonical_fact}"
 
             raw_entities = [x.strip() for x in entities.split(",") if x.strip()]
+            from core.untrusted_content import external_content_sources_from_json
+
+            external_content_sources = external_content_sources_from_json(
+                external_content_sources_json,
+            )
 
             candidate = build_canonical_memory_candidate(
                 memory_type="fact",
@@ -467,6 +541,8 @@ def save_to_memory(fact: str, entities: str = "", category: str = "other", reaso
                 reason=reason,
                 confidence=0.85 if reason == "user_stated" else 0.7,
             )
+            if external_content_sources:
+                candidate["external_content_sources"] = external_content_sources
 
             saved = memory.save(**candidate)
 
@@ -503,8 +579,9 @@ def delete_from_memory(query: str) -> str:
         norm_query = _norm(query).strip()
 
         with vector_lock:
-            collection = vector_store._collection
-            data = collection.get(include=["documents", "metadatas"])
+            data = vector_memory._safe_chroma_get(include=["documents", "metadatas"])
+        if data.get("_error"):
+            return "Deletion error: Chroma scan could not complete safely."
 
         # 1) Exact substring match FIRST — more reliable than embeddings when_
         # the phrases are close/similar (e.g. old incorrect vs correct address:
@@ -517,7 +594,9 @@ def delete_from_memory(query: str) -> str:
         if len(literal_hits) == 1:
             target_id, content = literal_hits[0]
             with vector_lock:
-                collection.delete(ids=[target_id])
+                deleted = vector_memory._safe_chroma_delete([target_id])
+            if not deleted:
+                return "Deletion error: Chroma could not remove the matching record."
             profile_deleted = delete_profile_facts_by_exact_fact(content)
             print(f"\n🔥 [DATABASE ACTION]: DELETED (exact match): {content}")
             return (
@@ -532,11 +611,36 @@ def delete_from_memory(query: str) -> str:
                 f"Be more specific about which to delete:\n{previews}"
             )
 
-        # 2) Fallback: semantic search (embeddings), only when no
+        # 2) Structured-profile literal match. This keeps profile-only facts
+        # erasable while semantic embeddings are intentionally unavailable.
+        profile_literal_hits = [
+            str(doc.get("fact", ""))
+            for doc in get_profile_facts(limit=300)
+            if norm_query and norm_query in _norm(doc.get("fact", ""))
+        ]
+        if len(profile_literal_hits) == 1:
+            content = profile_literal_hits[0]
+            profile_deleted = delete_profile_facts_by_exact_fact(content)
+            print(f"\n🔥 [DATABASE ACTION]: DELETED structured-only record: {content}")
+            return f"Memory '{content}' deleted successfully (structured profile only)."
+
+        if len(profile_literal_hits) > 1:
+            previews = "\n".join(f"  • {content.strip()[:140]}" for content in profile_literal_hits[:6])
+            return (
+                f"⚠️ Found {len(profile_literal_hits)} structured records matching '{query}'. "
+                f"Be more specific about which to delete:\n{previews}"
+            )
+
+        # 3) Fallback: semantic search (embeddings), only when no
         # there is no literal match. u_00ad_ u_00ad__
         query_emb = embeddings.embed_query(query)
         with vector_lock:
-            results = collection.query(query_embeddings=[query_emb], n_results=1)
+            results = vector_memory._safe_chroma_query(
+                query_embeddings=[query_emb],
+                n_results=1,
+            )
+            if results.get("_error"):
+                return "Deletion error: Chroma search could not complete safely."
 
             if not results['ids'] or not results['ids'][0]:
                 return "No relevant records found for deletion."
@@ -551,7 +655,9 @@ def delete_from_memory(query: str) -> str:
                 )
 
             target_id = results['ids'][0][0]
-            collection.delete(ids=[target_id])
+            deleted = vector_memory._safe_chroma_delete([target_id])
+            if not deleted:
+                return "Deletion error: Chroma could not remove the matching record."
             profile_deleted = delete_profile_facts_by_exact_fact(content)
 
         print(f"\n🔥 [DATABASE ACTION]: DELETED (Dist: {distance:.2f}): {content}")
@@ -569,8 +675,32 @@ def retrieve_photo(query: str) -> str:
     try:
         import numpy as np
 
-        with vector_lock:
-            results = vector_store.similarity_search(query, k=10)
+        semantic_error = None
+        query_emb = None
+        try:
+            query_emb = embeddings.embed_query(query)
+        except Exception as exc:
+            semantic_error = exc
+            from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+            if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                print(f"\033[93m[retrieve_photo]: Query embedding error (graceful skip): {exc}\033[0m")
+            else:
+                print(f"\033[93m[retrieve_photo]: semantic search unavailable; using photo archive ({exc})\033[0m")
+
+        results = []
+        if query_emb is not None:
+            try:
+                with vector_lock:
+                    results = vector_memory.safe_similarity_search(query, k=10, query_embedding=query_emb)
+            except Exception as exc:
+                from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+                if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                    raise
+                results = []
+                semantic_error = exc
+                print(f"\033[93m[retrieve_photo]: semantic search unavailable; using photo archive ({exc})\033[0m")
 
         for doc in results:
             photo_path = doc.metadata.get("photo_path")
@@ -586,7 +716,19 @@ def retrieve_photo(query: str) -> str:
                 index = json.load(f)
 
             if index:
-                query_emb = np.array(embeddings.embed_query(query))
+                if semantic_error is not None or query_emb is None:
+                    archive_match = _find_archived_photo_without_embeddings(index, query)
+                    if archive_match:
+                        entry, note = archive_match
+                        file_path = entry.get("file_path", "")
+                        if file_path and os.path.exists(file_path):
+                            return (
+                                f"Found archived photo from {entry.get('date', 'unknown date')}{note}\n"
+                                f"[SEND_PHOTO: {file_path}]"
+                            )
+                    return "System: No relevant photo found in the non-semantic archive."
+
+                query_emb = np.array(query_emb)
                 best_score = -1.0
                 best_entry = None
 
@@ -626,6 +768,108 @@ def retrieve_photo(query: str) -> str:
         return f"Error: Failed to retrieve photo: {str(e)}"
 
 
+def _document_query_match_score(query_tokens: list[str], description: str) -> int:
+    """Count query terms corroborated by document content, excluding its type marker."""
+    content = str(description or "").removeprefix("[DOCUMENT]:")
+    words = re.findall(
+        t("tools.system.greek_words_regex"),
+        _normalize_memory_query(content),
+    )
+    return sum(
+        any(word.startswith(_stem_token(token)) for word in words)
+        for token in set(query_tokens)
+    )
+
+
+@tool
+def retrieve_document(query: str) -> str:
+    """Retrieve an archived document and return its original file for delivery."""
+    try:
+        tokens = _memory_query_tokens(query)
+        if not tokens:
+            return "System: Document not found."
+        required_matches = min(2, len(set(tokens)))
+        query_emb = None
+        try:
+            query_emb = embeddings.embed_query(query)
+        except Exception as exc:
+            from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+            if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                print(f"[retrieve_document]: semantic query unavailable: {type(exc).__name__}")
+
+        if query_emb is not None:
+            try:
+                with vector_lock:
+                    results = vector_memory.safe_similarity_search(
+                        query,
+                        k=8,
+                        filter={"category": "documents"},
+                        query_embedding=query_emb,
+                    )
+                for document in results:
+                    file_path = str(document.metadata.get("file_path") or "")
+                    if (
+                        file_path
+                        and os.path.isfile(file_path)
+                        and _document_query_match_score(tokens, document.page_content)
+                        >= required_matches
+                    ):
+                        return (
+                            f"Found archived document: {document.page_content}\n"
+                            f"[CREATED_FILE: {file_path}]"
+                        )
+            except Exception as exc:
+                from core.ai_provider import EmbeddingsProviderSetupRequired, ProviderAuthError
+
+                if not isinstance(exc, (EmbeddingsProviderSetupRequired, ProviderAuthError)):
+                    raise
+
+        if os.path.exists(DOCS_INDEX_FILE):
+            with open(DOCS_INDEX_FILE, "r", encoding="utf-8") as index_file:
+                index = json.load(index_file)
+            matches: list[tuple[int, int, dict]] = []
+            for position, entry in enumerate(index if isinstance(index, list) else []):
+                candidate = f"{entry.get('caption', '')} {entry.get('summary', '')}"
+                score = _document_query_match_score(tokens, candidate)
+                file_path = str(entry.get("file_path") or "")
+                if score >= required_matches and os.path.isfile(file_path):
+                    matches.append((score, position, entry))
+            if matches:
+                _, _, entry = max(matches, key=lambda item: (item[0], item[1]))
+                file_path = str(entry["file_path"])
+                caption = str(entry.get("caption") or os.path.basename(file_path))
+                return (
+                    f"Found archived document: {caption}\n"
+                    f"[CREATED_FILE: {file_path}]"
+                )
+
+        return "System: Document not found."
+    except Exception as exc:
+        return f"Error: Failed to retrieve document: {exc}"
+
+
+def _find_archived_photo_without_embeddings(index: list[dict], query: str) -> tuple[dict, str] | None:
+    """Find a photo archive entry lexically when vector embeddings are unavailable."""
+    tokens = _memory_query_tokens(query)
+    if not tokens:
+        return None
+
+    scored: list[tuple[int, int, dict]] = []
+    for position, entry in enumerate(index):
+        candidate = _normalize_memory_query(
+            f"{entry.get('caption', '')} {entry.get('analysis', '')}",
+        )
+        score = sum(1 for token in tokens if _stem_token(token) in candidate)
+        if score:
+            scored.append((score, position, entry))
+    if not scored:
+        return None
+
+    _, _, entry = max(scored, key=lambda item: (item[0], item[1]))
+    return entry, " (matched from the local photo archive)"
+
+
 # ────────────────────────────────────────────────────────────────
 # REMINDERS & LISTS
 # ────────────────────────────────────────────────────────────────
@@ -644,10 +888,7 @@ def _normalize_reminder_text(text: str) -> str:
     value = re.sub(r"\s+", " ", value).strip()
     return value
 
-def _same_pending_reminder(existing_task: str, new_task: str, existing_time: str, new_time: str) -> bool:
-    if str(existing_time or "").strip() != str(new_time or "").strip():
-        return False
-
+def _same_reminder_task(existing_task: str, new_task: str) -> bool:
     a = _normalize_reminder_text(existing_task)
     b = _normalize_reminder_text(new_task)
 
@@ -668,15 +909,33 @@ def _same_pending_reminder(existing_task: str, new_task: str, existing_time: str
 
     return overlap >= max(2, min_len)
 
+
+def _same_pending_reminder(existing_task: str, new_task: str, existing_time: str, new_time: str) -> bool:
+    return (
+        str(existing_time or "").strip() == str(new_time or "").strip()
+        and _same_reminder_task(existing_task, new_task)
+    )
+
 @tool
-def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = None, action: str = "add", location: str = None) -> str:
+def set_local_reminder(
+    task: str,
+    minutes_from_now: int = 0,
+    exact_time: str = None,
+    action: str = "add",
+    location: str = None,
+    match_task: str = None,
+    external_content_sources_json: str = "",
+) -> str:
     """
     Manages local reminders.
-    action: 'add' (new), 'read' (read pending ONLY), 'done' (completion)
-    task: For 'add' → description. For 'done' → keyword of the reminder being completed.
-    location: ONLY for location-based reminders. Use 'home' when
-              {config.USER_NAME} says 'when I get home', 'as soon as I go home' etc.
+    action: 'add' (new), 'read' (read pending ONLY), 'done' (completion), 'update' (correct text)
+    task: For 'add'/'update' → description. For 'done' → keyword of the reminder being completed.
+    match_task: For 'update' → the current reminder description to replace. Read first;
+                if multiple pending reminders match, ask the user to clarify rather than guessing.
+    location: ONLY for location-based reminders. Use 'home' for arrival home,
+              or 'leave_current_location' to trigger after leaving the current place.
               When location is provided, DO NOT provide minutes_from_now or exact_time.
+    external_content_sources_json: Internal approval provenance. Do not set it manually.
     """
     conn = None
     try:
@@ -685,14 +944,35 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
 
         # ── READ: Returns ONLY pending ──────────────────────
         if action == "read":
-            cursor.execute("SELECT task, time FROM reminders WHERE status='pending'")
+            cursor.execute(
+                "SELECT task, time, external_content_sources_json, provenance_known "
+                "FROM reminders WHERE status='pending'"
+            )
             pending = cursor.fetchall()
             if not pending:
                 return t("tools.system.reminders_read_empty")
             lines = []
-            for rtask, tm in pending:
+            for rtask, tm, sources_json, provenance_known in pending:
+                from core.untrusted_content import (
+                    external_content_sources_from_json,
+                    format_untrusted_tool_result,
+                )
+
+                sources = external_content_sources_from_json(sources_json or "")
+                if sources:
+                    rtask = format_untrusted_tool_result(
+                        f"persisted reminder sources: {', '.join(sources)}",
+                        rtask,
+                    )
+                elif not provenance_known:
+                    rtask = format_untrusted_tool_result(
+                        "persisted reminder with unknown legacy provenance",
+                        rtask,
+                    )
                 if tm and tm.startswith("loc:"):
                     loc = tm.split(":", 1)[1]
+                    if loc == "leave_current_location":
+                        loc = t("tools.system.reminders_location_leave_current")
                     lines.append(f"• [📍 {loc}] {rtask}")
                 else:
                     lines.append(f"• [{tm}] {rtask}")
@@ -715,9 +995,65 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             conn.commit()
             return t("tools.system.reminders_done_success", task=task)
 
+        elif action == "update":
+            if not match_task:
+                return t("tools.system.reminders_update_req_match")
+
+            cursor.execute("SELECT id, task, time FROM reminders WHERE status='pending'")
+            matches = [
+                row for row in cursor.fetchall()
+                if _same_reminder_task(row[1], match_task)
+            ]
+            if not matches:
+                return t("tools.system.reminders_update_not_found", task=match_task)
+            if len(matches) > 1:
+                options = "\n".join(f"• [{tm}] {existing_task}" for _, existing_task, tm in matches)
+                return t("tools.system.reminders_update_ambiguous", options=options)
+
+            reminder_id, _, reminder_time = matches[0]
+            cursor.execute(
+                "SELECT task FROM reminders WHERE status='pending' AND id != ? AND time = ?",
+                (reminder_id, reminder_time),
+            )
+            for (existing_task,) in cursor.fetchall():
+                if _same_reminder_task(existing_task, task):
+                    return t(
+                        "tools.system.reminders_add_exists",
+                        target_time=reminder_time,
+                        existing_task=existing_task,
+                    )
+
+            cursor.execute(
+                "SELECT external_content_sources_json FROM reminders WHERE id=?",
+                (reminder_id,),
+            )
+            existing_sources_json = cursor.fetchone()[0]
+            from core.untrusted_content import external_content_sources_from_json
+
+            existing_sources = external_content_sources_from_json(existing_sources_json or "")
+            new_sources = external_content_sources_from_json(external_content_sources_json)
+            cursor.execute(
+                "UPDATE reminders SET task=?, external_content_sources_json=?, provenance_known=1 WHERE id=?",
+                (task, json.dumps(sorted(set(existing_sources) | set(new_sources))), reminder_id),
+            )
+            conn.commit()
+            return t("tools.system.reminders_update_success", task=task)
+
         # ── ADD: New reminder ─────────────────────────────────
         else:
             from datetime import datetime, timedelta
+            from memory.location_reminders import (
+                LEAVE_CURRENT_LOCATION,
+                get_fresh_current_location,
+                save_leave_current_location_anchor,
+            )
+
+            current_location = None
+            from core.untrusted_content import external_content_sources_from_json
+
+            provenance_json = json.dumps(
+                external_content_sources_from_json(external_content_sources_json)
+            )
 
             if minutes_from_now > 0:
                 target_time = (datetime.now() + timedelta(minutes=minutes_from_now)).strftime("%Y-%m-%d %H:%M")
@@ -733,6 +1069,10 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
                     except ValueError:
                         return t("tools.system.reminders_add_err_time")
             elif location:
+                if location == LEAVE_CURRENT_LOCATION:
+                    current_location = get_fresh_current_location()
+                    if current_location is None:
+                        return t("tools.system.reminders_add_err_live_location")
                 target_time = f"loc:{location}"
             else:
                 return t("tools.system.reminders_add_err_args")
@@ -740,19 +1080,43 @@ def set_local_reminder(task: str, minutes_from_now: int = 0, exact_time: str = N
             cursor.execute("SELECT id, task, time FROM reminders WHERE status='pending'")
             pending_rows = cursor.fetchall()
 
+            related_reminders = []
             for rid, existing_task, existing_time in pending_rows:
                 if _same_pending_reminder(existing_task, task, existing_time, target_time):
                     return t("tools.system.reminders_add_exists", target_time=target_time, existing_task=existing_task)
+                if _same_reminder_task(existing_task, task):
+                    related_reminders.append((existing_task, existing_time))
 
             cursor.execute(
-                "INSERT INTO reminders (task, time, status) VALUES (?, ?, 'pending')",
-                (task, target_time),
+                "INSERT INTO reminders (task, time, status, external_content_sources_json, provenance_known) "
+                "VALUES (?, ?, 'pending', ?, 1)",
+                (task, target_time, provenance_json),
             )
+            if current_location is not None:
+                save_leave_current_location_anchor(
+                    conn,
+                    reminder_id=cursor.lastrowid,
+                    anchor_lat=current_location[0],
+                    anchor_lon=current_location[1],
+                )
             conn.commit()
-            
+
             if location:
-                return t("tools.system.reminders_add_success_loc", location=location)
-            return t("tools.system.reminders_add_success_time", target_time=target_time)
+                if location == LEAVE_CURRENT_LOCATION:
+                    response = t("tools.system.reminders_add_success_leave_current")
+                else:
+                    response = t("tools.system.reminders_add_success_loc", location=location)
+            else:
+                response = t("tools.system.reminders_add_success_time", target_time=target_time)
+
+            if related_reminders:
+                existing_task, existing_time = related_reminders[0]
+                response += "\n" + t(
+                    "tools.system.reminders_add_related_existing",
+                    existing_task=existing_task,
+                    existing_time=existing_time,
+                )
+            return response
 
     except Exception as e:
         return t("tools.system.reminders_err_generic", e=str(e))
@@ -763,7 +1127,13 @@ from langchain_core.tools import tool
 from memory.routine_db import upsert_routine
 
 @tool
-def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: str = "general") -> str:
+def learn_routine(
+    day_of_week: str,
+    time_str: str,
+    event_name: str,
+    event_type: str = "general",
+    external_content_sources_json: str = "",
+) -> str:
     """
     [CRITICAL]: Use this WHEN {config.USER_NAME} mentions a habit,
     a routine, or something that is repeated (e.g., "Every Friday at 13:00 I go to the farmers market").
@@ -783,6 +1153,7 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
     ("today I went…", "tomorrow I have…").
     """
     from datetime import datetime
+    from core.untrusted_content import external_content_sources_from_json
 
     VALID_DAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Everyday", "Weekdays"}
     VALID_TYPES = {"family", "work", "hobby", "general"}
@@ -802,7 +1173,16 @@ def learn_routine(day_of_week: str, time_str: str, event_name: str, event_type: 
         event_type = "general"
 
     try:
-        res = upsert_routine(day_of_week, time_str, event_name, event_type, confidence_boost=0.3)
+        res = upsert_routine(
+            day_of_week,
+            time_str,
+            event_name,
+            event_type,
+            confidence_boost=0.3,
+            external_content_sources=external_content_sources_from_json(
+                external_content_sources_json,
+            ),
+        )
 
         if res == "created":
             return t("tools.system.routine_added_first", event_name=event_name)
@@ -878,6 +1258,7 @@ def edit_routine(
             event_name,
             day_of_week=day_of_week if day_of_week else None,
             time_str=time_str if time_str else None,
+            include_paused=True,
         )
 
         if not routines:
@@ -917,7 +1298,20 @@ def get_routines(day_of_week: str) -> str:
         for r in routines:
             conf_pct = int(r['confidence'] * 100)
             mentions = r.get('mentions', 1)
-            lines.append(t("tools.system.routine_day_item", time=r["time"], event=r["event"], type=r["type"], conf=conf_pct, mentions=mentions))
+            event = r["event"]
+            source_json = r.get("external_content_sources_json", "")
+            if source_json:
+                from core.untrusted_content import (
+                    external_content_sources_from_json,
+                    format_untrusted_tool_result,
+                )
+                sources = external_content_sources_from_json(source_json)
+                if sources:
+                    event = format_untrusted_tool_result(
+                        "persisted routine sources: " + ", ".join(sources),
+                        event,
+                    )
+            lines.append(t("tools.system.routine_day_item", time=r["time"], event=event, type=r["type"], conf=conf_pct, mentions=mentions))
         return "\n".join(lines)
     except Exception as e:
         return t("tools.system.routine_fetch_err", e=str(e))
@@ -932,13 +1326,26 @@ def search_routines(event_name: str) -> str:
     """
     try:
         from memory.routine_db import find_routines_for_schedule_control
-        routines = find_routines_for_schedule_control(event_name)
+        routines = find_routines_for_schedule_control(event_name, include_paused=True)
         if not routines:
             return f"No existing routines found matching '{event_name}'."
         
         lines = [f"Found {len(routines)} matching routines:"]
         for r in routines:
-            lines.append(f"- ID: {r['id']} | Event: {r['event']} | Day: {r['day']} | Time: {r['time']}")
+            event = r["event"]
+            source_json = r.get("external_content_sources_json", "")
+            if source_json:
+                from core.untrusted_content import (
+                    external_content_sources_from_json,
+                    format_untrusted_tool_result,
+                )
+                sources = external_content_sources_from_json(source_json)
+                if sources:
+                    event = format_untrusted_tool_result(
+                        "persisted routine sources: " + ", ".join(sources),
+                        event,
+                    )
+            lines.append(f"- ID: {r['id']} | Event: {event} | Day: {r['day']} | Time: {r['time']}")
         return "\n".join(lines)
     except Exception as e:
         return f"Error searching routines: {str(e)}"
@@ -1252,6 +1659,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
     from datetime import datetime
     from memory.routine_db import (
         find_routines_for_schedule_control, set_routine_paused_until, clear_routine_paused_until,
+        normalize_legacy_paused_routine_state,
         set_routine_active_window, set_routine_resume_rule, get_routine_schedule_meta,
         normalize_event
     )
@@ -1276,7 +1684,7 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
     already_ok = 0
 
     try:
-        routines = find_routines_for_schedule_control(event_name)
+        routines = find_routines_for_schedule_control(event_name, include_paused=True)
     except Exception as e:
         return t("tools.system.routine_search_err", e=str(e))
 
@@ -1300,6 +1708,9 @@ def control_routine_schedule(event_name: str, action: str, until_date: str = "",
                 meta = get_routine_schedule_meta(r_id)
                 existing_until = meta.get("paused_until")
                 if existing_until and existing_until >= until_date:
+                    # Preserve idempotence while repairing legacy rows that used
+                    # lifecycle state='paused' for a time-bound seasonal pause.
+                    normalize_legacy_paused_routine_state(r_id)
                     results.append(t("tools.system.routine_already_frozen", day=day, label=label, existing_until=existing_until))
                     already_ok += 1
                     continue
@@ -1511,13 +1922,15 @@ def control_pending_followup(
     if delay_minutes <= 0 and not target_window.strip():
         return "❌ Defer requires delay_minutes and/or target_window."
 
-    defer_followup(
+    outcome = defer_followup(
         item["id"],
         delay_minutes=delay_minutes or int(item.get("metadata", {}).get("delay_minutes_final") or 60),
         reason="manual_defer",
         target_window=(target_window or str(item.get("metadata", {}).get("target_window") or "")).strip(),
         topic=item["topic"],
     )
+    if outcome != "deferred":
+        return f"ℹ️ Follow-up #{item['id']} is no longer pending. No changes made."
     updated = find_pending_followups(limit=20)
     refreshed = next((row for row in updated if row["id"] == item["id"]), None)
     if not refreshed:
@@ -1530,10 +1943,16 @@ def control_pending_followup(
 
 
 @tool
-def manage_list(action: str, list_name: str, item: str = "") -> str:
+def manage_list(
+    action: str,
+    list_name: str,
+    item: str = "",
+    external_content_sources_json: str = "",
+) -> str:
     """Manages lists. Actions: 'add', 'remove', 'read', 'clear', 'delete'.
     For multiple items at once, separate them with a comma (item='milk, cheese').
-    For destructive actions ('clear', 'delete'), item must be '__CONFIRMED_CLEAR__'."""
+    For destructive actions ('clear', 'delete'), item must be '__CONFIRMED_CLEAR__'.
+    external_content_sources_json is internal approval provenance. Do not set it manually."""
     if action in {"clear", "delete"} and item != "__CONFIRMED_CLEAR__":
         return (
             f"Error: Refusing to {action} list '{list_name}' without explicit confirmation token."
@@ -1554,20 +1973,58 @@ def manage_list(action: str, list_name: str, item: str = "") -> str:
                     break
 
         if action == "read":
-            cursor.execute("SELECT item FROM lists WHERE list_name=?", (list_name,))
-            items = [row[0] for row in cursor.fetchall()]
+            cursor.execute(
+                "SELECT item, external_content_sources_json FROM lists WHERE list_name=?",
+                (list_name,),
+            )
+            rows = cursor.fetchall()
+            items = [row[0] for row in rows]
             if not items:
                 return f"The list '{list_name}' is empty."
-            return f"Contents of '{list_name}':\n" + "\n".join([f"- {i}" for i in items])
+            from core.untrusted_content import (
+                external_content_sources_from_json,
+                format_untrusted_tool_result,
+            )
+
+            rendered_items = []
+            for list_item, raw_sources in rows:
+                sources = external_content_sources_from_json(raw_sources or "")
+                if sources:
+                    list_item = format_untrusted_tool_result(
+                        "persisted list sources: " + ", ".join(sources),
+                        list_item,
+                    )
+                rendered_items.append(f"- {list_item}")
+            return f"Contents of '{list_name}':\n" + "\n".join(rendered_items)
 
         to_process = [i.strip() for i in item.split(",")] if item else []
+        from core.untrusted_content import external_content_sources_from_json
+
+        external_sources = external_content_sources_from_json(external_content_sources_json)
+        provenance_json = json.dumps(external_sources)
 
         if action == "add":
             for obj in to_process:
                 if obj:
-                    cursor.execute("SELECT id FROM lists WHERE list_name=? AND item=?", (list_name, obj))
-                    if not cursor.fetchone():
-                        cursor.execute("INSERT INTO lists (list_name, item) VALUES (?, ?)", (list_name, obj))
+                    cursor.execute(
+                        "SELECT id, external_content_sources_json FROM lists "
+                        "WHERE list_name=? AND item=?",
+                        (list_name, obj),
+                    )
+                    existing = cursor.fetchone()
+                    if existing is None:
+                        cursor.execute(
+                            "INSERT INTO lists (list_name, item, external_content_sources_json) "
+                            "VALUES (?, ?, ?)",
+                            (list_name, obj, provenance_json),
+                        )
+                    elif external_sources:
+                        existing_sources = external_content_sources_from_json(existing[1] or "")
+                        merged_sources = sorted(set(existing_sources) | set(external_sources))
+                        cursor.execute(
+                            "UPDATE lists SET external_content_sources_json=? WHERE id=?",
+                            (json.dumps(merged_sources), existing[0]),
+                        )
         elif action == "remove":
             for obj in to_process:
                 cursor.execute("DELETE FROM lists WHERE list_name=? AND item=?", (list_name, obj))
@@ -1624,11 +2081,17 @@ def google_tasks_tool(
     If the user simply says 'add a reminder' without specifying the topic, DO NOT call this tool. Ask them first what they want you to write!
     """
     try:
+        from core.workspace_oauth import (
+            load_workspace_credentials,
+            WorkspaceAuthError,
+            WorkspaceMissingCredentialsError,
+            WorkspaceTokenRevokedOrInvalidError,
+        )
         action = (action or "list").strip().lower()
         tasklist_id = tasklist_id or "@default"
         print(f"\033[93m[Tasks]: Action '{action}'...\033[0m")
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, ['https://www.googleapis.com/auth/tasks'])
-        service = build('tasks', 'v1', credentials=creds)
+        creds = load_workspace_credentials(scopes=['https://www.googleapis.com/auth/tasks'])
+        service = build('tasks', 'v1', credentials=creds, cache_discovery=False)
 
         if action == "list":
             result = service.tasks().list(
@@ -1691,14 +2154,24 @@ def google_tasks_tool(
             return f"🗑️ Google Task `{task_id}` deleted."
 
         return "❌ Unknown action. Try: list, create, complete, update, delete."
+    except WorkspaceMissingCredentialsError:
+        return "❌ Google Tasks: Google Workspace is not connected (token.json not found). Please authorize Google Workspace."
+    except WorkspaceTokenRevokedOrInvalidError as e:
+        return f"❌ Google Tasks: Google Workspace authorization expired or invalid ({e}). Please reconnect Google Workspace."
+    except WorkspaceAuthError as e:
+        return f"❌ Google Tasks auth error: {e}"
     except Exception as e:
         return f"Tasks Error: {str(e)}"
 
 @tool
 def create_file_tool(file_type: str, filename: str, data: str) -> str:
     """
-    [WARNING: For .docx, .xlsx, .pptx files, the use of this tool is FORBIDDEN. Use ONLY run_officecli]
     Creates local PDF, TXT (and legacy DOCX/XLSX) files.
+    Use PDF/TXT modes directly. Prefer run_officecli for Office output, even
+    simple files; DOCX/XLSX modes are fallback only when OfficeCLI is unavailable,
+    returns an error, or cannot cover the required structure. This tool does not
+    generate PowerPoint. Preserve the requested format and all safety/approval
+    gates; never use fallback to bypass a security rejection.
     file_type: 'docx', 'pdf', 'xlsx', 'txt'
     filename: The name of the file (e.g., 'report.txt')
     data: The content. 
@@ -1764,12 +2237,19 @@ def create_file_tool(file_type: str, filename: str, data: str) -> str:
 @tool
 def generate_image_tool(prompt: str) -> str:
     """
-    Creates an image based on a description (prompt) via Vertex AI Imagen.
+    Creates an image based on a description (prompt) via the active AI provider.
     """
     import os
     import time
     from slugify import slugify
     from config import BASE_DIR
+    from core.ai_provider import (
+        CapabilityNotSupportedError,
+        ProviderAuthError,
+        RateLimitError,
+        AIProviderError,
+    )
+    from core.brain import get_active_provider_adapter
 
     output_dir = os.path.join(BASE_DIR, "outputs")
     os.makedirs(output_dir, exist_ok=True)
@@ -1778,38 +2258,44 @@ def generate_image_tool(prompt: str) -> str:
     filename = f"{safe_filename}_{int(time.time())}.jpg"
     full_path = os.path.join(output_dir, filename)
 
-    # ── Vertex AI Imagen ──────────────────────────────────────────
     try:
-        from google import genai
-        from google.genai import types
+        adapter = get_active_provider_adapter()
+        img_bytes = adapter.generate_image(prompt, aspect_ratio="1:1")
+        if not img_bytes:
+            return f"❌ Image generation error ({adapter.provider_name}): provider returned no image data."
 
-        api_key = config.GEMINI_API_KEY
-        if api_key:
-            client = genai.Client(api_key=api_key)
-        else:
-            client = genai.Client(
-                vertexai=True,
-                project=config.PROJECT_ID,
-                location=config.LOCATION or "us-central1"
-            )
-            
-        response = client.models.generate_images(
-            model='imagen-3.0-generate-001',
-            prompt=prompt,
-            config=types.GenerateImagesConfig(
-                number_of_images=1,
-                aspect_ratio="1:1"
-            )
-        )
-        
-        if not response.generated_images:
-            return "❌ Vertex AI Imagen returned no image."
-            
-        response.generated_images[0].image.save(full_path)
+        import io
+        from PIL import Image
+
+        try:
+            with Image.open(io.BytesIO(img_bytes)) as img:
+                if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                    rgba = img.convert("RGBA")
+                    background = Image.new("RGB", rgba.size, (255, 255, 255))
+                    background.paste(rgba, mask=rgba.split()[3])
+                    rgb_img = background
+                elif img.mode != "RGB":
+                    rgb_img = img.convert("RGB")
+                else:
+                    rgb_img = img
+
+                rgb_img.save(full_path, format="JPEG", quality=95)
+        except Exception as img_err:
+            return f"❌ Image generation error ({adapter.provider_name}): invalid or unreadable image data ({img_err})."
+
         return f"✅ Ready! Image created.\n[SEND_PHOTO: {full_path}]"
 
+    except CapabilityNotSupportedError as exc:
+        return f"❌ Image generation is not supported by provider '{exc.provider}': {exc}"
+    except ProviderAuthError as exc:
+        return f"❌ Image generation authentication failed for provider '{exc.provider}': {exc}"
+    except RateLimitError as exc:
+        return f"❌ Image generation quota or rate limit exceeded for provider '{exc.provider}': {exc}"
+    except AIProviderError as exc:
+        return f"❌ Image generation error ({exc.provider}): {exc}"
     except Exception as e:
-        return f"❌ Error Vertex AI Imagen: {str(e)}"
+        return f"❌ Error during image creation: {str(e)}"
+
 def _escape_drive_query_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
@@ -1819,7 +2305,7 @@ def drive_manager(
     action: str = "list_files",
     file_id: str = None,
     local_path: str = None,
-    folder_id: str = "12YrIZ3uAQWmmwIlEkIkDf-4gcz2P8Ktv",
+    folder_id: str = None,
     query: str = None,
     new_name: str = None,
     target_folder_id: str = None,
@@ -1829,7 +2315,7 @@ def drive_manager(
     """Manages {config.USER_NAME}'s Google Drive.
 
     Actions:
-      'list_files'   — List files in folder (default: root astakos folder)
+      'list_files'   — List files in folder (default: root My Drive or configured backup folder)
       'search'       — Search by name or keyword (requires query=)
       'download'     — Download file (requires file_id=)
       'upload'       — Upload file (requires local_path=)
@@ -1843,16 +2329,25 @@ def drive_manager(
     try:
         from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
         import io
+        from core.workspace_oauth import (
+            load_workspace_credentials,
+            WorkspaceAuthError,
+            WorkspaceMissingCredentialsError,
+            WorkspaceTokenRevokedOrInvalidError,
+        )
 
         action = (action or "list_files").strip().lower()
         print(f"\033[93m[Drive]: Action '{action}'...\033[0m")
-        creds   = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
-        service = build('drive', 'v3', credentials=creds)
+        creds = load_workspace_credentials(scopes=['https://www.googleapis.com/auth/drive'])
+        service = build('drive', 'v3', credentials=creds, cache_discovery=False)
+
+
+        effective_folder_id = folder_id or "root"
 
         # ── LIST FILES ───────────────────────────────────────────
         if action == "list_files":
             results = service.files().list(
-                q=f"'{folder_id}' in parents and trashed=false",
+                q=f"'{effective_folder_id}' in parents and trashed=false",
                 fields="files(id, name, mimeType, size, modifiedTime)",
                 orderBy="modifiedTime desc",
                 pageSize=50
@@ -1952,7 +2447,9 @@ def drive_manager(
             _lp_real = os.path.realpath(local_path)
             if not any(_lp_real.startswith(d + os.sep) or _lp_real == d for d in _upload_allowed):
                 return f"❌ Forbidden upload path: only from outputs/, telegram_uploads/, telegram_photos/, watch_folder/ allowed."
-            file_metadata = {'name': os.path.basename(local_path), 'parents': [folder_id]}
+            file_metadata = {'name': os.path.basename(local_path)}
+            if folder_id and folder_id != "root":
+                file_metadata['parents'] = [folder_id]
             media = MediaFileUpload(local_path, resumable=True)
             file = service.files().create(body=file_metadata, media_body=media, fields='id,name').execute()
             return f"✅ '{file.get('name')}' uploaded! (ID: {file.get('id')})"
@@ -2003,10 +2500,12 @@ def drive_manager(
             metadata = {
                 "name": new_name,
                 "mimeType": "application/vnd.google-apps.folder",
-                "parents": [folder_id]
             }
+            if folder_id and folder_id != "root":
+                metadata["parents"] = [folder_id]
             folder = service.files().create(body=metadata, fields="id, name").execute()
             return f"📁 Folder '{folder.get('name')}' created (ID: {folder.get('id')})."
+
 
         # ── INFO ─────────────────────────────────────────────────
         elif action == "info":
@@ -2030,6 +2529,12 @@ def drive_manager(
 
         return "❌ Unknown action. See docstring for options."
 
+    except WorkspaceMissingCredentialsError:
+        return "❌ Google Drive: Google Workspace is not connected (token.json not found). Please authorize Google Workspace."
+    except WorkspaceTokenRevokedOrInvalidError as e:
+        return f"❌ Google Drive: Google Workspace authorization expired or invalid ({e}). Please reconnect Google Workspace."
+    except WorkspaceAuthError as e:
+        return f"❌ Google Drive auth error: {e}"
     except Exception as e:
         return f"❌ Drive Error: {str(e)}"
 
@@ -2247,94 +2752,121 @@ def run_code(filename: str, script_args: str = "") -> str:
         return f"Run Error: {str(e)}"
 
 
-@tool
-def write_custom_tool(tool_name: str, tool_code: str) -> str:
-    """Writes and tests a new tool in astakos_skills/.
-    It does not register it automatically in system/risk/registry — this is done with register_tool."""
-    import ast
+_SAFE_TOOL_MODULES = frozenset({
+    "math", "json", "datetime", "re", "typing", "pydantic",
+    "random", "string", "collections", "itertools", "decimal",
+    "hashlib", "uuid", "time", "functools", "inspect",
+    "langchain_core", "langchain_core.tools", "base64", "zlib",
+    "gzip", "enum", "dataclasses", "copy",
+})
 
-    clean_code = re.sub(r"```(?:python)?", "", tool_code).replace("```", "").strip()
+_ALLOWED_EXTERNAL_TOOL_MODULES = frozenset({
+    "httpx", "requests", "urllib", "bs4", "beautifulsoup4",
+    "csv", "pandas", "sqlite3",
+})
 
+_FORBIDDEN_TOOL_MODULES = frozenset({
+    "os", "sys", "subprocess", "ctypes", "shutil", "importlib",
+    "builtins", "socket", "ftplib", "smtplib", "paramiko",
+    "pickle", "shelve", "marshal", "pty", "commands", "posix",
+    "nt", "signal", "threading", "multiprocessing", "asyncio", "gc",
+})
+
+_FORBIDDEN_TOOL_CALLS = frozenset({
+    "eval", "exec", "open", "compile", "__import__",
+    "globals", "locals", "vars", "getattr", "setattr", "delattr",
+    "exit", "quit",
+})
+
+_FORBIDDEN_TOOL_DUNDERS = frozenset({
+    "__builtins__", "__class__", "__bases__", "__subclasses__",
+    "__globals__", "__code__", "__dict__", "__getattribute__",
+    "__reduce__", "__reduce_ex__",
+})
+
+
+def _validate_custom_tool_ast(code: str, tool_name: str) -> tuple[bool, str, set[str]]:
+    """Validate dynamically generated tool Python code via AST inspection."""
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tool_name):
-        return "System Error: invalid tool_name. Use a Python identifier, e.g. my_tool."
-
-    def _decorator_name(decorator):
-        if isinstance(decorator, ast.Call):
-            return _decorator_name(decorator.func)
-        if isinstance(decorator, ast.Name):
-            return decorator.id
-        if isinstance(decorator, ast.Attribute):
-            base = _decorator_name(decorator.value)
-            return f"{base}.{decorator.attr}" if base else decorator.attr
-        return ""
-
-    def _has_tool_decorator(function_node):
-        return any(_decorator_name(dec).split(".")[-1] == "tool" for dec in function_node.decorator_list)
-
-    # [SECURITY]: Blocklist for generated tool code — filesystem, network, execution
-    _dangerous_patterns = [
-        r"subprocess",
-        r"os\s*\.\s*system",
-        r"__import__",
-        r"eval\s*\(",
-        r"exec\s*\(",
-        r"pathlib",                           # filesystem ops
-        r"shutil",                            # copy/move/delete files
-        r"import\s+socket",                   # raw network
-        r"from\s+socket\s+import",            # raw network
-        r"import\s+requests",                 # HTTP calls
-        r"from\s+requests\s+import",          # HTTP calls
-        r"requests\s*\.",                     # HTTP calls
-        r"import\s+urllib",                   # HTTP calls
-        r"from\s+urllib\s+import",            # HTTP calls
-        r"urllib\s*\.",                       # HTTP calls
-        r"import\s+httpx",                    # HTTP calls
-        r"from\s+httpx\s+import",             # HTTP calls
-        r"httpx\s*\.",                        # HTTP calls
-        r"import\s+aiohttp",                  # async HTTP
-        r"from\s+aiohttp\s+import",           # async HTTP
-        r"aiohttp\s*\.",                      # async HTTP
-        r"import\s+ftplib",                   # FTP
-        r"from\s+ftplib\s+import",            # FTP
-        r"import\s+smtplib",                  # email sending
-        r"from\s+smtplib\s+import",           # email sending
-        r"import\s+paramiko",                 # SSH
-        r"from\s+paramiko\s+import",          # SSH
-        r"ctypes",                            # low-level OS access
-        r"importlib",                         # dynamic imports
-        r"compile\s*\(",                      # bytecode compile
-        r"globals\s*\(\s*\)",                 # globals manipulation
-        r"locals\s*\(\s*\)",                  # locals manipulation
-        r"__builtins__",                      # builtins override
-    ]
-    for _dp in _dangerous_patterns:
-        if re.search(_dp, clean_code, re.IGNORECASE):
-            return f"System Error: Rejected — detected forbidden pattern: `{_dp}`."
-    dangerous_pattern = None  # legacy — replaced by _dangerous_patterns
-    # (legacy check replaced by the _dangerous_patterns loop above)
+        return False, "System Error: invalid tool_name. Use a Python identifier, e.g. my_tool.", set()
 
     try:
-        tree = ast.parse(clean_code)
+        tree = ast.parse(code)
     except SyntaxError as se:
-        return f"❌ Syntax error (line {se.lineno}): {se.msg}\nLook: {se.text}"
+        return False, f"❌ Syntax error (line {se.lineno}): {se.msg}\nLook: {se.text}", set()
+    except Exception as exc:
+        return False, f"❌ Code parsing error: {exc}", set()
+
+    detected_capabilities = set()
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "open":
-            return "System Error: Rejected — detected forbidden built-in open() call."
+        # 1. Inspect imports
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root_module = alias.name.split(".")[0]
+                if root_module in _FORBIDDEN_TOOL_MODULES:
+                    return False, f"System Error: Rejected — forbidden module import: `{alias.name}`.", set()
+                if root_module in _ALLOWED_EXTERNAL_TOOL_MODULES:
+                    detected_capabilities.add(root_module)
+                elif root_module not in _SAFE_TOOL_MODULES:
+                    return False, f"System Error: Rejected — unapproved module import: `{alias.name}`.", set()
 
+        elif isinstance(node, ast.ImportFrom):
+            if node.level and node.level > 0:
+                return False, "System Error: Rejected — relative imports are not permitted in skills.", set()
+            if node.module:
+                root_module = node.module.split(".")[0]
+                if root_module in _FORBIDDEN_TOOL_MODULES:
+                    return False, f"System Error: Rejected — forbidden module import: `{node.module}`.", set()
+                if root_module in _ALLOWED_EXTERNAL_TOOL_MODULES:
+                    detected_capabilities.add(root_module)
+                elif root_module not in _SAFE_TOOL_MODULES:
+                    return False, f"System Error: Rejected — unapproved module import: `{node.module}`.", set()
+
+        # 2. Inspect identifiers (prevents calls, aliasing x=eval, capturing in structures [exec], passing as arguments)
+        elif isinstance(node, ast.Name):
+            if node.id in _FORBIDDEN_TOOL_CALLS or node.id in _FORBIDDEN_TOOL_DUNDERS:
+                return False, f"System Error: Rejected — forbidden identifier: `{node.id}`.", set()
+            if node.id in _FORBIDDEN_TOOL_MODULES:
+                return False, f"System Error: Rejected — forbidden module reference: `{node.id}`.", set()
+
+        # 3. Inspect attribute access (prevents dunder chaining and forbidden execution methods)
+        elif isinstance(node, ast.Attribute):
+            if node.attr in _FORBIDDEN_TOOL_DUNDERS:
+                return False, f"System Error: Rejected — forbidden dunder attribute access: `{node.attr}`.", set()
+            if node.attr in {"system", "popen", "spawn", "execv", "execve", "eval", "exec", "compile", "__import__"}:
+                return False, f"System Error: Rejected — forbidden execution method: `{node.attr}()`.", set()
+            if node.attr in {"sys", "os", "subprocess", "importlib", "builtins"}:
+                return False, f"System Error: Rejected — forbidden module access: `{node.attr}`.", set()
+
+    # 4. Verify exactly one top-level function with @tool decorator
     top_level_functions = [
         node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
     matching_functions = [node for node in top_level_functions if node.name == tool_name]
     if len(matching_functions) != 1:
         return (
-            f"System Error: code must contain exactly one top-level function "
-            f"named '{tool_name}'."
+            False,
+            f"System Error: code must contain exactly one top-level function named '{tool_name}'.",
+            set(),
         )
+
+    def _decorator_name(dec):
+        if isinstance(dec, ast.Call):
+            return _decorator_name(dec.func)
+        if isinstance(dec, ast.Name):
+            return dec.id
+        if isinstance(dec, ast.Attribute):
+            base = _decorator_name(dec.value)
+            return f"{base}.{dec.attr}" if base else dec.attr
+        return ""
+
+    def _has_tool_decorator(fn_node):
+        return any(_decorator_name(dec).split(".")[-1] == "tool" for dec in fn_node.decorator_list)
 
     target_function = matching_functions[0]
     if not _has_tool_decorator(target_function):
-        return f"System Error: function '{tool_name}' must have the @tool decorator."
+        return False, f"System Error: function '{tool_name}' must have the @tool decorator.", set()
 
     extra_tool_functions = [
         node.name for node in top_level_functions
@@ -2342,9 +2874,23 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
     ]
     if extra_tool_functions:
         return (
-            "System Error: only one @tool function is allowed. "
-            f"Extra decorated functions: {', '.join(extra_tool_functions)}."
+            False,
+            f"System Error: only one @tool function is allowed. Extra decorated functions: {', '.join(extra_tool_functions)}.",
+            set(),
         )
+
+    return True, "", detected_capabilities
+
+
+@tool
+def write_custom_tool(tool_name: str, tool_code: str) -> str:
+    """Writes and tests a new tool in astakos_skills/.
+    It does not register it automatically in system/risk/registry — this is done with register_tool."""
+    clean_code = re.sub(r"```(?:python)?", "", tool_code).replace("```", "").strip()
+
+    valid, err_msg, detected_caps = _validate_custom_tool_ast(clean_code, tool_name)
+    if not valid:
+        return err_msg
 
     try:
         workspace_dir = os.path.realpath(WORKSPACE_DIR)
@@ -2353,9 +2899,7 @@ def write_custom_tool(tool_name: str, tool_code: str) -> str:
             return "System Error: invalid tool path."
         if os.path.exists(final_path):
             return f"System Error: astakos_skills/{tool_name}.py already exists."
-        temp_path = os.path.join(WORKSPACE_DIR, f"_test_{tool_name}.py")
-    except:
-        temp_path = f"_test_{tool_name}.py"
+    except Exception:
         final_path = f"{tool_name}.py"
 
     test_script = f"""import math, json, inspect
@@ -2383,18 +2927,15 @@ if __name__ == "__main__":
         print(f"TEST_FAIL: {{e}}")
 """
 
+    temp_path = None
     try:
-        with open(temp_path, "w", encoding="utf-8") as f:
-            f.write(test_script)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as tf:
+            tf.write(test_script)
+            temp_path = tf.name
 
         res = subprocess.run([sys.executable, temp_path], capture_output=True, text=True, timeout=15)
         stdout = res.stdout.strip()
         stderr = res.stderr.strip()
-
-        try:
-            os.remove(temp_path)
-        except:
-            pass
 
         if "TEST_FAIL" in stdout or (res.returncode != 0 and not stdout):
             error_detail = stdout or stderr
@@ -2411,71 +2952,42 @@ if __name__ == "__main__":
         with open(final_path, "w", encoding="utf-8") as f:
             f.write(paste_code.rstrip() + "\n")
 
+        caps_str = f" [Capabilities: {', '.join(sorted(detected_caps))}]" if detected_caps else ""
         print(f"\n\033[92m{sep}")
-        print(f"  ✅  TOOL WRITTEN: {tool_name}")
+        print(f"  ✅  TOOL WRITTEN: {tool_name}{caps_str}")
         print(f"  🧪  Test: {stdout}")
         print(sep)
         print(paste_code)
         print(f"{sep}\033[0m\n")
         print(f"{config.USER_NAME}: ", end="", flush=True)
 
-        return f"✅ Tool '{tool_name}' written to astakos_skills/{tool_name}.py and passed the test ({stdout})."
+        return f"✅ Tool '{tool_name}' written to astakos_skills/{tool_name}.py and passed the test ({stdout}).{caps_str}"
 
     except subprocess.TimeoutExpired:
-        try:
-            os.remove(temp_path)
-        except:
-            pass
         return "❌ Timeout: the test script hung for more than 15 seconds."
     except Exception as e:
         return f"Error: {str(e)}"
+    finally:
+        if temp_path:
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except Exception:
+                pass
 
 
 # ────────────────────────────────────────────────────────────────
 # EMAIL
 # ────────────────────────────────────────────────────────────────
-import config
-TOKEN_PATH = config.TOKEN_PATH
-CREDS_PATH = config.CREDENTIALS_PATH
-
-SCOPES = [
-    'https://www.googleapis.com/auth/gmail.modify',
-    'https://www.googleapis.com/auth/drive',
-    'https://www.googleapis.com/auth/calendar',
-    'https://www.googleapis.com/auth/tasks',
-    'https://www.googleapis.com/auth/fitness.activity.read',
-    'https://www.googleapis.com/auth/fitness.sleep.read',
-    'https://www.googleapis.com/auth/fitness.heart_rate.read',
-]
-
 def get_gmail_service():
-    """Creates the Gmail API service using OAuth."""
-    creds = None
-    if os.path.exists(TOKEN_PATH):
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+    """Creates the Gmail API service using the shared Workspace OAuth loader."""
+    try:
+        from core.workspace_oauth import get_workspace_service
+        return get_workspace_service("gmail", "v1", scopes=['https://www.googleapis.com/auth/gmail.modify'])
+    except Exception as exc:
+        raise Exception(f"Google Workspace is not connected. Please connect Google Workspace. ({exc})") from exc
 
-    if not creds or not creds.valid:
-        if not os.path.exists(CREDS_PATH):
-            raise Exception("Missing credentials.json! Download it from Google Cloud.")
 
-        if creds and creds.expired and creds.refresh_token:
-            from google.auth.transport.requests import Request
-            try:
-                creds.refresh(Request())
-            except RefreshError as e:
-                if "invalid_scope" not in str(e).lower():
-                    raise
-                print("[GoogleAuth] token invalid_scope - forcing fresh OAuth consent.")
-                creds = None
-
-        if not creds or not creds.valid:
-            flow = InstalledAppFlow.from_client_secrets_file(CREDS_PATH, SCOPES)
-            creds = flow.run_local_server(port=0, prompt='consent', access_type='offline')
-
-        with open(TOKEN_PATH, 'w') as token:
-            token.write(creds.to_json())
-
-    return build('gmail', 'v1', credentials=creds)
 
 
 def decode_base64(data):
@@ -2657,7 +3169,7 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
                 return "❌ Read_full requires email_id."
             data = service.users().messages().get(userId="me", id=email_id, format="full").execute()
             body_text = extract_body(data['payload'])
-            return f"📩 Content:\n{clean_text(body_text)[:5000]}"
+            return f"{t('prompts.mail_content_result_prefix')}\n{clean_text(body_text)[:5000]}"
 
         # =========================
         # READ THREAD (Full Conversation)
@@ -2682,7 +3194,10 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
                 output.append(f"--- Message {i+1} | From: {from_val} ({date_val}) ---\n{clean_text(body_text)[:2000]}")
             
             full_text = "\n\n".join(output)
-            return f"📩 Entire thread ({len(messages_in_thread)} messages):\n{full_text[:8000]}"
+            return (
+                f"{t('prompts.mail_thread_result_prefix')} "
+                f"({len(messages_in_thread)} messages):\n{full_text[:8000]}"
+            )
 
         # =========================
         # DELETE
@@ -2696,7 +3211,11 @@ def mail_manager(action: str, query: str = None, email_id: str = None,
         return f"❌ Unknown command: {action}"
 
     except Exception as e:
-        return f"Mail API Error: {str(e)}"
+        err_msg = str(e)
+        if "not connected" in err_msg.lower() or "missing credentials" in err_msg.lower() or "missing token" in err_msg.lower():
+            return f"❌ Gmail: Google Workspace is not connected. Please authorize or reconnect Google Workspace. ({e})"
+        return f"Mail API Error: {err_msg}"
+
 
 # ────────────────────────────────────────────────────────────────
 # GITHUB
@@ -2976,45 +3495,34 @@ def _is_home(lat: float, lon: float, home_lat: float = 0.0, home_lon: float = 0.
 
 @tool
 def get_current_location() -> str:
-    """
-    Returns the last recorded GPS coordinate of {config.USER_NAME} from last_location.json.
-    Used to know where the user is in real-time.
+    """Return typed GPS data: current/stale/missing/invalid and configured home presence.
+
+    is_home=null means unknown; stale points do not establish current presence.
     """
     import json
-    import os
     import time
-    from datetime import datetime
     from config import GPS_STORAGE_FILE
-
-    if not os.path.exists(GPS_STORAGE_FILE):
-        return "📍 No recorded location found. Ask {config.USER_NAME} to send Live Location."
+    from core.location_result import finite_number, location_payload, LOCATION_MAX_AGE_SECONDS
+    from services.location_update import location_is_home
 
     try:
         with open(GPS_STORAGE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            lat = data.get("lat")
-            lon = data.get("lon")
-            ts = data.get("timestamp", 0)
-
-            # Calculation of "freshness"
-            diff_minutes = int((time.time() - ts) / 60)
-            last_seen = datetime.fromtimestamp(ts).strftime('%H:%M:%S')
-
-            if diff_minutes > 1440:
-                return f"📍 Location is very old ({diff_minutes // 60}h old, last updated {last_seen})."
-
-            maps_link = f"https://maps.google.com/?q={lat},{lon}"
-            home_status = "🏠 Is HOME" if _is_home(float(lat), float(lon)) else "🚶 Is OUT of home"
-
-            return (
-                f"📍 Coordinates: {lat}, {lon}\n"
-                f"{home_status}\n"
-                f"🗺️ <a href='{maps_link}'>View on Map</a>\n"
-                f"⏱️ Updated {diff_minutes} minutes ago (at {last_seen})."
-            )
-
-    except Exception as e:
-        return f"❌ Error reading GPS: {str(e)}"
+        if not isinstance(data, dict):
+            return location_payload("invalid")
+        lat, lon, ts = (data.get(key) for key in ("lat", "lon", "timestamp"))
+        now = time.time()
+        if (not all(finite_number(value) for value in (lat, lon, ts))
+                or not -90 <= lat <= 90 or not -180 <= lon <= 180
+                or ts <= 0 or ts > now):
+            return location_payload("invalid")
+        if now - ts > LOCATION_MAX_AGE_SECONDS:
+            return location_payload("stale", lat, lon, ts)
+        return location_payload("current", lat, lon, ts, location_is_home(lat, lon))
+    except FileNotFoundError:
+        return location_payload("missing")
+    except (OSError, ValueError, TypeError):
+        return location_payload("invalid")
 
 @tool
 def control_spotify(
@@ -3088,59 +3596,103 @@ def get_fit_summary(days_ago: int = 1) -> str:
 
 
 @tool
-def save_goal_tool(project: str, description: str, status: str = "active", progress: int = 0, milestones: str = "") -> str:
+def save_goal_tool(
+    project: str,
+    description: str,
+    status: str = "active",
+    progress: int = 0,
+    milestones: str = "",
+    external_content_sources_json: str = "",
+) -> str:
     """
-    Saves or updates a long-term goal for {config.USER_NAME}.
+    Creates a genuinely new long-term goal. Existing projects in ANY status,
+    including done, are protected from replacement. Use partial status/progress/
+    milestones tools for existing projects, even when omitted from active context.
     project: Short project name (e.g., 'ShiftMaster', 'Astakos', 'PraxisERP').
     description: What he wants to achieve (e.g., 'To finish the licensing module').
     status: 'active' (in progress) | 'paused' (shelved) | 'done' (completed).
     progress: Progress percentage 0-100.
     milestones: Smaller steps or milestones (as a string).
+    external_content_sources_json: Internal approval provenance. Do not set this manually.
     """
     from memory.vector_store import save_goal
-    ok = save_goal(project=project, description=description, status=status, progress=progress, milestones=milestones)
+    from core.untrusted_content import external_content_sources_from_json
+
+    ok = save_goal(
+        project=project,
+        description=description,
+        status=status,
+        progress=progress,
+        milestones=milestones,
+        external_content_sources=external_content_sources_from_json(
+            external_content_sources_json,
+        ),
+        create_only=True,
+    )
     if ok:
         return f"✅ Goal '{project}' saved ({status}, {progress}%)."
-    return f"❌ Failed to save goal '{project}'."
+    return f"❌ Goal '{project}' was not created: it may already exist (including completed goals), or storage failed. No replacement was made. Use partial goal updates for an existing project; do not claim success."
 
 
 @tool
-def update_goal_status_tool(project: str, status: str) -> str:
+def update_goal_status_tool(project: str, status: str, external_content_sources_json: str = "") -> str:
     """
     Updates the status of an existing goal.
     project: The name of the project (e.g., 'ShiftMaster').
     status: 'active' | 'paused' | 'done'
+    external_content_sources_json: Internal approval provenance. Do not set manually.
     """
     from memory.vector_store import update_goal_status
-    ok = update_goal_status(project=project, status=status)
+    from core.untrusted_content import external_content_sources_from_json
+    ok = update_goal_status(project=project, status=status,
+                            external_content_sources=external_content_sources_from_json(external_content_sources_json))
     if ok:
         return f"✅ Goal '{project}' → {status}."
     return f"❌ Goal '{project}' not found."
 
 
 @tool
-def update_goal_progress_tool(project: str, progress: int) -> str:
+def update_goal_progress_tool(project: str, progress: int, external_content_sources_json: str = "") -> str:
     """
-    Updates the progress percentage of an existing goal (0-100).
+    Updates the completion percentage of an existing goal (0-100).
+    Use an explicit percentage or a known agreed milestone plan, not scores,
+    measurements, elapsed time, or an arbitrary estimate from conversation.
     project: The name of the project.
     progress: An integer from 0 to 100.
+    external_content_sources_json: Internal approval provenance. Do not set manually.
     """
     from memory.vector_store import update_goal_progress
-    ok = update_goal_progress(project=project, progress=progress)
+    from core.untrusted_content import external_content_sources_from_json
+    ok = update_goal_progress(project=project, progress=progress,
+                              external_content_sources=external_content_sources_from_json(external_content_sources_json))
     if ok:
         return f"✅ Goal '{project}' progress → {progress}%."
     return f"❌ Goal '{project}' not found."
 
 
 @tool
-def update_goal_milestones_tool(project: str, milestones: str) -> str:
+def update_goal_milestones_tool(
+    project: str,
+    milestones: str,
+    external_content_sources_json: str = "",
+) -> str:
     """
-    Updates the milestones of an existing goal.
+    Replaces the milestones of an existing goal and refreshes its activity time.
+    Include previous relevant milestones alongside new user-reported results or
+    verified completed steps. Records scores without changing completion percent.
     project: The name of the project.
     milestones: The new milestones (in string format, e.g., '1) UI, 2) DB').
     """
     from memory.vector_store import update_goal_milestones
-    ok = update_goal_milestones(project=project, milestones=milestones)
+    from core.untrusted_content import external_content_sources_from_json
+
+    ok = update_goal_milestones(
+        project=project,
+        milestones=milestones,
+        external_content_sources=external_content_sources_from_json(
+            external_content_sources_json,
+        ),
+    )
     if ok:
         return f"✅ Goal '{project}' milestones updated."
     return f"❌ Goal '{project}' not found."
@@ -3677,15 +4229,15 @@ def memory_review(days: int = 1, op: str = "", category: str = "") -> str:
 
 
 all_tools = [
-    search_memory, save_to_memory, delete_from_memory, retrieve_photo, update_pending_linkedin_post, process_and_clear_linkedin_post,
+    search_memory, save_to_memory, delete_from_memory, retrieve_photo, retrieve_document, update_pending_linkedin_post, process_and_clear_linkedin_post,
     set_local_reminder, manage_list,
     google_calendar_tool, google_tasks_tool, drive_manager,
     read_local_file, write_code, run_code, write_custom_tool,
     mail_manager, github_manager, control_vacuum, control_spotify, recipe_expert, log_meal, search_recipe_library, get_saved_recipe, mark_recipe_favorite, search_flights, search_google_places,
-    create_file_tool, get_current_location,
+    create_file_tool, get_current_location, manage_known_places,
     get_news, get_weather_forecast, search_supermarket_prices, relay_local_payload,
     search_goldmall_offers, execute_local_pipeline, archive_file, get_navigation_info, generate_image_tool, post_to_linkedin, learn_routine, edit_routine, delete_routine, get_routines, search_routines, control_routine_notifications, control_routine_schedule, control_routine_condition, control_routine_cooldown, control_pending_followup, browse_url,
-    duckduckgo_search, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, update_goal_progress_tool, update_goal_milestones_tool, tool_stats, system_doctor, memory_review,
+    duckduckgo_search, research_web, run_terminal_command, get_fit_summary, save_goal_tool, update_goal_status_tool, update_goal_progress_tool, update_goal_milestones_tool, tool_stats, system_doctor, memory_review,
     repo_mapper,
     scan_receipt,
     text_stats,
@@ -3698,5 +4250,6 @@ all_tools = [
     list_recent_files,
     # File generator
     generate_excel, generate_word_doc, generate_pdf, generate_csv,
-    list_agent_skills, read_agent_skill, run_officecli, manage_context_flag
+    list_agent_skills, read_agent_skill, run_officecli, manage_context_flag,
+    get_world_time,
 ]

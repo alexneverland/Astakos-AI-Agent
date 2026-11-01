@@ -1,47 +1,60 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 import os
 import json
 import time
+import socket
+import struct
+import base64
+import hashlib
+import hmac
 import queue
 import signal
 import asyncio
 import threading
 import ipaddress
+import html
 from core.i18n import t
+from collections.abc import Iterator
 import sys
 import re
 import secrets
 import logging
+from typing import Any
+from collections.abc import Callable, Mapping
+from urllib.parse import quote, unquote, urlencode
 from api.path_security import resolve_allowed_file
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi.staticfiles import StaticFiles
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, HTTPException, Depends, Form
+from starlette.datastructures import Headers, QueryParams
+from starlette.responses import Response
+from starlette.types import Scope
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, HTTPException, Depends, Form, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from rich.console import Console
 from zoneinfo import ZoneInfo
 
 from core.brain import llm, safe_llm_invoke
+from services.turn_timing import trace_turn
 from core.graph import graph, AgentState
 from core.agents import clean_message
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
 from services.context_extractor import extract_and_update_context_flags
 from memory.pending_followups import (
-    maybe_create_followup_from_exchange,
-    maybe_resolve_followups_from_user_message,
+    process_followup_exchange,
     find_pending_followups,
 )
 def _enqueue_followup_pipeline(user_text, ai_text, agent_name, channel):
-    maybe_resolve_followups_from_user_message(user_text)
-    maybe_create_followup_from_exchange(
+    process_followup_exchange(
         user_text=user_text,
         ai_text=ai_text,
         agent_name=agent_name,
@@ -57,6 +70,11 @@ from fastapi.staticfiles import StaticFiles
 from config import PHOTOS_DIR
 from core.brain import vertex_client, FAST_MODEL, llm
 from core.utils import detect_prompt_injection
+from core.text_to_speech import (
+    MAX_TTS_INPUT_BYTES,
+    synthesize_speech as _synthesize_speech,
+)
+from core.voice_delivery import build_voice_delivery_context as _build_voice_delivery_context
 console = Console()
 from core.brain import FAST_MODEL
 # ────────────────────────────────────────────────────────────────
@@ -86,31 +104,299 @@ def _get_or_create_token() -> str:
 
 LOCAL_TOKEN = _get_or_create_token()
 _bearer = HTTPBearer(auto_error=False)
+ASSET_TOKEN_TTL_SECONDS = 300
+
+def _is_container_environment() -> bool:
+    """Returns True if the application is running inside a Docker or container runtime."""
+    if os.getenv("ASTAKOS_CONTAINER") in ("1", "true", "True"):
+        return True
+    return os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv")
+
+
+def _get_default_gateway_linux() -> str | None:
+    """Reads default gateway IP from /proc/net/route in a Linux container."""
+    try:
+        if os.path.exists("/proc/net/route"):
+            with open("/proc/net/route", "r") as f:
+                for line in f:
+                    fields = line.strip().split()
+                    if len(fields) >= 3 and fields[1] == "00000000":
+                        val = int(fields[2], 16)
+                        return socket.inet_ntoa(struct.pack("<L", val))
+    except (OSError, ValueError, struct.error):
+        pass
+    return None
+
+
+def _is_docker_bridge_gateway(host: str) -> bool:
+    """
+    Checks if a client host IP exactly matches the container's verified default gateway
+    when running inside a container environment. Fails closed if the gateway is indeterminate.
+    """
+    if not _is_container_environment() or not host:
+        return False
+
+    gw = _get_default_gateway_linux()
+    if not gw:
+        return False
+
+    return host == gw
+
+
+def _is_trusted_client_host(host: str) -> bool:
+    """Checks whether the client host is trusted without a token (loopback or verified Docker bridge gateway)."""
+    if host in ("127.0.0.1", "::1", "localhost"):
+        return True
+    return _is_docker_bridge_gateway(host)
+
+
+def _validate_token_string(token: str | None) -> bool:
+    """Safely validates a bearer/query token against LOCAL_TOKEN in constant time."""
+    if not token or not LOCAL_TOKEN:
+        return False
+    return secrets.compare_digest(token, LOCAL_TOKEN)
+
+
+def _extract_token_from_query_and_headers(
+    query_params: Mapping[str, str],
+    headers: Mapping[str, str],
+) -> str | None:
+    """Extract a query token first, otherwise a bearer token from headers."""
+    token = query_params.get("token")
+    if token:
+        return token
+
+    return _extract_bearer_token(headers)
+
+
+def _extract_bearer_token(headers: Mapping[str, str]) -> str | None:
+    """Extract a bearer token from headers without accepting URL credentials."""
+    authorization = headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return None
+
+
+def _asset_request_path(mount_path: str, relative_path: str) -> str:
+    """Return a normalized same-origin static path for a mounted asset."""
+    return f"/{mount_path.strip('/')}/{quote(relative_path.lstrip('/'), safe='/')}"
+
+
+def _create_asset_access_token(asset_path: str, *, now: int | None = None) -> str:
+    """Create a short-lived token restricted to one static asset path."""
+    issued_at = int(time.time()) if now is None else now
+    expires_at = issued_at + ASSET_TOKEN_TTL_SECONDS
+    payload = f"{expires_at}:{asset_path}".encode("utf-8")
+    signature = hmac.new(LOCAL_TOKEN.encode("utf-8"), payload, hashlib.sha256).digest()
+    encoded_signature = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+    return f"{expires_at}.{encoded_signature}"
+
+
+def _validate_asset_access_token(
+    token: str | None,
+    asset_path: str,
+    *,
+    now: int | None = None,
+) -> bool:
+    """Validate a short-lived token for exactly one static asset path."""
+    if not token or not LOCAL_TOKEN:
+        return False
+    try:
+        expires_text, supplied_signature = token.split(".", 1)
+        expires_at = int(expires_text)
+    except (TypeError, ValueError):
+        return False
+
+    current_time = int(time.time()) if now is None else now
+    if expires_at <= current_time:
+        return False
+    payload = f"{expires_at}:{asset_path}".encode("utf-8")
+    expected_signature = base64.urlsafe_b64encode(
+        hmac.new(LOCAL_TOKEN.encode("utf-8"), payload, hashlib.sha256).digest(),
+    ).decode("ascii").rstrip("=")
+    return hmac.compare_digest(supplied_signature, expected_signature)
+
+
+def _private_asset_url_for_client_host(host: str, mount_path: str, filename: str) -> str:
+    """Build a same-origin asset URL with a scoped token for one client host."""
+    asset_url = _asset_request_path(mount_path, filename)
+    if _is_trusted_client_host(host):
+        return asset_url
+    return f"{asset_url}?{urlencode({'asset_token': _create_asset_access_token(asset_url)})}"
+
+
+def _private_asset_url(request: Request, mount_path: str, filename: str) -> str:
+    """Build a same-origin asset URL with a scoped token for an HTTP client."""
+    host = request.client.host if request.client else ""
+    return _private_asset_url_for_client_host(host, mount_path, filename)
+
+
+def _asset_history_marker(mount_path: str, filename: str) -> str:
+    """Return the stable, token-free asset reference persisted in chat history."""
+    return f"[ASTAKOS_ASSET:{_asset_request_path(mount_path, filename)}]"
+
+
+def _replace_bracketed_markers(
+    content: str,
+    prefix: str,
+    transform: Callable[[str], str | None],
+) -> str:
+    """Replace bounded ``[PREFIX:value]`` markers without regex backtracking."""
+    cursor = 0
+    parts: list[str] = []
+    while True:
+        marker_start = content.find(prefix, cursor)
+        if marker_start < 0:
+            parts.append(content[cursor:])
+            return "".join(parts)
+        value_start = marker_start + len(prefix)
+        marker_end = content.find("]", value_start)
+        if marker_end < 0:
+            parts.append(content[cursor:])
+            return "".join(parts)
+        parts.append(content[cursor:marker_start])
+        marker = content[marker_start:marker_end + 1]
+        replacement = transform(content[value_start:marker_end])
+        parts.append(marker if replacement is None else replacement)
+        cursor = marker_end + 1
+
+
+def _asset_url_from_history_marker(client_host: str, asset_path: str) -> str | None:
+    """Mint a fresh URL only for a canonical, persisted private-asset reference."""
+    for mount_path in ("photos", "outputs", "avatars"):
+        prefix = f"/{mount_path}/"
+        if not asset_path.startswith(prefix):
+            continue
+        filename = unquote(asset_path[len(prefix):])
+        if not filename or filename != os.path.basename(filename):
+            return None
+        if _asset_request_path(mount_path, filename) != asset_path:
+            return None
+        return _private_asset_url_for_client_host(client_host, mount_path, filename)
+    return None
+
+
+def _asset_history_marker_from_legacy_photo_path(file_path: str) -> str:
+    """Translate a legacy Telegram photo marker into a stable private-asset reference."""
+    normalized_path = file_path.strip().replace("\\", "/")
+    filename = normalized_path.rsplit("/", 1)[-1]
+    mount_path = "outputs" if "outputs" in normalized_path.lower() else "photos"
+    return _asset_history_marker(mount_path, filename)
+
+
+def _render_persisted_asset_markers_for_client(
+    content: str,
+    client_host: str,
+) -> str:
+    """Render private asset references and compact document logs for the Web UI."""
+    lines = content.splitlines()
+    if (
+        len(lines) >= 2
+        and lines[0].startswith("[USER_UPLOADED_FILE]: ")
+        and lines[1].startswith("[FILE PATH]: ")
+    ):
+        filename = lines[0].removeprefix("[USER_UPLOADED_FILE]: ").strip()
+        caption = next(
+            (line.removeprefix("[USER_CAPTION]: ").strip()
+             for line in lines[2:] if line.startswith("[USER_CAPTION]: ")),
+            "",
+        )
+        return f"📄 Έστειλα αρχείο: {filename}" + (f"\n{caption}" if caption else "")
+
+    normalized_content = _replace_bracketed_markers(
+        content,
+        "[SEND_PHOTO:",
+        lambda file_path: _asset_history_marker_from_legacy_photo_path(file_path),
+    )
+
+    def replace_marker(asset_path: str) -> str | None:
+        image_url = _asset_url_from_history_marker(client_host, asset_path)
+        if not image_url:
+            return None
+        return f"[ASTAKOS_ASSET_URL:{html.escape(image_url, quote=True)}]"
+
+    return _replace_bracketed_markers(
+        normalized_content,
+        "[ASTAKOS_ASSET:",
+        replace_marker,
+    )
+
+
+def _render_persisted_asset_markers(content: str, request: Request) -> str:
+    """Mint fresh client-facing image URLs for an HTTP request."""
+    host = request.client.host if request.client else ""
+    return _render_persisted_asset_markers_for_client(content, host)
+
+
+class AuthenticatedStaticFiles(StaticFiles):
+    """Serve private assets only to trusted local clients or token holders."""
+
+    def __init__(self, *, directory: str, mount_path: str) -> None:
+        super().__init__(directory=directory)
+        self._mount_path = mount_path.strip("/")
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        client = scope.get("client")
+        host = str(client[0]) if client else ""
+        if _is_trusted_client_host(host):
+            return await super().get_response(path, scope)
+
+        query_string = scope.get("query_string", b"")
+        query_text = (
+            query_string.decode("latin-1")
+            if isinstance(query_string, bytes)
+            else str(query_string)
+        )
+        query_params = QueryParams(query_text)
+        asset_token = query_params.get("asset_token")
+        if asset_token and _validate_asset_access_token(
+            asset_token,
+            _asset_request_path(self._mount_path, path),
+        ):
+            return await super().get_response(path, scope)
+
+        if asset_token or not _validate_token_string(_extract_bearer_token(Headers(scope=scope))):
+            return JSONResponse(
+                {"detail": "Unauthorized"},
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+        return await super().get_response(path, scope)
+
 
 async def require_token(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer)
-):
-    """Dependency: checks the bearer token. Always allows trusted local access."""
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+) -> None:
+    """Dependency: checks the bearer token. Allows trusted local loopback and Docker bridge gateway."""
     host = request.client.host if request.client else ""
-    if host in ("127.0.0.1", "::1", "localhost"):
+    if _is_trusted_client_host(host):
         return  # loopback always allowed (Web UI on the same computer)
 
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        ip = None
-
-    # Docker Desktop / local bridge requests from the same machine may appear
-    # as private gateway IPs instead of loopback. Allow them only when the
-    # request still targets localhost on the published host port.
-    if ip and ip.is_private:
-        host_header = (request.headers.get("host") or "").lower()
-        if host_header.startswith("127.0.0.1:") or host_header.startswith("localhost:"):
-            return
-
-    if not credentials or not secrets.compare_digest(credentials.credentials, LOCAL_TOKEN):
+    token = credentials.credentials if credentials else None
+    if not _validate_token_string(token):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+async def require_ws_token(websocket: WebSocket) -> bool:
+    """
+    Validates WebSocket client against trusted origins or Bearer/Query token.
+    Closes connection with WS_1008_POLICY_VIOLATION if unauthorized.
+    """
+    host = websocket.client.host if websocket.client else ""
+    if _is_trusted_client_host(host):
+        return True
+
+    if _validate_token_string(
+        _extract_token_from_query_and_headers(
+            websocket.query_params,
+            websocket.headers,
+        ),
+    ):
+        return True
+
+    # Unauthorized: terminate WebSocket connection with policy violation code (1008)
+    await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+    return False
 
 # ── WebSocket log streaming ────────────────────────────────────
 active_websockets: list = []
@@ -118,14 +404,23 @@ server_loop = None
 
 
 def _broadcast_ws(payload: dict):
-    """Sends a JSON event to all connected WebSocket clients."""
+    """Sends a JSON event to all clients, minting asset URLs per recipient."""
     import json as _json
     if not server_loop or not active_websockets:
         return
-    msg = _json.dumps(payload, ensure_ascii=False)
     for ws in active_websockets:
         try:
-            asyncio.run_coroutine_threadsafe(ws.send_text(msg), server_loop)
+            message_payload = payload.copy()
+            content = message_payload.get("content")
+            if isinstance(content, str):
+                client = getattr(ws, "client", None)
+                client_host = str(getattr(client, "host", ""))
+                message_payload["content"] = _render_persisted_asset_markers_for_client(
+                    content,
+                    client_host,
+                )
+            message = _json.dumps(message_payload, ensure_ascii=False)
+            asyncio.run_coroutine_threadsafe(ws.send_text(message), server_loop)
         except Exception:
             pass
 
@@ -166,11 +461,15 @@ def append_to_chat_history(
     agent: str | None = None,
     *,
     return_saved: bool = False,
+    metadata: dict | None = None,
+    mirror_target: str | None = None,
+    mirror_content: str | None = None,
 ):
     """Add message to the shared SQLite conversation history (web channel) and websocket push."""
     now = datetime.now()
     shared_message_id = None
     shared_message_rowid = None
+    saved = None
     try:
         from memory.conversation_history import append_message
         saved = append_message(
@@ -178,10 +477,28 @@ def append_to_chat_history(
             content=content,
             channel="web",
             agent=agent,
+            metadata=metadata,
+            mirror_target=mirror_target,
+            mirror_content=mirror_content,
             timestamp=now,
         )
         shared_message_id = saved.get("id")
         shared_message_rowid = saved.get("rowid")
+        if mirror_target is not None:
+            try:
+                print("[WebMirror]: " + json.dumps({"event": "mirror_queued",
+                    "message_id": shared_message_id, "rowid": shared_message_rowid,
+                    "channel": mirror_target}), flush=True)
+            except (OSError, UnicodeError, ValueError):
+                pass
+        if role == "user":
+            from services.behavioral_event_scheduler import schedule_persisted_user_intake
+
+            schedule_persisted_user_intake(
+                rowid=shared_message_rowid,
+                metadata=metadata,
+                enqueue_slow_task=enqueue_slow_task,
+            )
         
         _broadcast_ws({
             "type": "new_message",
@@ -196,15 +513,25 @@ def append_to_chat_history(
     except Exception as e:
         print(f"[ConversationHistory/web]: Error shared write: {e}")
     if return_saved:
-        return {"id": shared_message_id, "rowid": shared_message_rowid}
+        # Return canonical persisted provenance, not an ID-only reconstruction.
+        # A later display/telemetry failure does not undo the committed row.
+        return saved if saved is not None else {"id": shared_message_id, "rowid": shared_message_rowid}
     return shared_message_id
 
 
-def notify_telegram_message(role: str, content: str, agent: str | None = None) -> int | None:
+def notify_telegram_message(
+    role: str,
+    content: str,
+    agent: str | None = None,
+    *,
+    metadata: dict | None = None,
+    return_saved: bool = False,
+    message_id: str | None = None,
+) -> int | dict[str, int | None] | None:
     """
     Called by the Telegram handler when a message arrives/is sent.
     Saves to the shared SQLite database and notifies the Web UI via WebSocket.
-    Returns the new message id or None if it fails.
+    Returns the display message id, or the persisted-row result when requested.
     """
     now = datetime.now()
     try:
@@ -216,6 +543,8 @@ def notify_telegram_message(role: str, content: str, agent: str | None = None) -
             channel="telegram",
             timestamp=now,
             agent=agent,
+            metadata=metadata,
+            message_id=message_id,
         )
         msg_id = saved.get("rowid") or get_max_rowid()
         _broadcast_ws({
@@ -228,6 +557,8 @@ def notify_telegram_message(role: str, content: str, agent: str | None = None) -
             "time": now.strftime("%H:%M"),
             "content": content,
         })
+        if return_saved:
+            return {"rowid": saved.get("rowid"), "message_id": msg_id}
         return msg_id
     except Exception as e:
         print(f"[ConversationHistory/telegram]: Error write: {e}")
@@ -244,6 +575,10 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
         return []
 
     context_msgs = []
+    from core.untrusted_content import (
+        format_model_history_content,
+        history_message_additional_kwargs,
+    )
     for entry in entries:
         if exclude_message_id and entry.get("id") == exclude_message_id:
             continue
@@ -251,10 +586,20 @@ def _load_shared_context_messages(channel: str, exclude_message_id: str | None =
         if not content:
             continue
         prefix = f"[{entry.get('date', '')} {entry.get('time', '')} / {entry.get('channel', '')}] "
+        content = format_model_history_content(
+            f"{prefix}{content}",
+            entry.get("metadata"),
+        )
         if entry.get("role") in ("user", "human", "Human"):
-            context_msgs.append(HumanMessage(content=f"{prefix}{content}"))
+            context_msgs.append(HumanMessage(
+                content=content,
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
         else:
-            context_msgs.append(AIMessage(content=f"{prefix}{content}"))
+            context_msgs.append(AIMessage(
+                content=content,
+                additional_kwargs=history_message_additional_kwargs(entry.get("metadata")),
+            ))
     return context_msgs
 
 
@@ -279,7 +624,11 @@ def _tool_results_fallback_response(user_text: str, tool_results: list[str]) -> 
     return t("api.server.synthesis_failed") + joined_results[:1800]
 
 
-def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -> list:
+def _load_shared_history_entries(
+    channel: str | None = None,
+    limit: int = 200,
+    request: Request | None = None,
+) -> list:
     try:
         from memory.conversation_history import load_messages
         entries = load_messages(channel=channel, limit=limit)
@@ -298,6 +647,8 @@ def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -
             role = "user"
         elif role in ("ai", "bot"):
             role = "assistant"
+        if request is not None:
+            content = _render_persisted_asset_markers(content, request)
         history.append({
             "role": role,
             "content": content,
@@ -311,6 +662,30 @@ def _load_shared_history_entries(channel: str | None = None, limit: int = 200) -
     return history
 
 
+def _bounded_web_graph_events(messages_for_graph: list, limit: int) -> Iterator[dict]:
+    """Preserve terminal approvals or report an exhausted turn without replay."""
+    from langgraph.errors import GraphRecursionError
+
+    terminal_approval = False
+    try:
+        for event in graph.stream(
+            {"messages": messages_for_graph, "channel": "web"},
+            {"recursion_limit": limit},
+        ):
+            approval = event.get("approval_check") or {}
+            terminal_approval = (
+                approval.get("approval_status") in ("blocked", "pending")
+                and bool(approval.get("messages"))
+            )
+            yield event
+    except GraphRecursionError:
+        print("[Web->Graph]: Step budget exhausted; preserving terminal approval"
+              if terminal_approval else "[Web->Graph]: Step budget exhausted; turn incomplete")
+        yield {"graph_limit": {"graph_budget_exhausted": True, "messages": [] if terminal_approval else [
+                AIMessage(content=t("api.server.graph_budget_exhausted")),
+        ]}}
+
+
 def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
     """
     Runs the synchronous LangGraph stream off the main event loop.
@@ -321,22 +696,51 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
     final_ai_response = ""
     handling_agent = "Chat_Agent"
     tool_result_fallbacks: list[str] = []
+    external_tool_names: set[str] = set()
+    tool_args_by_id: dict[str, dict] = {}
+    saved_local_draft = False
+    graph_budget_exhausted = False
 
     t_graph_0 = perf_counter()
-    for event in graph.stream(
-        {"messages": messages_for_graph, "channel": "web"},
-        {"recursion_limit": limit},
-    ):
+    for event in _bounded_web_graph_events(messages_for_graph, limit):
         trace.process_event(event)
         for node, data in event.items():
             if data is None:
                 continue
+            graph_budget_exhausted = graph_budget_exhausted or bool(data.get("graph_budget_exhausted"))
+            if node == "graph_limit" and not data.get("messages"):
+                continue
+            for event_message in data.get("messages", []):
+                for tool_call in getattr(event_message, "tool_calls", None) or []:
+                    tool_call_id = str(tool_call.get("id", ""))
+                    tool_args = tool_call.get("args", {})
+                    if tool_call_id and isinstance(tool_args, dict):
+                        tool_args_by_id[tool_call_id] = tool_args
 
             if node == "tools":
                 t_tools_0 = perf_counter()
                 for msg in data.get("messages", []):
                     if getattr(msg, "type", "") == "tool":
+                        from core.untrusted_content import (
+                            format_untrusted_tool_result,
+                            is_untrusted_external_tool_result_content,
+                        )
+                        tool_name = str(getattr(msg, "name", ""))
+                        if tool_name == "relay_local_payload":
+                            from core.utils import looks_like_terminal_messenger_draft_result
+
+                            saved_local_draft = saved_local_draft or looks_like_terminal_messenger_draft_result(
+                                clean_message(getattr(msg, "content", "")),
+                            )
+                        tool_args = tool_args_by_id.get(str(getattr(msg, "tool_call_id", "")), {})
+                        is_external = is_untrusted_external_tool_result_content(
+                            tool_name, tool_args, str(getattr(msg, "content", "")),
+                        )
+                        if is_external:
+                            external_tool_names.add(tool_name)
                         tool_content = clean_message(getattr(msg, "content", "")).strip()
+                        if is_external:
+                            tool_content = format_untrusted_tool_result(tool_name, tool_content)
                         if tool_content:
                             tool_result_fallbacks.append(tool_content)
                 trace.mark_phase(
@@ -371,7 +775,10 @@ def _run_web_graph_stream_sync(messages_for_graph: list, limit: int, trace):
         "final_ai_response": final_ai_response,
         "handling_agent": handling_agent,
         "tool_result_fallbacks": tool_result_fallbacks,
+        "external_tool_names": sorted(external_tool_names),
         "graph_elapsed_ms": graph_elapsed_ms,
+        "saved_local_draft": saved_local_draft,
+        "graph_budget_exhausted": graph_budget_exhausted,
     }
 
 # ────────────────────────────────────────────────────────────────
@@ -416,16 +823,29 @@ def enqueue_fast_task(func, *args):
 def enqueue_slow_task(func, *args):
     slow_queue.put((func, args))
 
-def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
+def _enqueue_slow_memory_sifter(
+    user_text: str,
+    ai_text: str,
+    handling_agent: str,
+    channel: str,
+    external_content_sources: set[str] | None = None,
+    trusted_user_only: bool = False,
+) -> None:
+    """Queue memory sifting, optionally using only trusted user-originated text."""
+    if external_content_sources:
+        print("[MemorySifterSlow]: external-derived exchange - skip automatic memory write")
+        return
     from memory.session_memory import run_memory_sifter_fast, run_memory_sifter_slow
-    seed_facts = run_memory_sifter_fast(user_text, ai_text, handling_agent, channel)
+    safe_ai_text = "" if trusted_user_only else ai_text
+    seed_facts = run_memory_sifter_fast(user_text, safe_ai_text, handling_agent, channel)
     enqueue_slow_task(
         run_memory_sifter_slow,
         user_text,
-        ai_text,
+        safe_ai_text,
         handling_agent,
         channel,
         seed_facts,
+        not trusted_user_only,
     )
 
 # ────────────────────────────────────────────────────────────────
@@ -436,11 +856,25 @@ def _enqueue_slow_memory_sifter(user_text, ai_text, handling_agent, channel):
 # FASTAPI LIFESPAN
 # ────────────────────────────────────────────────────────────────
 
+def prepare_web_routine_feedback(app: FastAPI) -> None:
+    """Wire the approved dated store before workers, without migration or reset."""
+    from config import CONVERSATION_DB_FILE
+    from services.routine_feedback_runtime import build_existing_routine_feedback_runtime
+    feedback_runtime = build_existing_routine_feedback_runtime()
+    if feedback_runtime is not None:
+        app.state.persisted_routine_feedback_handler = feedback_runtime.handler(
+            channel="web", conversation_db_path=CONVERSATION_DB_FILE)
+        # Draft consumption shares the same canonical transaction in this process.
+        from memory import routine_db
+        routine_db._dated_draft_feedback_recorder = feedback_runtime.store.record_draft_acknowledgement
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Starts workers, waits, terminates cleanly."""
     global server_loop
     server_loop = asyncio.get_running_loop()
+    prepare_web_routine_feedback(app)
     sys.stdout = WsLogger(sys.stdout)
     threads = [
         # reminder_worker and proactive_worker run ONLY in telegram_bot.py
@@ -454,7 +888,11 @@ async def lifespan(app: FastAPI):
     print("\n--- Astakos API Server: Started ---")
     try:
         from memory.pending_assets import init_pending_assets_table
+        from memory.list_store import init_list_store
+        from memory.reminder_store import init_reminder_store
         init_pending_assets_table()
+        init_list_store()
+        init_reminder_store()
     except Exception as e:
         print(f"[PendingAssets]: Init failed: {e}")
         
@@ -475,30 +913,34 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Graceful ChromaDB shutdown
-    try:
-        from memory.vector_store import vector_lock
-        acquired = vector_lock.acquire(timeout=3)
-        if acquired:
-            vector_lock.release()
-    except Exception:
-        pass
-
     shutdown_event.set()
 
     loop = asyncio.get_event_loop()
+    summary_future = loop.run_in_executor(None, lambda: _run_session_summary("web"))
     try:
-        await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: _run_session_summary("web")),
-            timeout=10.0
-        )
-    except (asyncio.TimeoutError, Exception):
+        await asyncio.wait_for(asyncio.shield(summary_future), timeout=10.0)
+    except asyncio.TimeoutError:
         print("\033[93m[System]: Summary timeout — skipping.\033[0m")
+        try:
+            await summary_future
+        except Exception:
+            pass
+    except Exception:
+        print("\033[93m[System]: Summary timeout — skipping.\033[0m")
+
+    # Graceful ChromaDB shutdown
+    try:
+        from memory.vector_store import close_vector_store
+        close_vector_store()
+    except Exception:
+        pass
 # ────────────────────────────────────────────────────────────────
 # FASTAPI APP & MIDDLEWARE
 # ────────────────────────────────────────────────────────────────
 
 server = FastAPI(lifespan=lifespan)
+from api.owntracks import build_owntracks_app
+server.mount("/owntracks", build_owntracks_app(), name="owntracks")
 
 def _api_internal_error(operation: str) -> str:
     logging.exception("API %s failed", operation)
@@ -506,18 +948,18 @@ def _api_internal_error(operation: str) -> str:
 
 # Keep terminal output useful: app debug prints stay visible, noisy polling access logs do not.
 logging.getLogger("uvicorn.access").disabled = True
-server.mount("/photos", StaticFiles(directory=PHOTOS_DIR), name="photos")
+server.mount("/photos", AuthenticatedStaticFiles(directory=PHOTOS_DIR, mount_path="photos"), name="photos")
 
 # --- [MASTRO-ROUTE]: Allow downloading from the outputs folder ---
 from config import BASE_DIR
 outputs_dir = os.path.join(BASE_DIR, "outputs")
 os.makedirs(outputs_dir, exist_ok=True)
-server.mount("/outputs", StaticFiles(directory=outputs_dir), name="outputs")
+server.mount("/outputs", AuthenticatedStaticFiles(directory=outputs_dir, mount_path="outputs"), name="outputs")
 
 # --- [MASTRO-FIX]: Separate folder for the UI faces ---
 avatars_dir = os.path.join(BASE_DIR, "avatars")
 os.makedirs(avatars_dir, exist_ok=True)
-server.mount("/avatars", StaticFiles(directory=avatars_dir), name="avatars")
+server.mount("/avatars", AuthenticatedStaticFiles(directory=avatars_dir, mount_path="avatars"), name="avatars")
 
 # CORS — localhost only (no external source can call the server)
 server.add_middleware(
@@ -543,12 +985,45 @@ async def manual_session_save(_=Depends(require_token)):
     # Execution in a separate thread to prevent the API from freezing
     threading.Thread(target=_run_session_summary, args=("web",), daemon=True).start()
     return JSONResponse({"status": "Archiving started!"})
+
+def _enqueue_capability_gap_web(user_text: str, ai_text: str, agent: str, channel: str, correlation_rowid: int):
+    from core.capability_draft import is_bug_diagnosis_text
+    if is_bug_diagnosis_text(ai_text):
+        return
+    from memory.working_memory import update_capabilities_from_exchange
+    observation = update_capabilities_from_exchange(user_text, ai_text, agent)
+    if not observation:
+        return
+
+    from core.capability_draft import is_bug_proposal_text, is_capability_proposal_text
+    if is_capability_proposal_text(ai_text) or is_bug_proposal_text(ai_text):
+        return
+
+    from memory.conversation_history import load_messages_after_rowid
+    newer = load_messages_after_rowid(after_rowid=correlation_rowid, channel=channel)
+    if any(m.get("role") == "user" for m in newer):
+        return
+
+    from core.capability_draft import render_capability_followup
+    proposal = render_capability_followup(observation.kind, observation.description)
+    if not proposal:
+        return
+
+    append_to_chat_history("assistant", proposal, agent="Dev_Agent")
+
+
 @server.post("/chat")
+@trace_turn("web")
 async def chat_endpoint(request: Request, _=Depends(require_token)):
     global last_interaction_time
 
     body       = await request.json()
     user_input = body.get("message", "").strip()
+    is_voice_mode = body.get("voice_mode") is True
+    routine_completion_context: SystemMessage | None = None
+    routine_draft_offer_context: SystemMessage | None = None
+    routine_draft_offer_to_consume: tuple[int, object] | None = None
+    routine_action_consumed = False
 
     # (Mastro-Shield): Avoid null or strange paths
     photo_path = resolve_allowed_file(
@@ -559,6 +1034,16 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     if not user_input:
         return JSONResponse({"error": t("api.server.empty_message")}, status_code=400)
 
+    # Pin the display target for this entire Web text turn, including its reply.
+    mirror_target = None
+    if not is_voice_mode:
+        from core.messaging_channel import resolve_external_channel
+
+        try:
+            mirror_target = resolve_external_channel()
+        except ValueError as exc:
+            print(f"[WebMirror]: No valid external channel: {exc}")
+
     # 1. --- PROMPT INJECTION FIREWALL ---
     # We catch malicious intents before they ever touch the LLM or cost API tokens.
     if detect_prompt_injection(user_input):
@@ -567,6 +1052,52 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             "agent": "Security_Firewall",
             "response": "🛡️ [SECURITY OVERRIDE]: Prohibited command detected."
         })
+
+    voice_delivery_context = _build_voice_delivery_context(is_voice_mode)
+
+    from services.routine_context_clarification import (
+        context_answer_graph_context, try_context_question_reply,
+    )
+
+    # Persist this authenticated turn before routine-completion inference/mutation.
+    # Reuse the identity on every subsequent path rather than inserting it again.
+    asset_history_kwargs = {}
+    if photo_path:
+        from core.untrusted_content import external_content_history_metadata, USER_PROVIDED_ASSET_SOURCE
+        asset_history_kwargs["metadata"] = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
+    current_history_saved = append_to_chat_history(
+        "user", user_input, return_saved=True, mirror_target=mirror_target,
+        **asset_history_kwargs,
+    )
+    current_history_rowid = current_history_saved.get("rowid")
+    current_history_id = current_history_saved.get("id")
+    if (type(current_history_rowid) is not int or current_history_rowid <= 0
+            or not current_history_id):
+        logging.error("Web turn stopped: user history identity was not persisted")
+        return JSONResponse({"error": t("api.server.internal_error")}, status_code=503)
+
+    context_answer = await asyncio.to_thread(
+        try_context_question_reply, user_input, "web", trusted_owner=True,
+        external_derived=bool(photo_path),
+    )
+    if context_answer.consumed and not context_answer.continue_conversation:
+        reply = context_answer.reply
+        user_saved = current_history_saved
+        assistant_saved = append_to_chat_history(
+            "assistant", reply, agent="Routine_Context", return_saved=True,
+            mirror_target=mirror_target,
+        )
+        enqueue_fast_task(log_exchange, user_input, reply, "Routine_Context", "web")
+        return JSONResponse({
+            "agent": "Routine_Context", "response": reply,
+            "user_rowid": user_saved["rowid"], "assistant_rowid": assistant_saved["rowid"],
+        })
+
+    if context_answer.context_flags_processed and context_answer.continue_conversation:
+        from config import CONVERSATION_DB_FILE
+        from services.context_extractor import reconcile_context_message
+        enqueue_slow_task(reconcile_context_message, user_input, current_history_rowid,
+                          CONVERSATION_DB_FILE)
 
     # 2. --- XML CONTEXT ISOLATION ---
     # Web/Telegram are trusted local user channels.
@@ -599,55 +1130,325 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     except Exception as e:
         print(f"[RecentAssetFollowup]: {e}")
 
-    # ── Routine Confirmation from Web UI ─────────────────────────
-    # Same logic as telegram_bot — accent-insensitive
-    import unicodedata
-    def _normalize_gr(t):
-        return unicodedata.normalize("NFD", t).encode("ascii", "ignore").decode("ascii").lower()
+    # ── Routine Completion Decision from Web UI ─────────────────────
+    # Explicit injection only: activate after scheduler/schema verification.
+    feedback_handler = getattr(server.state, "persisted_routine_feedback_handler", None)
+    if photo_path:
+        # The attachment turn is analyzed as external content, not as a second
+        # interpretation of the caption against a pending routine.
+        pass
+    elif feedback_handler is not None:
+        try:
+            routine_result = await asyncio.to_thread(
+                feedback_handler, user_input, current_history_saved,
+            )
+            from services.matrix_routine_completion import MatrixRoutineDraftOffer
+            if isinstance(routine_result, MatrixRoutineDraftOffer):
+                routine_draft_offer_context = routine_result.context
+                routine_draft_offer_to_consume = (routine_result.routine_id, routine_result.sent_at)
+                pending_routine_confirmations = {routine_result.routine_id: {
+                    "event": routine_result.event_name, "sent_at": routine_result.sent_at,
+                    "draft_offer": True,
+                }}
+                routine_completion_context = routine_result.context
+            else:
+                routine_completion_context = routine_result
+            if routine_completion_context is not None and not isinstance(routine_completion_context, SystemMessage):
+                raise TypeError("Routine feedback callback must return trusted context or None")
+        except Exception as exc:
+            from services.routine_completion_context import build_dated_routine_feedback_context
+            from services.routine_feedback_turn import FeedbackTurnResult
+            print(f"[Web Routine Feedback]: {type(exc).__name__}")
+            routine_completion_context = build_dated_routine_feedback_context(FeedbackTurnResult("error"))
+        from services.routine_completion_context import routine_feedback_consumes_turn
+        routine_action_consumed = routine_feedback_consumes_turn(routine_completion_context)
+    else:
+        try:
+            from core.messenger_draft import active_draft_status
+            from memory.routine_db import (
+                acknowledge_pending_draft_offer,
+                load_pending_confirmations,
+            )
+            from services.routine_completion_helper import decide_completion
+            from services.routine_completion_selector import select_routine as _completion_selector
+            from services.routine_completion_context import accept_pending_messenger_draft_offer
 
-    try:
-        from clients.telegram_bot import pending_routine_confirmations
-        if pending_routine_confirmations:
-            txt = _normalize_gr(user_input)
-            txt_words = txt.replace(",","").replace(".","").replace("!","").split()
-            yes_w = [_normalize_gr(w) for w in config.NLP_CONFIG.get("intents", {}).get("confirm_words", [])]
-            no_w  = [_normalize_gr(w) for w in config.NLP_CONFIG.get("intents", {}).get("cancel_words", [])]
-            act_w = [_normalize_gr(w) for w in config.NLP_CONFIG.get("intents", {}).get("action_words", [])]
-            implicit = False
-            if any(w in txt for w in act_w):
-                for rid, rdata in pending_routine_confirmations.items():
-                    ev = rdata.get("event","") if isinstance(rdata,dict) else str(rdata)
-                    ev_words = [_normalize_gr(w) for w in ev.split() if len(w)>3]
-                    if any(ew in txt for ew in ev_words):
-                        implicit = True
-                        break
-            if any(w in txt_words for w in yes_w) or implicit:
-                from memory.routine_db import confirm_routine, mark_routine_responded, clear_pending_confirmations
-                from memory.event_log import log_event
-                for rid in list(pending_routine_confirmations.keys()):
+            # Web and Telegram run in separate processes. The database is the shared
+            # pending-confirmation source of truth; importing the bot's RAM mapping
+            # here would always miss offers created by the Telegram scheduler.
+            pending_routine_confirmations = load_pending_confirmations()
+            if pending_routine_confirmations:
+                pending_candidates = {
+                    rid: (pdata.get("event", "") if isinstance(pdata, dict) else str(pdata))
+                    for rid, pdata in pending_routine_confirmations.items()
+                }
+                active_draft, _, _ = active_draft_status()
+                draft_offer_ids = frozenset(
+                    rid
+                    for rid, pdata in pending_routine_confirmations.items()
+                    if not active_draft and isinstance(pdata, dict) and pdata.get("draft_offer") is True
+                )
+                selector_candidates = {
+                    rid: (
+                        f"{event_name}\n[MESSENGER_DRAFT_OFFER]"
+                        if rid in draft_offer_ids else event_name
+                    )
+                    for rid, event_name in pending_candidates.items()
+                }
+                accepted_draft_offer = None
+                draft_offer_consumed = False
+                if not active_draft:
+                    accepted_draft_offer = accept_pending_messenger_draft_offer(
+                        pending_routine_confirmations,
+                        user_input,
+                    )
+                    if accepted_draft_offer is not None:
+                        pending_data = pending_routine_confirmations.get(
+                            accepted_draft_offer.routine_id,
+                            {},
+                        )
+                        sent_at = pending_data.get("sent_at")
+                        if sent_at is None:
+                            accepted_draft_offer = None
+                        else:
+                            routine_draft_offer_to_consume = (
+                                accepted_draft_offer.routine_id,
+                                sent_at,
+                            )
+                if accepted_draft_offer is not None:
+                    from services.routine_completion_helper import RoutineSelection
+
+                    decision = RoutineSelection(
+                        action="acknowledge",
+                        routine_id=accepted_draft_offer.routine_id,
+                    )
+                else:
+                    decision = decide_completion(
+                        user_text=user_input,
+                        candidates=selector_candidates,
+                        pool="pending",
+                        semantic_selector=_completion_selector,
+                        draft_offer_ids=draft_offer_ids,
+                    )
+
+                if decision.action == "draft" and decision.routine_id is not None:
+                    from services.routine_completion_context import get_pending_messenger_draft_offer
+
+                    accepted_draft_offer = get_pending_messenger_draft_offer(
+                        pending_routine_confirmations,
+                        decision.routine_id,
+                    )
+                    if accepted_draft_offer is not None:
+                        pending_data = pending_routine_confirmations.get(decision.routine_id, {})
+                        sent_at = pending_data.get("sent_at")
+                        if sent_at is not None:
+                            routine_draft_offer_to_consume = (decision.routine_id, sent_at)
+                    if accepted_draft_offer is None or routine_draft_offer_to_consume is None:
+                        accepted_draft_offer = None
+                        from services.routine_completion_helper import RoutineSelection
+
+                        decision = RoutineSelection(action="none", routine_id=None)
+                    else:
+                        from services.routine_completion_helper import RoutineSelection
+
+                        decision = RoutineSelection(
+                            action="acknowledge",
+                            routine_id=decision.routine_id,
+                        )
+
+                if decision.action == "complete" and decision.routine_id is not None:
+                    from memory.routine_db import (
+                        confirm_routine,
+                        mark_routine_responded,
+                        mark_routine_triggered_today,
+                        remove_pending_confirmation,
+                    )
+                    from memory.event_log import log_event
+
+                    rid = decision.routine_id
+                    pdata = pending_routine_confirmations.get(rid, {})
+                    ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+
                     confirm_routine(rid)
                     mark_routine_responded(rid)
-                    log_event("routines","confirmed",routine_id=rid,event=pending_routine_confirmations[rid].get("event","?"))
-                    print(f"✅ [Web Routine Confirmed]: {pending_routine_confirmations[rid]}")
-                pending_routine_confirmations.clear()
-                clear_pending_confirmations()
-            elif any(w in txt for w in no_w):
-                from memory.routine_db import decay_routine, clear_pending_confirmations
-                from memory.event_log import log_event
-                for rid in list(pending_routine_confirmations.keys()):
-                    decay_routine(rid)
-                    log_event("routines","dismissed",routine_id=rid,event=pending_routine_confirmations[rid].get("event","?"))
-                    print(f"📉 [Web Routine Dismissed]: {pending_routine_confirmations[rid]}")
-                pending_routine_confirmations.clear()
-                clear_pending_confirmations()
-    except Exception as _rce:
-        print(f"[Web Routine Confirm]: {_rce}")
+                    mark_routine_triggered_today(rid)
+                    remove_pending_confirmation(rid)
+                    log_event(
+                        "routines", "confirmed",
+                        routine_id=rid, event=ev,
+                    )
+                    print(f"✅ [Web Routine Confirmed]: {pdata}")
+                    pending_routine_confirmations.pop(rid, None)
+
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
+
+                elif decision.action == "acknowledge" and decision.routine_id is not None:
+                    from memory.routine_db import mark_routine_acknowledged, remove_pending_confirmation
+                    from memory.event_log import log_event
+
+                    rid = decision.routine_id
+                    pdata = pending_routine_confirmations.get(rid, {})
+                    ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+
+                    if not draft_offer_consumed and routine_draft_offer_to_consume is None:
+                        mark_routine_acknowledged(rid)
+                        remove_pending_confirmation(rid)
+                    if routine_draft_offer_to_consume is None:
+                        log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
+                        print(f"[Web Routine Acknowledged]: {pdata}")
+                        pending_routine_confirmations.pop(rid, None)
+                        from services.routine_completion_context import build_routine_completion_context
+
+                        routine_completion_context = build_routine_completion_context()
+                    if accepted_draft_offer is not None and accepted_draft_offer.routine_id == rid:
+                        routine_draft_offer_context = accepted_draft_offer.context
+                    routine_action_consumed = True
+
+                elif decision.action == "skip_today" and decision.routine_id is not None:
+                    from memory.routine_db import record_routine_skip_today, remove_pending_confirmation
+                    from memory.event_log import log_event
+
+                    rid = decision.routine_id
+                    pdata = pending_routine_confirmations.get(rid, {})
+                    ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+                    skip_result = record_routine_skip_today(rid)
+                    remove_pending_confirmation(rid)
+                    log_event(
+                        "routines", "routine_skipped_today", routine_id=rid, event=ev,
+                        skip_streak=skip_result["skip_streak"],
+                        cooldown_applied=skip_result["cooldown_applied"],
+                    )
+                    print(f"[Web Routine Skipped Today]: {pdata}")
+                    pending_routine_confirmations.pop(rid, None)
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
+
+                elif decision.action == "pause" and decision.routine_id is not None:
+                    from memory.routine_db import pause_routine_indefinitely, remove_pending_confirmation
+                    from memory.event_log import log_event
+
+                    rid = decision.routine_id
+                    pdata = pending_routine_confirmations.get(rid, {})
+                    ev = pdata.get("event", "?") if isinstance(pdata, dict) else str(pdata)
+                    pause_routine_indefinitely(rid)
+                    remove_pending_confirmation(rid)
+                    log_event("routines", "routine_paused", routine_id=rid, event=ev)
+                    print(f"[Web Routine Paused]: {pdata}")
+                    pending_routine_confirmations.pop(rid, None)
+                    from services.routine_completion_context import build_routine_completion_context
+                    routine_completion_context = build_routine_completion_context()
+                    routine_action_consumed = True
+
+                # pass_through → continue to normal processing.
+            if not routine_action_consumed:
+                # ── Pre-emptive today-pool completion (no consumed pending action) ──
+                from datetime import datetime as _dt_now
+                from memory.routine_db import get_eligible_preemptive_routines_for_day, mark_routine_triggered_today
+
+                day_name = _dt_now.now().strftime("%A")
+                today_routines = get_eligible_preemptive_routines_for_day(day_name)
+                if today_routines:
+                    today_candidates = {r["id"]: r["event"] for r in today_routines}
+                    decision = decide_completion(
+                        user_text=user_input,
+                        candidates=today_candidates,
+                        pool="today",
+                        semantic_selector=_completion_selector,
+                    )
+
+                    if decision.action == "complete" and decision.routine_id is not None:
+                        from memory.event_log import log_event
+
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+                        mark_routine_triggered_today(rid)
+                        log_event(
+                            "routines", "preemptive_completed",
+                            routine_id=rid, event=ev,
+                        )
+                        print(f"✅ [Web Routine Pre-emptive Completed]: #{rid} {ev}")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                    elif decision.action == "acknowledge" and decision.routine_id is not None:
+                        from memory.event_log import log_event
+                        from memory.routine_db import mark_routine_acknowledged
+
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+                        mark_routine_acknowledged(rid)
+                        log_event("routines", "routine_acknowledged", routine_id=rid, event=ev)
+                        print(f"[Web Routine Acknowledged]: #{rid} {ev}")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                    elif decision.action == "skip_today" and decision.routine_id is not None:
+                        from memory.event_log import log_event
+                        from memory.routine_db import record_routine_skip_today
+
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+                        skip_result = record_routine_skip_today(rid)
+                        log_event(
+                            "routines", "routine_skipped_today", routine_id=rid, event=ev,
+                            skip_streak=skip_result["skip_streak"],
+                            cooldown_applied=skip_result["cooldown_applied"],
+                        )
+                        print(f"[Web Routine Skipped Today]: #{rid} {ev}")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                    elif decision.action == "pause" and decision.routine_id is not None:
+                        from memory.event_log import log_event
+                        from memory.routine_db import pause_routine_indefinitely
+
+                        rid = decision.routine_id
+                        ev = today_candidates.get(rid, "?")
+                        pause_routine_indefinitely(rid)
+                        log_event("routines", "routine_paused", routine_id=rid, event=ev)
+                        print(f"[Web Routine Paused]: #{rid} {ev}")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+                    # pass_through → continue to normal processing.
+                if not routine_action_consumed:
+                    from memory.routine_db import get_active_routine_catalog, pause_routine_indefinitely
+                    from services.routine_completion_helper import relevant_catalog_candidates
+
+                    catalog = {
+                        routine["id"]: routine["event"]
+                        for routine in get_active_routine_catalog()
+                    }
+                    pause_candidates = relevant_catalog_candidates(user_input, catalog)
+                    decision = decide_completion(
+                        user_text=user_input,
+                        candidates=pause_candidates,
+                        pool="catalog",
+                        semantic_selector=_completion_selector,
+                    )
+                    if decision.action == "pause" and decision.routine_id is not None:
+                        from memory.event_log import log_event
+
+                        rid = decision.routine_id
+                        ev = pause_candidates[rid]
+                        pause_routine_indefinitely(rid)
+                        log_event("routines", "routine_paused", routine_id=rid, event=ev)
+                        print(f"[Web Routine Paused]: #{rid} {ev}")
+                        from services.routine_completion_context import build_routine_completion_context
+                        routine_completion_context = build_routine_completion_context()
+                        routine_action_consumed = True
+        except Exception as _rce:
+            print(f"[Web Routine Completion]: {_rce}")
+
 
     # ── Pending Asset Confirmation from Web UI ───────────────────
     try:
         from memory.pending_assets import (
             clear_expired_pending_assets,
-            get_latest_pending_asset,
+            get_latest_pending_asset_any,
             mark_pending_asset_confirmed,
             mark_pending_asset_cancelled,
             classify_pending_asset_reply,
@@ -655,9 +1456,7 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         )
         clear_expired_pending_assets()
         from memory.pending_assets import is_reply_to_recent_asset_prompt
-        pending_photo_asset = get_latest_pending_asset("web", "photo")
-        pending_doc_asset = get_latest_pending_asset("web", "document")
-        pending_asset = pending_photo_asset or pending_doc_asset
+        pending_asset = None if routine_action_consumed else get_latest_pending_asset_any("web")
         reply_kind = classify_pending_asset_reply(user_input) if pending_asset else None
         asset_prompt_active = is_reply_to_recent_asset_prompt("web") if pending_asset else False
 
@@ -666,36 +1465,42 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
 
         if pending_asset and reply_kind == "yes" and asset_prompt_active:
             from memory.vector_store import memory
-            if pending_asset["asset_type"] == "photo":
-                memory.save(
-                    memory_type="photo",
-                    file_path=pending_asset["file_path"],
-                    analysis=pending_asset.get("analysis", ""),
-                    caption=pending_asset.get("caption", "") or pending_asset["filename"],
-                )
-            else:
-                memory.save(
-                    memory_type="document",
-                    file_path=pending_asset["file_path"],
-                    analysis=pending_asset.get("analysis", ""),
-                    caption=pending_asset.get("caption", "") or pending_asset["filename"],
-                )
-                
-            mark_pending_asset_confirmed(pending_asset["id"])
+            from services.pending_asset_confirmation import (
+                ConfirmedAssetSaveError,
+                save_confirmed_asset,
+            )
 
-            reply = t("api.server.saved_to_memory")
+            try:
+                save_confirmed_asset(memory, pending_asset)
+            except ConfirmedAssetSaveError as exc:
+                print(
+                    "[PendingAssets]: Web save failed; pending retained "
+                    f"({type(exc.__cause__ or exc).__name__})"
+                )
+                reply = t("services.pending_asset_confirmation.save_failed_retry")
+            else:
+                mark_pending_asset_confirmed(pending_asset["id"])
+                reply = t("api.server.saved_to_memory")
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
-            append_to_chat_history("user", user_input)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            user_saved = current_history_saved
+            assistant_saved = append_to_chat_history(
+                "assistant", reply, agent="Chat_Agent", return_saved=True,
+                mirror_target=mirror_target,
+            )
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
-            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+            if not context_answer.context_flags_processed:
+                enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
+            return JSONResponse({
+                "agent": "Chat_Agent", "response": reply,
+                "user_rowid": user_saved["rowid"],
+                "assistant_rowid": assistant_saved["rowid"],
+            })
 
         if pending_asset and reply_kind == "no" and asset_prompt_active:
             mark_pending_asset_cancelled(pending_asset["id"])
@@ -704,32 +1509,43 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
-            append_to_chat_history("user", user_input)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            user_saved = current_history_saved
+            assistant_saved = append_to_chat_history(
+                "assistant", reply, agent="Chat_Agent", return_saved=True,
+                mirror_target=mirror_target,
+            )
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
-            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+            if not context_answer.context_flags_processed:
+                enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
+            return JSONResponse({
+                "agent": "Chat_Agent", "response": reply,
+                "user_rowid": user_saved["rowid"],
+                "assistant_rowid": assistant_saved["rowid"],
+            })
     except Exception as e:
         print(f"[PendingAssets]: Web text handler error: {e}")
 
     # ── Messenger Draft Intent Guard (Web UI parity with Telegram) ─────────────
     try:
-        from core.messenger_draft import active_draft_status, clear_draft
+        from core.messenger_draft import active_draft_status, clear_draft, capture_draft_write_guard
         from services.messenger_intent import classify_messenger_intent
         from memory.execution_trace import ExecutionTrace
 
+        draft_guard = capture_draft_write_guard([HumanMessage(content=user_input,
+            additional_kwargs={"astakos_owner_rowid": current_history_saved["rowid"]})])
         draft_active, _, draft_data = active_draft_status()
-        draft_intent = classify_messenger_intent(
-            user_input,
-            has_active_draft=draft_active,
+        draft_intent = (
+            classify_messenger_intent(user_input, has_active_draft=draft_active)
+            if not routine_action_consumed
+            else None
         )
 
         if draft_intent and draft_intent.intent == "clear_draft":
-            cleared = bool(clear_draft())
+            cleared = bool(clear_draft(write_guard=draft_guard))
             reply = (
                 t("server.draft_cleared")
                 if cleared
@@ -739,20 +1555,28 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
 
-            append_to_chat_history("user", user_input)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            user_saved = current_history_saved
+            assistant_saved = append_to_chat_history(
+                "assistant", reply, agent="Chat_Agent", return_saved=True,
+                mirror_target=mirror_target,
+            )
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
+            if not context_answer.context_flags_processed:
+                enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
 
             _trace = ExecutionTrace(channel="web", user_message=user_input)
             _trace.mark_phase("messenger_intent_clear_intercept", 1)
             _trace.finalize(response=reply)
             _trace.save()
-            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+            return JSONResponse({
+                "agent": "Chat_Agent", "response": reply,
+                "user_rowid": user_saved["rowid"],
+                "assistant_rowid": assistant_saved["rowid"],
+            })
 
         if draft_intent and draft_intent.intent == "clarify_draft":
             if draft_active and draft_data and draft_data.get("message"):
@@ -772,40 +1596,56 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             reply = sanitize_messenger_draft_claims(reply)
             reply = strip_operational_assistant_paragraphs(reply).strip() or reply
 
-            append_to_chat_history("user", user_input)
-            append_to_chat_history("assistant", reply, agent="Chat_Agent")
+            user_saved = current_history_saved
+            assistant_saved = append_to_chat_history(
+                "assistant", reply, agent="Chat_Agent", return_saved=True,
+                mirror_target=mirror_target,
+            )
             enqueue_fast_task(log_exchange, user_input, reply, "Chat_Agent", "web")
             enqueue_fast_task(update_working_memory, user_input, reply)
             enqueue_fast_task(_enqueue_slow_memory_sifter, user_input, reply, "Chat_Agent", "web")
             enqueue_slow_task(update_capabilities_from_exchange, user_input, reply, "Chat_Agent")
             enqueue_slow_task(_enqueue_followup_pipeline, user_input, reply, "Chat_Agent", "web")
-            enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
+            if not context_answer.context_flags_processed:
+                enqueue_slow_task(extract_and_update_context_flags, user_input, reply, "web")
 
             _trace = ExecutionTrace(channel="web", user_message=user_input)
             _trace.mark_phase("messenger_intent_clarify_intercept", 1)
             _trace.finalize(response=reply)
             _trace.save()
-            return JSONResponse({"agent": "Chat_Agent", "response": reply})
+            return JSONResponse({
+                "agent": "Chat_Agent", "response": reply,
+                "user_rowid": user_saved["rowid"],
+                "assistant_rowid": assistant_saved["rowid"],
+            })
     except Exception as e:
         print(f"[MessengerIntent Web]: {e}")
 
     with memory_lock:
         last_interaction_time = time.time()
 
-    # ── Save user message to history ────────────────────
-    # Note: We save the original `user_input` to the UI chat history, 
-    # not the XML-wrapped version, to keep the frontend looking clean.
-    current_history_saved = append_to_chat_history("user", user_input, return_saved=True)
-    current_history_id = current_history_saved.get("id")
-    current_history_rowid = current_history_saved.get("rowid")
-
     final_ai_response = ""
     handling_agent    = "Chat_Agent"
+    _trace = None
+    trace_response = None
+    trace_error = None
 
     try:
+        # ── Explicit canonical fail-closed containment check for photo_path ──
+        safe_photo_path = ""
+        if photo_path:
+            try:
+                base_dir = os.path.realpath(os.path.abspath(PHOTOS_DIR))
+                cand_path = os.path.realpath(os.path.abspath(photo_path))
+                allowed_prefix = base_dir.rstrip(os.sep) + os.sep
+                if cand_path.startswith(allowed_prefix) and os.path.isfile(cand_path):
+                    safe_photo_path = cand_path
+            except Exception:
+                safe_photo_path = ""
+        photo_path = safe_photo_path
+
         # ── Multimodal message if a file exists ───────────
         if photo_path and os.path.exists(photo_path):
-            import base64
             filename = os.path.basename(photo_path)
             ext = os.path.splitext(filename)[1].lower()
             image_exts = [".jpg", ".jpeg", ".png", ".webp", ".gif"]
@@ -815,43 +1655,73 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             # We inject the isolated input into the enhanced string
             enhanced_user_input = f"[USER_UPLOADED_FILE]: {filename}\n{isolated_user_input}"
 
-            # If it is an IMAGE, we convert it to Base64 and send it as image_url
             if ext in image_exts:
-                print(f"\033[94m[Vision]: Encoding image to base64 ({ext})...\033[0m")
-                with open(photo_path, "rb") as f:
-                    img_b64 = base64.b64encode(f.read()).decode("utf-8")
-
                 mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                         ".gif": "image/gif", ".webp": "image/webp"}.get(ext, "image/jpeg")
 
-                human_msg = HumanMessage(content=[
-                    {"type": "text", "text": enhanced_user_input},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_b64}"}}
-                ])
-                print(f"\033[92m[Chat]: Multimodal message (Image): {filename}\033[0m")
-                print(f"\033[94m[Vision]: Ready for analysis by LLM — message: '{isolated_user_input[:120]}'\033[0m")
+                from core.untrusted_content import (
+                    USER_PROVIDED_ASSET_SOURCE,
+                    external_content_history_metadata,
+                    format_untrusted_asset_vision_prompt,
+                    format_untrusted_tool_result,
+                )
+                from core.ai_provider import (
+                    CapabilityNotSupportedError,
+                    ProviderAuthError,
+                    RateLimitError,
+                    AIProviderError,
+                )
+                from core.brain import get_active_provider_adapter, safe_adapter_call
 
-            # If it is a DOCUMENT (PDF, Word, Excel), we send it only as text/name
+                vision_prompt = format_untrusted_asset_vision_prompt(
+                    f"Analyze this image and describe the visual content relevant to the user request:\n{isolated_user_input or 'Describe the image.'}"
+                )
+
+                def _run_vision_analysis() -> str:
+                    with open(photo_path, "rb") as f:
+                        img_bytes = f.read()
+                    adapter = get_active_provider_adapter()
+                    return safe_adapter_call(
+                        adapter.analyze_vision,
+                        vision_prompt,
+                        img_bytes,
+                        mime_type=mime,
+                    ).strip()
+
+                try:
+                    vision_text = (await asyncio.to_thread(_run_vision_analysis)) or "No visual analysis returned."
+                except CapabilityNotSupportedError as exc:
+                    vision_text = f"Vision analysis is not supported by active provider '{exc.provider}'."
+                except (ProviderAuthError, RateLimitError, AIProviderError) as exc:
+                    vision_text = f"Vision analysis error ({getattr(exc, 'provider', 'unknown')}): {exc}"
+                except Exception as exc:
+                    vision_text = f"Vision analysis error: {exc}"
+
+                untrusted_analysis = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, vision_text)
+                enhanced_user_input = (
+                    f"[USER_UPLOADED_FILE]: {filename}\n"
+                    f"[PHOTO PATH]: {photo_path}\n"
+                    f"[ANALYSIS]: {untrusted_analysis}\n"
+                    f"{isolated_user_input}"
+                )
+                human_msg = HumanMessage(
+                    content=enhanced_user_input,
+                    additional_kwargs=external_content_history_metadata([
+                        USER_PROVIDED_ASSET_SOURCE,
+                    ]),
+                )
+                print(f"\033[92m[Chat]: Processed image with adapter vision: {filename}\033[0m")
             else:
                 human_msg = HumanMessage(content=enhanced_user_input)
                 print(f"\033[94m[Chat]: Text message with document reference: {filename}\033[0m")
-
-        # ── Standard text message ────────────────────────────────
         else:
-            # We feed the LangGraph state the isolated XML payload
             human_msg = HumanMessage(content=isolated_user_input)
 
-        # Timestamp on the current message
         now_ts = datetime.now().strftime("%H:%M")
-        if isinstance(human_msg.content, str):
-            human_msg = HumanMessage(content=f"[{now_ts}] {human_msg.content}")
-        elif isinstance(human_msg.content, list):
-            parts = list(human_msg.content)
-            for i, p in enumerate(parts):
-                if isinstance(p, dict) and p.get("type") == "text":
-                    parts[i] = {"type": "text", "text": f"[{now_ts}] {p['text']}"}
-                    break
-            human_msg = HumanMessage(content=parts)
+        human_msg = HumanMessage(
+            content=f"[{now_ts}] {human_msg.content}",
+            additional_kwargs={**human_msg.additional_kwargs, "astakos_owner_rowid": current_history_rowid},
+        )
         # ── Running LangGraph ─────────────────────────────────
         import tools.system as _ts; _ts._CURRENT_CHANNEL = "web"
         if photo_path and os.path.exists(photo_path):
@@ -882,59 +1752,139 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         )
         
         is_ultra_ack = is_ultra_light_ack(isolated_user_input)
+        from core.capability_draft import has_pending_bug_followup
+        pending_bug_followup = has_pending_bug_followup(
+            {"messages": context_msgs + [human_msg]}
+        )
         tool_result_fallbacks = []
+        external_tool_names: list[str] = []
+        graph_budget_exhausted = False
+        provenance_messages_for_reply: list = []
+
+        from core.planner import get_fresh_pending_plan_confirmation
+
+        pending_plan_confirmation = not routine_action_consumed and bool(
+            get_fresh_pending_plan_confirmation(
+                {"channel": "web"},
+                isolated_user_input,
+            )
+        )
+        _trace.mark_phase(
+            "pending_plan_confirmation_active",
+            1 if pending_plan_confirmation else 0,
+        )
 
         mail_prompt_active = is_reply_to_recent_mail_prompt(context_msgs)
         linkedin_prompt_active = is_reply_to_recent_linkedin_prompt(context_msgs)
 
-        if is_ultra_ack and not mail_prompt_active:
+        if (
+            is_ultra_ack
+            and not pending_bug_followup
+            and routine_completion_context is None
+            and not mail_prompt_active
+            and not pending_plan_confirmation
+            and not context_answer.consumed
+        ):
             _trace.mark_phase("ultra_light_ack_used", 1)
             final_ai_response = get_ultra_light_ack_response()
             handling_agent = "UltraLightACK"
             print(f"\033[92m[Web->UltraLightACK]: Instant reply in '{isolated_user_input}'\033[0m")
         else:
             medium_path_used = is_medium_web_chat_path_candidate(isolated_user_input)
-            fast_path_used = (not medium_path_used) and is_simple_chat_fast_path_candidate(isolated_user_input)
+            fast_path_used = (
+                not pending_plan_confirmation
+                and not medium_path_used
+                and is_simple_chat_fast_path_candidate(isolated_user_input)
+            )
             _trace.mark_phase("fast_path_candidate", 1 if fast_path_used else 0)
             _trace.mark_phase("fast_path_used", 1 if fast_path_used else 0)
             _trace.mark_phase("medium_path_candidate", 1 if medium_path_used else 0)
             _trace.mark_phase("medium_path_used", 1 if medium_path_used else 0)
+            from services.routine_completion_context import append_routine_completion_context
+            voice_context_messages = (
+                [voice_delivery_context]
+                if voice_delivery_context is not None
+                else []
+            )
+            answer_context = context_answer_graph_context(context_answer)
+            if answer_context is not None:
+                voice_context_messages.append(answer_context)
 
-            if fast_path_used:
+            if pending_plan_confirmation:
+                limit = 100
+                messages_for_graph = append_routine_completion_context(
+                    context_msgs,
+                    routine_completion_context,
+                    routine_draft_offer_context,
+                ) + voice_context_messages + [human_msg]
+            elif fast_path_used:
                 limit = 12
-                messages_for_graph = context_msgs[-6:] + [human_msg]
+                messages_for_graph = append_routine_completion_context(
+                    context_msgs[-6:],
+                    routine_completion_context,
+                    routine_draft_offer_context,
+                ) + voice_context_messages + [human_msg]
             elif medium_path_used:
                 limit = 24
-                messages_for_graph = context_msgs[-8:] + [human_msg]
+                messages_for_graph = append_routine_completion_context(
+                    context_msgs[-8:],
+                    routine_completion_context,
+                    routine_draft_offer_context,
+                ) + voice_context_messages + [human_msg]
             else:
                 limit = 100
-                messages_for_graph = context_msgs + [human_msg]
+                messages_for_graph = append_routine_completion_context(
+                    context_msgs,
+                    routine_completion_context,
+                    routine_draft_offer_context,
+                ) + voice_context_messages + [human_msg]
 
             _trace.mark_phase("web_graph_budget", limit)
 
+            provenance_messages_for_reply = messages_for_graph
             graph_result = await asyncio.to_thread(
                 _run_web_graph_stream_sync,
                 messages_for_graph,
                 limit,
                 _trace,
             )
+            if routine_draft_offer_to_consume and graph_result.get("saved_local_draft"):
+                from memory.routine_db import acknowledge_pending_draft_offer
+                draft_routine_id, draft_sent_at = routine_draft_offer_to_consume
+                if acknowledge_pending_draft_offer(draft_routine_id, draft_sent_at):
+                    from memory.event_log import log_event
+
+                    draft_data = pending_routine_confirmations.get(draft_routine_id, {})
+                    draft_event = draft_data.get("event", "?") if isinstance(draft_data, dict) else str(draft_data)
+                    log_event(
+                        "routines",
+                        "routine_acknowledged",
+                        routine_id=draft_routine_id,
+                        event=draft_event,
+                    )
+                    print(f"[Web Routine Acknowledged]: {draft_data}")
+                    pending_routine_confirmations.pop(draft_routine_id, None)
             final_ai_response = graph_result["final_ai_response"]
             handling_agent = graph_result["handling_agent"]
             tool_result_fallbacks = graph_result["tool_result_fallbacks"]
+            external_tool_names = graph_result["external_tool_names"]
             graph_elapsed_ms = graph_result["graph_elapsed_ms"]
+            graph_budget_exhausted = bool(graph_result.get("graph_budget_exhausted"))
             _trace.mark_phase("graph_call_ms", graph_elapsed_ms)
             _trace.mark_phase("graph_stream_ms", graph_elapsed_ms)
 
         t_build_0 = perf_counter()
 
-        if should_attach_linkedin_draft_reply(
+        if not graph_budget_exhausted and should_attach_linkedin_draft_reply(
             isolated_user_input,
             tool_result_fallbacks,
             recent_linkedin_prompt_active=linkedin_prompt_active,
         ):
             final_ai_response = build_linkedin_draft_ready_reply(tool_result_fallbacks)
 
-        if any(looks_like_terminal_messenger_draft_result(r) for r in tool_result_fallbacks):
+        if not graph_budget_exhausted and any(
+            looks_like_terminal_messenger_draft_result(r) for r in tool_result_fallbacks
+        ):
             final_ai_response = build_messenger_draft_ready_reply(tool_result_fallbacks)
 
         if not final_ai_response:
@@ -945,6 +1895,12 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
         # doesn't memorize the XML tags as part of your data.
         clean_user = clean_message(user_input)
         clean_ai   = clean_message(final_ai_response)
+        mirror_ai: str | None = None
+        from services.created_file import extract_created_files
+
+        visible_output = extract_created_files(clean_ai).text
+        if visible_output != clean_ai:
+            mirror_ai = visible_output
 
         # 1. --- MASTER INTERCEPTOR FOR REGISTRATION LINKS (Web UI) ---
         file_match = re.search(r"\[CREATED_FILE:\s*(.*?)\]", clean_ai)
@@ -970,22 +1926,13 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             clean_ai = re.sub(r"\[CREATED_FILE:\s*(.*?)\]", lambda m: file_card, clean_ai)
 
         # 2. --- MASTRO INTERCEPTOR FOR IMAGES (Web UI) ---
-        photo_match = re.search(r"\[SEND_PHOTO:\s*(.*?)\]", clean_ai)
-        if photo_match:
-            file_path = photo_match.group(1).strip()
-            filename = os.path.basename(file_path)
-            base_url = str(request.base_url).rstrip("/")
-            
-            # We smartly check where the photo is located
-            if "outputs" in file_path.lower():
-                img_url = f"{base_url}/outputs/{filename}"
-            else:
-                img_url = f"{base_url}/photos/{filename}"
-                
-            img_html = f'<br><br><img src="{img_url}" alt="Astakos Image" style="max-width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">'
-            
-            # We replace the label with the image
-            clean_ai = re.sub(r"\[SEND_PHOTO:\s*(.*?)\]", img_html, clean_ai)
+        # Persist stable references. Fresh client-specific URLs are rendered only
+        # when returning the response or replaying history.
+        clean_ai = _replace_bracketed_markers(
+            clean_ai,
+            "[SEND_PHOTO:",
+            lambda file_path: _asset_history_marker_from_legacy_photo_path(file_path),
+        )
 
         if final_ai_response:
             # We store the CLEAN strings everywhere (including the Link/Img if it exists)
@@ -994,35 +1941,63 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
             from core.utils import sanitize_messenger_draft_claims, strip_operational_assistant_paragraphs
             clean_ai = sanitize_messenger_draft_claims(clean_ai)
             clean_ai = strip_operational_assistant_paragraphs(clean_ai).strip() or clean_ai
-            _trace.finalize(response=clean_ai)
+            if mirror_ai is not None:
+                mirror_ai = strip_operational_assistant_paragraphs(
+                    sanitize_messenger_draft_claims(mirror_ai)
+                ).strip()
+            client_ai = _render_persisted_asset_markers(clean_ai, request)
+            from core.untrusted_content import derived_external_content_history_metadata
+            assistant_metadata = derived_external_content_history_metadata(
+                provenance_messages_for_reply,
+                external_tool_names,
+            )
+            trace_response = client_ai
             
+            assistant_history_kwargs = {
+                "agent": handling_agent,
+                "return_saved": True,
+            }
+            if assistant_metadata:
+                assistant_history_kwargs["metadata"] = assistant_metadata
             assistant_history_saved = append_to_chat_history(
                 "assistant",
                 clean_ai,
-                agent=handling_agent,
-                return_saved=True,
+                mirror_target=mirror_target if mirror_ai != "" else None,
+                mirror_content=mirror_ai,
+                **assistant_history_kwargs,
             )
             assistant_history_rowid = assistant_history_saved.get("rowid")
             
             t_bg_0 = perf_counter()
-            enqueue_fast_task(log_exchange,                      clean_user, clean_ai, handling_agent, "web")
-            enqueue_fast_task(update_working_memory,             clean_user, clean_ai)
-            enqueue_fast_task(_enqueue_slow_memory_sifter,       clean_user, clean_ai, handling_agent, "web")
-            enqueue_slow_task(update_capabilities_from_exchange, clean_user, clean_ai, handling_agent)
-            enqueue_slow_task(_enqueue_followup_pipeline, clean_user, clean_ai, handling_agent, "web")
-            enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")
+            from core.untrusted_content import external_content_source_names
+            external_content_sources = external_content_source_names(assistant_metadata)
+            if external_content_sources:
+                print("[Security]: external-derived reply - use trusted user text only for background state")
+                enqueue_fast_task(log_exchange,                  clean_user, "", handling_agent, "web")
+                enqueue_fast_task(update_working_memory,         clean_user, "")
+                enqueue_fast_task(_enqueue_slow_memory_sifter,   clean_user, "", handling_agent, "web", None, True)
+                enqueue_slow_task(_enqueue_followup_pipeline, clean_user, "", handling_agent, "web")
+                if not context_answer.context_flags_processed:
+                    enqueue_slow_task(extract_and_update_context_flags, clean_user, "", "web")
+            else:
+                enqueue_fast_task(log_exchange,                  clean_user, clean_ai, handling_agent, "web")
+                enqueue_fast_task(update_working_memory,         clean_user, clean_ai, external_content_sources)
+                enqueue_fast_task(_enqueue_slow_memory_sifter,   clean_user, clean_ai, handling_agent, "web", external_content_sources)
+                enqueue_slow_task(_enqueue_capability_gap_web,   clean_user, clean_ai, handling_agent, "web", current_history_rowid)
+                enqueue_slow_task(_enqueue_followup_pipeline, clean_user, clean_ai, handling_agent, "web")
+                if not context_answer.context_flags_processed:
+                    enqueue_slow_task(extract_and_update_context_flags, clean_user, clean_ai, "web")
             _trace.mark_phase("background_enqueue_ms", int((perf_counter() - t_bg_0) * 1000))
-
-            _trace.save()
 
         return JSONResponse({
             "agent":    handling_agent,
-            "response": clean_ai,  # Returning the response to the Frontend
+            "response": client_ai if final_ai_response else clean_ai,
             "user_rowid": current_history_rowid,
             "assistant_rowid": assistant_history_rowid if final_ai_response else None,
         })
 
     except Exception as e:
+        trace_error = type(e).__name__
         import traceback
         traceback.print_exc()
         err = str(e).lower()
@@ -1032,10 +2007,15 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
                 status_code=503,
             )
         return JSONResponse({"error": _api_internal_error("chat")}, status_code=500)
+    finally:
+        if _trace is not None:
+            _trace.finalize(response=trace_response,
+                error=trace_error or ("NoResponse" if not trace_response else None))
+            _trace.save()
 
 @server.post("/voice")
 async def process_web_voice(file: UploadFile = File(...), _=Depends(require_token)):
-    """Accepts audio from the Web UI, transcribes it to text using Gemini, and returns it."""
+    """Accepts audio from the Web UI, transcribes it to text using the active AI provider, and returns it."""
     try:
         audio_data = await file.read()
         debug_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "debug_voice.webm")
@@ -1043,45 +2023,56 @@ async def process_web_voice(file: UploadFile = File(...), _=Depends(require_toke
             f.write(audio_data)
         print(f"\033[96m[Web Voice]: Decoding audio ({len(audio_data)} bytes)...\033[0m")
         import config
-        _provider = getattr(config, "LLM_PROVIDER", "vertex").lower()
-        
-        if _provider in ["vertex", "gemini"]:
-            from core.brain import vertex_client
-            client = vertex_client
-            response = client.models.generate_content(
-                model=FAST_MODEL,
-                contents=[
-                    {"inline_data": {"mime_type": "audio/webm", "data": audio_data}},
-                    t("prompts.ext_speech_to_text")
-                ]
+        from core.brain import get_voice_provider_adapter
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            VoiceProviderSetupRequired,
+        )
+
+        try:
+            adapter = get_voice_provider_adapter()
+            transcription = adapter.transcribe_audio(audio_data, mime_type="audio/webm")
+        except VoiceProviderSetupRequired:
+            return JSONResponse(
+                {
+                    "error": t("api.server.voice_provider_setup_required"),
+                    "setup_required": True,
+                },
+                status_code=400,
             )
-            transcription = response.text.strip() if response.text else ""
-            if not transcription or "[SILENCE]" in transcription:
-                return JSONResponse({"error": t("api.server.no_audio_heard")})
-                
-        elif _provider == "openai":
-            import requests
-            headers = {"Authorization": f"Bearer {config.OPENAI_API_KEY}"}
-            files = {"file": ("audio.webm", audio_data, "audio/webm")}
-            data = {"model": "whisper-1"}
-            resp = requests.post("https://api.openai.com/v1/audio/transcriptions", headers=headers, files=files, data=data)
-            resp_json = resp.json()
-            if "error" in resp_json:
-                return JSONResponse({"error": str(resp_json["error"])}, status_code=500)
-            transcription = resp_json.get("text", "").strip()
-            if not transcription:
-                return JSONResponse({"error": t("api.server.no_audio_heard")})
-                
-        else:
-            return JSONResponse({"error": "Voice input is not supported for this LLM Provider (Anthropic). Please use Text."})
+        except CapabilityNotSupportedError as exc:
+            return JSONResponse(
+                {"error": f"Voice input is not supported for active provider '{adapter.provider_name}'. Please use text or configure a provider with voice support."},
+                status_code=400,
+            )
+        except ProviderAuthError as exc:
+            print(f"\033[91m[Web Voice Auth Error]: {exc}\033[0m")
+            return JSONResponse(
+                {"error": f"Voice transcription authentication failed for provider '{adapter.provider_name}'. Please verify the provider credentials."},
+                status_code=401,
+            )
+        except RateLimitError as exc:
+            return JSONResponse({"error": f"Quota or rate limit exceeded for provider '{adapter.provider_name}'. Please retry shortly."}, status_code=429)
+
+        if not transcription or "[SILENCE]" in transcription or "[ΣΙΩΠΗ]" in transcription:
+            return JSONResponse(
+                {
+                    "error": t("api.server.no_audio_heard"),
+                    "no_speech": True,
+                }
+            )
+
         print(f"\033[92m[Web Voice]: {config.USER_NAME} said -> {transcription}\033[0m")
-        return JSONResponse({"transcription": transcription})
+        wake_name = str(
+            getattr(config, "VOICE_WAKE_NAME", "")
+            or getattr(config, "BOT_NAME", "Astakos")
+        ).strip()
+        return JSONResponse({"transcription": transcription, "wake_name": wake_name})
     except Exception as e:
         return JSONResponse({"error": _api_internal_error("voice")}, status_code=500)
 
-
-import edge_tts
-import io
 
 @server.post("/tts")
 async def text_to_speech(request: Request, _=Depends(require_token)):
@@ -1092,17 +2083,57 @@ async def text_to_speech(request: Request, _=Depends(require_token)):
             return JSONResponse({"error": t("api.server.empty_text_for_tts")}, status_code=400)
         text = re.sub(r'[*#`]', '', text)
         text = re.sub(r'\[.*?\]\(.*?\)', '', text)
-        text = re.sub(r'\[SEND_PHOTO:.*?\]', '', text)
+        text = _replace_bracketed_markers(text, "[SEND_PHOTO:", lambda _: "")
+        text = _replace_bracketed_markers(text, "[ASTAKOS_ASSET:", lambda _: "")
+        text = _replace_bracketed_markers(text, "[ASTAKOS_ASSET_URL:", lambda _: "")
         text = text.strip()
-        from core.i18n import CURRENT_LOCALE
-        voice = "el-GR-NestorasNeural" if CURRENT_LOCALE == "el" else "en-US-ChristopherNeural"
-        communicate = edge_tts.Communicate(text, voice, rate="-10%", volume="+10%")
-        audio_buffer = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_buffer.write(chunk["data"])
-        audio_buffer.seek(0)
-        audio_bytes = audio_buffer.read()
+        from core.i18n import LANG
+        from core.ai_provider import (
+            CapabilityNotSupportedError,
+            ProviderAuthError,
+            RateLimitError,
+            VoiceProviderSetupRequired,
+        )
+        try:
+            audio_bytes = await asyncio.to_thread(_synthesize_speech, text, LANG)
+        except VoiceProviderSetupRequired:
+            return JSONResponse(
+                {
+                    "error": t("api.server.voice_provider_setup_required"),
+                    "setup_required": True,
+                },
+                status_code=400,
+            )
+        except CapabilityNotSupportedError as exc:
+            return JSONResponse(
+                {
+                    "error": (
+                        f"Voice synthesis is not supported for provider "
+                        f"'{exc.provider}'. Configure a provider with voice support."
+                    )
+                },
+                status_code=400,
+            )
+        except ProviderAuthError as exc:
+            return JSONResponse(
+                {
+                    "error": (
+                        f"Voice synthesis authentication failed for provider "
+                        f"'{exc.provider}'. Please verify the provider credentials."
+                    )
+                },
+                status_code=401,
+            )
+        except RateLimitError as exc:
+            return JSONResponse(
+                {
+                    "error": (
+                        f"Voice synthesis quota or rate limit exceeded for provider "
+                        f"'{exc.provider}'. Please retry shortly."
+                    )
+                },
+                status_code=429,
+            )
         if not audio_bytes:
             return JSONResponse({"error": t("api.server.tts_creation_failed")}, status_code=500)
         print(f"\033[95m[TTS]: Voice generated ({len(audio_bytes)} bytes)\033[0m")
@@ -1160,27 +2191,23 @@ def _looks_like_recent_asset_followup(text: str) -> bool:
     return any(m in t for m in short_followup_markers)
 
 def _read_document_text_for_analysis(file_path: str, file_ext: str) -> str:
-    doc_text = ""
-    try:
-        if file_ext in (".txt", ".csv", ".json", ".py", ".md", ".log"):
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as df:
-                doc_text = _prepare_document_excerpt(df.read())
-        elif file_ext == ".pdf":
-            import pypdf
-            reader = pypdf.PdfReader(file_path)
-            doc_text = _prepare_document_excerpt("\n".join(p.extract_text() or "" for p in reader.pages))
-        elif file_ext in (".docx",):
-            from docx import Document as DocxDoc
-            doc_text = _prepare_document_excerpt("\n".join(p.text for p in DocxDoc(file_path).paragraphs))
-        elif file_ext in (".xlsx", ".xls"):
-            import pandas as pd
-            df_data = pd.read_excel(file_path)
-            doc_text = _prepare_document_excerpt(df_data.to_string(index=False))
-        else:
-            doc_text = t("api.server.unsupported_inline_type", file_ext=file_ext)
-    except Exception as read_err:
-        doc_text = t("api.server.unreadable_content", read_err=read_err)
-    return doc_text
+    from services.document_input import (
+        SUPPORTED_DOCUMENT_EXTENSIONS,
+        DocumentPreviewError,
+        ensure_document_preview_readable,
+        extract_document_preview,
+    )
+
+    if file_ext in SUPPORTED_DOCUMENT_EXTENSIONS:
+        return _prepare_document_excerpt(
+            extract_document_preview(file_path, max_chars=16000)
+        )
+    if file_ext in {".py", ".log"}:
+        from core.utils import extract_text_preview
+
+        preview = extract_text_preview(file_path, max_chars=16000)
+        return _prepare_document_excerpt(ensure_document_preview_readable(preview))
+    raise DocumentPreviewError(t("api.server.unsupported_inline_type", file_ext=file_ext))
 
 @server.post("/upload")
 async def upload_file(
@@ -1191,6 +2218,13 @@ async def upload_file(
 ):
     """Endpoint for uploading files (photos & documents) from the Web UI."""
     try:
+        from core.messaging_channel import resolve_external_channel
+
+        try:
+            mirror_target = resolve_external_channel()
+        except ValueError as exc:
+            print(f"[WebMirror]: No valid external channel: {exc}")
+            mirror_target = None
         file_ext  = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
         if file_ext not in ALLOWED_EXTENSIONS:
             return JSONResponse({"status": "error", "message": t("api.server.invalid_file_type", file_ext=file_ext)}, status_code=400)
@@ -1215,7 +2249,6 @@ async def upload_file(
         memory_analysis = ""
         detailed_analysis = ""
         if is_image:
-            from core.brain import llm
             from langchain_core.messages import HumanMessage
             import base64
             import io
@@ -1227,72 +2260,124 @@ async def upload_file(
             
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='JPEG')
-            img_b64 = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
+            raw_img_bytes = img_byte_arr.getvalue()
             
-            def analyze_img(prompt_text):
-                msg = HumanMessage(
-                    content=[
-                        {"type": "text", "text": prompt_text},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-                    ]
-                )
-                resp = llm.invoke([msg])
-                from core.utils import clean_message
-                return clean_message(resp.content) if resp and resp.content else ""
-                
-            memory_analysis = analyze_img("Describe what you see in Greek, concisely, 1-2 sentences.")
-            if not memory_analysis:
-                memory_analysis = "No analysis available."
-                
-            detailed_analysis = analyze_img("Analyze the photo in detail in Greek, with humor and liveliness.")
-            if not detailed_analysis:
-                detailed_analysis = memory_analysis
-            chat_ai_msg = (
-                t("api.server.photo_received", filename=filename) +
-                f"{detailed_analysis}\n\n" +
-                t("api.server.save_prompt").split("\n")[0] + "\n" +
-                t("api.server.save_prompt").split("\n")[1]
+            from core.untrusted_content import (
+                USER_PROVIDED_ASSET_SOURCE,
+                format_untrusted_asset_vision_prompt,
             )
-            user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
+            from core.ai_provider import (
+                CapabilityNotSupportedError,
+                ProviderAuthError,
+                RateLimitError,
+                AIProviderError,
+            )
+            from core.brain import get_active_provider_adapter, safe_adapter_call
+
+            adapter = get_active_provider_adapter()
+            vision_error_msg = None
+            detailed_analysis = ""
+
+            def _run_upload_vision() -> str:
+                return safe_adapter_call(
+                    adapter.analyze_vision,
+                    format_untrusted_asset_vision_prompt("Analyze the photo in detail in Greek, with humor and liveliness."),
+                    raw_img_bytes,
+                    mime_type="image/jpeg",
+                ).strip()
+
+            try:
+                detailed_analysis = await asyncio.to_thread(_run_upload_vision)
+                if not detailed_analysis:
+                    vision_error_msg = "Η οπτική ανάλυση δεν επέστρεψε περιγραφή."
+            except CapabilityNotSupportedError as exc:
+                vision_error_msg = f"Η ανάλυση εικόνας δεν υποστηρίζεται από τον πάροχο '{exc.provider}'."
+            except ProviderAuthError as exc:
+                vision_error_msg = f"Η αυθεντικοποίηση ανάλυσης εικόνας απέτυχε για τον πάροχο '{exc.provider}'."
+            except RateLimitError as exc:
+                vision_error_msg = f"Ξεπέρασες το όριο κλήσεων/quota για την ανάλυση εικόνας ({exc.provider})."
+            except AIProviderError as exc:
+                vision_error_msg = f"Σφάλμα κατά την ανάλυση εικόνας ({exc.provider}): {exc}"
+            except Exception as exc:
+                vision_error_msg = f"Σφάλμα κατά την ανάλυση εικόνας: {exc}"
+
+            if vision_error_msg:
+                memory_analysis = ""
+                chat_ai_msg = (
+                    t("api.server.photo_received", filename=filename) +
+                    f"⚠️ {vision_error_msg}\n\n" +
+                    "Η φωτογραφία αποθηκεύτηκε τοπικά, αλλά η οπτική ανάλυση δεν είναι διαθέσιμη."
+                )
+                user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS_UNAVAILABLE]: {vision_error_msg}"
+            else:
+                memory_analysis = detailed_analysis
+                chat_ai_msg = (
+                    t("api.server.photo_received", filename=filename) +
+                    f"{detailed_analysis}\n\n" +
+                    t("api.server.save_prompt").split("\n")[0] + "\n" +
+                    t("api.server.save_prompt").split("\n")[1]
+                )
+                user_log_msg = f"[USER_UPLOADED_PHOTO]: {filename}\n[PHOTO PATH]: {file_path}\n[ANALYSIS]: {memory_analysis}"
         elif file_ext in doc_exts:
             # We read the content of the document
-            doc_text = _read_document_text_for_analysis(file_path, file_ext)
+            from services.document_input import DocumentPreviewError
+
+            try:
+                doc_text = _read_document_text_for_analysis(file_path, file_ext)
+            except DocumentPreviewError as exc:
+                detailed_analysis = f"⚠️ {exc}"
+                memory_analysis = ""
+                chat_ai_msg = f"📄 **{file.filename}**\n\n{detailed_analysis}"
+                user_log_msg = (
+                    f"[USER_UPLOADED_FILE]: {filename}\n"
+                    f"[FILE PATH]: {file_path}\n"
+                    f"[USER_CAPTION]: {user_caption}\n"
+                    f"[DOCUMENT_ANALYSIS_UNAVAILABLE]: {exc}"
+                )
+                doc_text = None
+
+            if doc_text is not None:
+                from core.untrusted_content import (
+                    USER_PROVIDED_ASSET_SOURCE,
+                    format_untrusted_tool_result,
+                )
+                doc_text = format_untrusted_tool_result(USER_PROVIDED_ASSET_SOURCE, doc_text)
 
             # We send to the LLM for summary/analysis
-            from memory.conversation_history import build_asset_context_text
-            conversation_context = build_asset_context_text("web")
+                from memory.conversation_history import build_asset_context_text
+                conversation_context = build_asset_context_text("web")
 
-            caption_text = user_caption or t("api.server.no_caption_provided")
+                caption_text = user_caption or t("api.server.no_caption_provided")
 
-            from core.i18n import load_prompt
-            sum_prompt = load_prompt("web_document_context.md").format(
-                conversation_context=conversation_context or "No recent context exists.",
-                caption_text=caption_text,
-                summary_rules=t('api.server.summary_rules'),
-                file_filename=file.filename,
-                doc_text=doc_text
-            )
-            from langchain_core.messages import HumanMessage as _HM
-            sum_resp = safe_llm_invoke(llm, [_HM(content=sum_prompt)])
-            detailed_analysis = clean_message(sum_resp.content).strip() if sum_resp and sum_resp.content else t("api.server.analysis_failed")
-            memory_analysis = detailed_analysis[:500]
+                from core.i18n import load_prompt
+                sum_prompt = load_prompt("web_document_context.md").format(
+                    conversation_context=conversation_context or "No recent context exists.",
+                    caption_text=caption_text,
+                    summary_rules=t('api.server.summary_rules'),
+                    file_filename=file.filename,
+                    doc_text=doc_text
+                )
+                from langchain_core.messages import HumanMessage as _HM
+                sum_resp = safe_llm_invoke(llm, [_HM(content=sum_prompt)])
+                detailed_analysis = clean_message(sum_resp.content).strip() if sum_resp and sum_resp.content else t("api.server.analysis_failed")
+                memory_analysis = detailed_analysis[:500]
 
-            asset_label = t("api.server.asset_text") if is_virtual_paste else t("api.server.asset_doc")
+                asset_label = t("api.server.asset_text") if is_virtual_paste else t("api.server.asset_doc")
 
-            chat_ai_msg = (
-                f"📄 **{asset_label}:** `{file.filename}`\n\n" +
-                f"{detailed_analysis}\n\n" +
-                t("api.server.save_prompt").split("\n")[0] + "\n" +
-                t("api.server.save_prompt").split("\n")[1]
-            )
-            source_tag = "pasted_text" if is_virtual_paste else "uploaded_document"
-            user_log_msg = (
-                f"[USER_UPLOADED_FILE]: {filename}\n" +
-                f"[FILE PATH]: {file_path}\n" +
-                f"[USER_CAPTION]: {user_caption}\n" +
-                t("api.server.visual_analysis_prefix", memory_analysis=memory_analysis) +
-                f"[CONTENT_SOURCE]: {source_tag}"
-            )
+                chat_ai_msg = (
+                    f"📄 **{asset_label}:** `{file.filename}`\n\n" +
+                    f"{detailed_analysis}\n\n" +
+                    t("api.server.save_prompt").split("\n")[0] + "\n" +
+                    t("api.server.save_prompt").split("\n")[1]
+                )
+                source_tag = "pasted_text" if is_virtual_paste else "uploaded_document"
+                user_log_msg = (
+                    f"[USER_UPLOADED_FILE]: {filename}\n" +
+                    f"[FILE PATH]: {file_path}\n" +
+                    f"[USER_CAPTION]: {user_caption}\n" +
+                    t("api.server.visual_analysis_prefix", memory_analysis=memory_analysis) +
+                    f"[CONTENT_SOURCE]: {source_tag}"
+                )
         else:
             memory_analysis = t("api.server.memory_analysis_format", file_ext=file_ext, filename=file.filename)
             detailed_analysis = t("api.server.detailed_analysis_format", file_ext=file_ext)
@@ -1305,14 +2390,34 @@ async def upload_file(
         upload_history_msg = t("api.server.upload_history_msg", filename=filename)
         if user_caption:
             upload_history_msg += t("api.server.upload_history_caption", user_caption=user_caption)
-        append_to_chat_history("user", upload_history_msg)
-        append_to_chat_history("assistant", chat_ai_msg)
-        enqueue_fast_task(log_exchange, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
-        enqueue_fast_task(update_working_memory, user_log_msg, chat_ai_msg)
-        enqueue_fast_task(_enqueue_slow_memory_sifter, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
-        enqueue_slow_task(update_capabilities_from_exchange, user_log_msg, chat_ai_msg, "Chat_Agent")
-        enqueue_slow_task(_enqueue_followup_pipeline, user_log_msg, chat_ai_msg, "Chat_Agent", "web")
-        enqueue_slow_task(extract_and_update_context_flags, user_log_msg, chat_ai_msg, "web")
+        from core.untrusted_content import (
+            USER_PROVIDED_ASSET_SOURCE,
+            external_content_history_metadata,
+        )
+        asset_metadata = external_content_history_metadata([USER_PROVIDED_ASSET_SOURCE])
+        user_saved = append_to_chat_history(
+            "user", upload_history_msg, metadata=asset_metadata, return_saved=True,
+            mirror_target=mirror_target,
+            mirror_content=(
+                "📷 Έστειλα φωτογραφία από το Web."
+                if is_image else "📄 Έστειλα αρχείο από το Web."
+            ),
+        )
+        archive_prompt = "\n".join(t("api.server.save_prompt").splitlines()[:2])
+        mirror_ai_msg = chat_ai_msg
+        if archive_prompt and mirror_ai_msg.endswith(archive_prompt):
+            mirror_ai_msg = mirror_ai_msg[:-len(archive_prompt)].rstrip()
+        assistant_saved = append_to_chat_history(
+            "assistant", chat_ai_msg, metadata=asset_metadata, return_saved=True,
+            mirror_target=mirror_target,
+            mirror_content=mirror_ai_msg,
+        )
+        print("[Security]: upload-derived reply - use trusted user text only for background state")
+        enqueue_fast_task(log_exchange, user_caption, "", "Chat_Agent", "web")
+        enqueue_fast_task(update_working_memory, user_caption, "", [USER_PROVIDED_ASSET_SOURCE])
+        enqueue_fast_task(_enqueue_slow_memory_sifter, user_caption, "", "Chat_Agent", "web", {USER_PROVIDED_ASSET_SOURCE}, True)
+        enqueue_slow_task(_enqueue_followup_pipeline, user_caption, "", "Chat_Agent", "web")
+        enqueue_slow_task(extract_and_update_context_flags, user_caption, "", "web")
 
         from memory.pending_assets import looks_like_asset_confirmation_prompt
         if looks_like_asset_confirmation_prompt(chat_ai_msg):
@@ -1326,6 +2431,7 @@ async def upload_file(
                     filename=filename,
                     analysis=memory_analysis,
                     caption=user_caption,
+                    external_content_sources=[USER_PROVIDED_ASSET_SOURCE],
                 )
             except Exception as e:
                 print(f"[PendingAssets]: Web upload error: {e}")
@@ -1333,9 +2439,12 @@ async def upload_file(
             "status":    "success",
             "filename":  filename,
             "file_path": file_path,
-            "url":       f"/photos/{filename}" if is_image else None,
+            "url":       _private_asset_url(request, "photos", filename) if is_image else None,
             "ai_message": chat_ai_msg,
             "analysis":  memory_analysis,
+            "user_message": upload_history_msg,
+            "user_rowid": user_saved["rowid"],
+            "assistant_rowid": assistant_saved["rowid"],
         })
     except Exception as e:
         return JSONResponse({"status": "error", "message": _api_internal_error("upload")}, status_code=500)
@@ -1354,7 +2463,7 @@ async def health():
 
 
 @server.get("/messages/poll")
-async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends(require_token)):
+async def poll_messages(request: Request, after_id: int = 0, channel: str | None = None, _=Depends(require_token)):
     """
     Polling endpoint for the Web UI.
     Returns messages with id > after_id (default: 0 = all).
@@ -1362,7 +2471,14 @@ async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends
     """
     try:
         from memory.conversation_history import load_messages_after_rowid, get_max_rowid
+        from core.untrusted_content import public_history_metadata
         messages = load_messages_after_rowid(after_rowid=after_id, channel=channel or None, limit=50)
+        for message in messages:
+            message["content"] = _render_persisted_asset_markers(
+                str(message.get("content", "")),
+                request,
+            )
+            message["metadata"] = public_history_metadata(message.get("metadata"))
         current_max = get_max_rowid()
         return {"messages": messages, "max_id": current_max}
     except Exception as e:
@@ -1370,21 +2486,28 @@ async def poll_messages(after_id: int = 0, channel: str | None = None, _=Depends
 
 
 @server.get("/history")
-async def get_history(_=Depends(require_token)):
+async def get_history(request: Request, _=Depends(require_token)):
     """Provides the history to the Web UI from the shared SQLite."""
-    history = _load_shared_history_entries(limit=200)
+    history = _load_shared_history_entries(limit=200, request=request)
     return {"history": history}
 
 
 @server.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket):
     """Keeps the channel open — sends live print() output to the Web UI."""
+    if not await require_ws_token(websocket):
+        return
+
     await websocket.accept()
     active_websockets.append(websocket)
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    except Exception:
+        logging.exception("Unexpected error in /ws/logs handler")
+    finally:
         if websocket in active_websockets:
             active_websockets.remove(websocket)
 
@@ -1392,6 +2515,87 @@ async def websocket_logs(websocket: WebSocket):
 # ────────────────────────────────────────────────────────────────
 # OBSERVABILITY: /debug/runtime + /debug + /debug/traces
 # ────────────────────────────────────────────────────────────────
+
+@server.get("/api/workspace/oauth/start")
+async def start_debug_workspace_oauth(
+    request: Request,
+    _: None = Depends(require_token),
+) -> dict[str, str]:
+    """Starts Google Workspace reconnect from an explicit Debug Dashboard action."""
+    from core.workspace_oauth import (
+        WorkspaceAuthError,
+        create_workspace_oauth_authorization_url,
+    )
+
+    try:
+        base_url = str(request.base_url).rstrip("/")
+        auth_url = create_workspace_oauth_authorization_url(
+            f"{base_url}/api/workspace/oauth/callback",
+        )
+        return {"auth_url": auth_url}
+    except WorkspaceAuthError:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Workspace OAuth client secrets file not found. Please check credentials/client_secrets.json.",
+        ) from None
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to initiate Google Workspace authorization.",
+        ) from None
+
+
+@server.get("/api/workspace/oauth/callback", response_class=HTMLResponse)
+async def debug_workspace_oauth_callback(
+    request: Request,
+    code: str = "",
+    state: str = "",
+) -> HTMLResponse:
+    """Completes an explicit Debug Dashboard OAuth reconnect after CSRF validation."""
+    from core.workspace_oauth import (
+        WorkspaceOAuthStateError,
+        WorkspaceOAuthTokenExchangeError,
+        WorkspaceOAuthTokenPersistenceError,
+        complete_workspace_oauth_authorization,
+    )
+
+    try:
+        base_url = str(request.base_url).rstrip("/")
+        complete_workspace_oauth_authorization(
+            f"{base_url}/api/workspace/oauth/callback",
+            code,
+            state,
+        )
+    except WorkspaceOAuthStateError:
+        return HTMLResponse(
+            "<h3>Invalid or expired OAuth state. Please restart authorization from the Debug Dashboard.</h3>",
+            status_code=400,
+        )
+    except WorkspaceOAuthTokenExchangeError:
+        return HTMLResponse(
+            "<h3>Google could not complete authorization. Please start reconnect again and finish the Google consent screen.</h3>",
+            status_code=400,
+        )
+    except WorkspaceOAuthTokenPersistenceError:
+        return HTMLResponse(
+            "<h3>Google approved access, but Astakos could not save the token. Please check the local credentials folder permissions.</h3>",
+            status_code=500,
+        )
+    except Exception:
+        return HTMLResponse(
+            "<h3>Authorization could not be completed. Please restart reconnect from the Debug Dashboard.</h3>",
+            status_code=400,
+        )
+
+    return HTMLResponse(
+        """<!DOCTYPE html>
+<html><head><title>Authorization Successful</title></head>
+<body><h3>Google Workspace connected successfully.</h3>
+<script>
+if (window.opener) { try { window.opener.postMessage("workspace_oauth_complete", "*"); } catch(e) {} }
+setTimeout(() => window.close(), 1500);
+</script></body></html>""",
+    )
 
 def _read_json_file(path: str, default):
     try:
@@ -1443,6 +2647,84 @@ def _debug_condition_state_details(flag_name: str, effective_value, raw_states: 
     }
 
 
+_ROUTINE_OUTCOME_LABELS = {
+    "routine_triggered": "Sent",
+    "deferred_followup": "Sent: deferred follow-up",
+    "preemptive_completed": "Completed today",
+    "confirmed": "Confirmed",
+    "dismissed": "Dismissed",
+    "pending_cleared_muted": "Notifications muted",
+    "routine_condition_blocked": "Blocked by condition",
+    "routine_condition_allowed": "Condition passed",
+    "routine_cooldown_skip": "Skipped: cooldown",
+    "routine_silent_skip": "Skipped: silent",
+    "routine_context_skip": "Skipped: context",
+    "routine_rate_limit_skip": "Skipped: rate limit",
+    "routine_inactive_skip": "Skipped: inactive",
+    "routine_timeout_decay": "Timed out",
+    "routine_pending_stale_cleared": "Stale pending cleared",
+}
+
+_ROUTINE_OUTCOME_I18N_KEYS = {
+    "routine_acknowledged": "api.server.routine_outcome_acknowledged",
+    "routine_skipped_today": "api.server.routine_outcome_skipped_today",
+    "routine_paused": "api.server.routine_outcome_paused",
+    "routine_response_window_expired": "api.server.routine_outcome_response_window_expired",
+    "routine_unanswered_decay": "api.server.routine_outcome_unanswered_decay",
+}
+
+
+def _routine_outcome_label(action: str) -> str:
+    """Return a readable Debug label for any routine lifecycle event action."""
+    localized_key = _ROUTINE_OUTCOME_I18N_KEYS.get(action)
+    if localized_key:
+        return t(localized_key)
+    return _ROUTINE_OUTCOME_LABELS.get(
+        action,
+        f"Recorded: {action.replace('_', ' ').capitalize()}",
+    )
+
+
+def _latest_routine_outcome(events: list[dict], routine_id: int) -> dict | None:
+    """Return the last decision; a condition pass alone is not a dispatch outcome."""
+    outcomes = [
+        event for event in events
+        if event.get("routine_id") == routine_id
+        and isinstance(event.get("action"), str)
+        and event["action"]
+        and event["action"] != "routine_condition_allowed"
+    ]
+    return outcomes[-1] if outcomes else None
+
+
+def _routine_outcome_fields(events: list[dict], routine_id: int) -> dict[str, str | None]:
+    """Build the Dashboard outcome fields shared by active and non-active routines."""
+    latest = _latest_routine_outcome(events, routine_id)
+    checks = [event for event in events if event.get("routine_id") == routine_id
+              and event.get("action") in ("routine_condition_allowed", "routine_condition_blocked")]
+    check_fields = {}
+    if checks:
+        check_fields = {"last_condition_check_action": checks[-1]["action"],
+                        "last_condition_check_ts": checks[-1].get("timestamp")}
+    if not latest:
+        return {
+            "last_outcome_action": None,
+            "last_outcome_label": "Not evaluated",
+            "last_outcome_ts": None,
+            "last_outcome_reason": None,
+            **check_fields,
+        }
+
+    action = latest["action"]
+    return {
+        "last_outcome_action": action,
+        "last_outcome_label": _routine_outcome_label(action),
+        "last_outcome_ts": latest.get("timestamp"),
+        "last_outcome_reason": latest.get("reason") or latest.get("debug_effect"),
+        **check_fields,
+    }
+
+
 @server.get("/debug/runtime")
 async def debug_runtime(_=Depends(require_token)):
     """
@@ -1466,14 +2748,25 @@ async def debug_runtime(_=Depends(require_token)):
     active_routines   = []
     pending_from_db   = []
     cooldown_info     = []
+    from services.routine_feedback import ATHENS as feedback_timezone
+    evidence_now = datetime.now(feedback_timezone)
 
     try:
-        from services.routine_context import build_runtime_routine_context
+        from services.routine_context import build_runtime_routine_context, build_routine_context_evidence, project_routine_context
         from services.routine_conditions import evaluate_routine_conditions
         from memory.routine_db import get_routine_conditions
-        ctx = build_runtime_routine_context(datetime.now())
+        from memory.routine_context_clarification import ATHENS
+        from services.routine_context_clarification_debug import clarification_diagnostics, latest_clarification_check
+        from pathlib import Path
+        evidence_now = datetime.now(ATHENS)
+        current_evidence = build_routine_context_evidence(evidence_now)
+        ctx = project_routine_context(build_runtime_routine_context(datetime.now()), current_evidence)
+        clarification_debug = clarification_diagnostics(
+            Path(base) / "astakos_routine_context_questions.json", evidence_now, current_evidence)
+        clarification_debug["last_check"] = None
     except ImportError:
         ctx = {}
+        clarification_debug = {"error": True, "pending": None, "evidence": {}}
         evaluate_routine_conditions = lambda c_list, cx: {"allowed": True, "results": []}
         get_routine_conditions = lambda rid: []
 
@@ -1501,45 +2794,27 @@ async def debug_runtime(_=Depends(require_token)):
         from memory.event_log import get_events
         today_str = datetime.now().strftime("%Y-%m-%d")
         today_events = get_events(today_str, job="routines")
-
-        def _routine_outcome_label(action: str, debug_effect: str | None = None) -> str:
-            mapping = {
-                "routine_triggered": "Sent",
-                "routine_condition_blocked": "Blocked by condition",
-                "routine_condition_allowed": "Condition passed",
-                "routine_cooldown_skip": "Skipped: cooldown",
-                "routine_silent_skip": "Skipped: silent",
-                "routine_context_skip": "Skipped: context",
-                "routine_rate_limit_skip": "Skipped: rate limit",
-                "routine_inactive_skip": "Skipped: inactive",
-                "routine_timeout_decay": "Timed out",
-                "routine_pending_stale_cleared": "Stale pending cleared",
-            }
-            return mapping.get(action, action)
+        clarification_debug["last_check"] = latest_clarification_check(today_events)
 
         # Active routines
         cursor.execute("""
             SELECT id, day_of_week, time_str, event_name, confidence,
                    mention_count, notify_cooldown_hours, last_notified_ts, state,
                    condition_type, condition_payload, condition_mode,
-                   priority, source_memory_ref, conflict_group, paused_until, pause_reason, muted_until
+                    priority, source_memory_ref, conflict_group, paused_until, pause_reason, muted_until,
+                    paused_indefinitely
             FROM routines
             WHERE state='active'
             ORDER BY day_of_week, time_str
         """)
         for row in cursor.fetchall():
-            r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state, c_type, c_payload, c_mode, priority, memory_ref, conflict_group, paused_until, pause_reason, muted_until = row
+            r_id, day, tstr, ev, conf, mentions, cd_h, last_ts, state, c_type, c_payload, c_mode, priority, memory_ref, conflict_group, paused_until, pause_reason, muted_until, paused_indefinitely = row
             now_dt = datetime.now()
-            cooldown_remaining = None
-            if last_ts:
-                try:
-                    last_dt = datetime.fromisoformat(last_ts)
-                    elapsed = (now_dt - last_dt).total_seconds()
-                    cd_secs = (cd_h or 20.0) * 3600
-                    remaining_secs = cd_secs - elapsed
-                    cooldown_remaining = max(0, round(remaining_secs / 3600, 1))
-                except Exception:
-                    pass
+            from services.routine_feedback_debug import cooldown_diagnostics
+            from memory.routine_db import clamp_cooldown_hours, COOLDOWN_DEFAULT_HOURS
+            cooldown_fields = cooldown_diagnostics(cd_h, last_ts,
+                effective_hours=clamp_cooldown_hours(cd_h if cd_h is not None else COOLDOWN_DEFAULT_HOURS),
+                now=evidence_now)
             
             cond_res = None
             cond_matched = None
@@ -1589,19 +2864,7 @@ async def debug_runtime(_=Depends(require_token)):
                 except Exception:
                     pass
 
-            last_outcome_action = None
-            last_outcome_label = "Not evaluated"
-            last_outcome_ts = None
-            last_outcome_reason = None
-            
-            # Find the latest event for this r_id among canonical routine outcome actions
-            r_events = [e for e in today_events if e.get("routine_id") == r_id and e.get("action", "").startswith("routine_")]
-            if r_events:
-                latest = r_events[-1]
-                last_outcome_action = latest.get("action")
-                last_outcome_label = _routine_outcome_label(last_outcome_action, latest.get("debug_effect"))
-                last_outcome_ts = latest.get("timestamp")
-                last_outcome_reason = latest.get("reason") or latest.get("debug_effect")
+            outcome_fields = _routine_outcome_fields(today_events, r_id)
 
             if not memory_ref and conditions_list:
                 memory_ref = conditions_list[0].get("source_memory_ref")
@@ -1613,9 +2876,8 @@ async def debug_runtime(_=Depends(require_token)):
                 "event":             ev,
                 "confidence":        round(conf or 0, 2),
                 "mentions":          mentions or 1,
-                "cooldown_hours":    cd_h or 20.0,
                 "last_notified":     last_ts,
-                "cooldown_remaining_h": cooldown_remaining,
+                **cooldown_fields,
                 "state":             state,
                 "conditions":        conditions_list,
                 "condition_type":    c_type,
@@ -1628,13 +2890,11 @@ async def debug_runtime(_=Depends(require_token)):
                 "conflict_group":    conflict_group,
                 "source_memory_ref": memory_ref,
                 "paused_until":      paused_until,
+                "paused_indefinitely": bool(paused_indefinitely),
                 "pause_reason":      pause_reason,
                 "condition_reason": cond_reason,
                 "muted_until": muted_until,
-                "last_outcome_action": last_outcome_action,
-                "last_outcome_label": last_outcome_label,
-                "last_outcome_ts": last_outcome_ts,
-                "last_outcome_reason": last_outcome_reason
+                **outcome_fields,
             })
 
         # Pending confirmations
@@ -1718,6 +2978,8 @@ async def debug_runtime(_=Depends(require_token)):
             if not memory_ref and conditions_list:
                 memory_ref = conditions_list[0].get("source_memory_ref")
 
+            outcome_fields = _routine_outcome_fields(today_events, r_id)
+
             cooldown_info.append({
                 "id": r_id, "day": day, "time": tstr,
                 "event": ev, "state": state,
@@ -1734,7 +2996,8 @@ async def debug_runtime(_=Depends(require_token)):
                 "source_memory_ref": memory_ref,
                 "paused_until":      paused_until,
                 "pause_reason":      pause_reason,
-                "muted_until":       muted_until
+                "muted_until":       muted_until,
+                **outcome_fields,
             })
 
         # Stats
@@ -1742,6 +3005,18 @@ async def debug_runtime(_=Depends(require_token)):
         state_counts = dict(cursor.fetchall())
 
         conn.close()
+        from memory.routine_feedback import read_feedback_debug_snapshot
+        routine_rows = active_routines + cooldown_info
+        try:
+            feedback_debug = read_feedback_debug_snapshot(db_path,
+                [item["id"] for item in routine_rows], now=evidence_now)
+            for item in routine_rows:
+                item["feedback_diagnostics"] = feedback_debug[item["id"]]
+                item["feedback_diagnostics"]["active"] = (
+                    getattr(server.state, "persisted_routine_feedback_handler", None) is not None)
+        except Exception:
+            for item in routine_rows:
+                item["feedback_diagnostics"] = {"status": "read_error"}
     except Exception as e:
         state_counts = {}
         active_routines.append({"error": _api_internal_error("debug_runtime")})
@@ -1778,6 +3053,22 @@ async def debug_runtime(_=Depends(require_token)):
     sleep_until = override.get("sleep_until")
     sleeping    = sleep_until and time.time() < sleep_until
     sleep_until_str = datetime.fromtimestamp(sleep_until).strftime("%H:%M") if sleeping else None
+    routine_pause_until = override.get("routine_pause_until")
+    try:
+        routine_pause_until = float(routine_pause_until)
+    except (TypeError, ValueError):
+        routine_pause_until = None
+    routines_paused = bool(routine_pause_until and time.time() < routine_pause_until)
+    routine_pause_until_str = (
+        datetime.fromtimestamp(routine_pause_until).strftime("%d/%m %H:%M")
+        if routines_paused
+        else None
+    )
+    routine_pause_remaining_days = (
+        max(1, int((routine_pause_until - time.time() + 86399) // 86400))
+        if routines_paused
+        else None
+    )
 
     # ── 5. Heartbeat health ──────────────────────────────────────
     snap_age = round(time.time() - datetime.fromisoformat(snapshot["written_at"]).timestamp(), 0) \
@@ -1825,9 +3116,16 @@ async def debug_runtime(_=Depends(require_token)):
     pending_actions = _get_pending_actions()
     messenger_draft = _get_messenger_draft_debug()
 
+    try:
+        from core.diagnostics import get_system_diagnostics_summary
+        system_diagnostics = get_system_diagnostics_summary()
+    except Exception:
+        system_diagnostics = {}
+
     return JSONResponse({
         "snapshot_age_s":  snap_age,
         "scheduler_alive": scheduler_alive,
+        "diagnostics":     system_diagnostics,
         "channel_sessions": channel_sessions,
         "conversation": conversation_debug,
         "session": session_debug,
@@ -1836,6 +3134,7 @@ async def debug_runtime(_=Depends(require_token)):
             "pending_count": len(pending_actions),
             "pending_tools": [a.get("tool_name") for a in pending_actions],
         },
+
         "messenger_draft": messenger_draft,
         "scheduler": {
             "written_at":         snapshot.get("written_at"),
@@ -1844,6 +3143,9 @@ async def debug_runtime(_=Depends(require_token)):
             "quiet_hours":        snapshot.get("quiet_hours"),
             "proactive_muted":    snapshot.get("proactive_muted"),
             "reminders_paused":   snapshot.get("reminders_paused"),
+            "routines_paused":    snapshot.get("routines_paused"),
+            "routine_pause_until": snapshot.get("routine_pause_until"),
+            "routine_pause_remaining_days": snapshot.get("routine_pause_remaining_days"),
             "proactive_this_hour": snapshot.get("proactive_this_hour", 0),
             "pending_count":      snapshot.get("pending_confirmations", 0),
         },
@@ -1852,8 +3154,12 @@ async def debug_runtime(_=Depends(require_token)):
             "mute_proactive":  bool(override.get("mute_proactive")),
             "sleeping":        bool(sleeping),
             "sleep_until":     sleep_until_str,
+            "routines_paused": routines_paused,
+            "routine_pause_until": routine_pause_until_str,
+            "routine_pause_remaining_days": routine_pause_remaining_days,
         },
         "routines": {
+            "context_clarification": clarification_debug,
             "state_counts":    state_counts,
             "active":          active_routines,
             "non_active":      cooldown_info,
@@ -1909,12 +3215,25 @@ async def approve_action(tool_call_id: str, _=Depends(require_token)):
     try:
         from core.approval import execute_approved_pending
         from tools.system import all_tools
-        execution = execute_approved_pending(tool_call_id, all_tools)
+        execution = await asyncio.to_thread(execute_approved_pending, tool_call_id, all_tools)
         if not execution["ok"]:
             return {"ok": False, "status": execution["status"], "error": execution["error"]}
 
         tool_name = execution["tool"]
         result = execution["result"]
+        if tool_name == "run_terminal_command":
+            from services.approved_terminal_continuation import approved_terminal_reply, record_terminal_reply
+            from services.external_delivery import external_delivery_router
+
+            reply = await asyncio.to_thread(approved_terminal_reply, execution)
+            if reply:
+                await asyncio.to_thread(record_terminal_reply, execution.get("continuation_context"),
+                                        execution["channel"], reply, tool_call_id)
+                try:
+                    await asyncio.to_thread(external_delivery_router.send_text, reply)
+                except Exception as exc:
+                    print(f"[Terminal Analysis]: Result delivery failed ({type(exc).__name__})")
+                return {"ok": True, "status": "executed", "tool": tool_name, "result": reply}
         from tools.telegram import send_telegram_msg_full
         send_telegram_msg_full(str(result), prefix=t("api.server.dashboard_action_success", tool_name=tool_name))
         return {"ok": True, "status": "executed", "tool": tool_name, "result": str(result)}
@@ -2154,11 +3473,11 @@ async def upload_to_drive_endpoint(request: Request, _=Depends(require_token)):
     """Uploads a local file to Google Drive, returns the shareable URL."""
     try:
         body     = await request.json()
-        from config import UPLOADS_DIR
+        from config import DOCUMENTS_DIR, UPLOADS_DIR
 
         filepath = resolve_allowed_file(
             body.get("path"),
-            (PHOTOS_DIR, UPLOADS_DIR),
+            (PHOTOS_DIR, UPLOADS_DIR, DOCUMENTS_DIR),
         )
         if not filepath:
             return JSONResponse({"ok": False, "error": t("api.server.file_not_found")}, status_code=404)
@@ -2220,7 +3539,7 @@ async def delete_goal(project: str, _=Depends(require_token)):
         from memory.vector_store import vector_store, vector_lock
         with vector_lock:
             existing = vector_store._collection.get(
-                where={"category": "goal", "project": project}
+                where={"$and": [{"category": "goal"}, {"project": project}]}
             )
             if not existing["ids"]:
                 return {"ok": False, "error": f"Goal not found"}
@@ -2267,6 +3586,37 @@ async def debug_memory_audit(days: int = 1, _=Depends(require_token)):
             except Exception:
                 pass
     return {"entries": entries, "count": len(entries)}
+
+
+@server.get("/debug/behavioral-patterns")
+async def debug_behavioral_patterns(
+    _: None = Depends(require_token),
+) -> dict[str, object]:
+    """Return read-only pattern candidates from confirmed behavioral events."""
+    try:
+        from memory.behavioral_event_state import list_events
+        from services.behavioral_pattern_aggregator import (
+            aggregate_behavioral_pattern_candidates,
+            summarize_behavioral_pattern_progress,
+        )
+
+        events = list_events(record_state="confirmed", initialize=False)
+        candidates = aggregate_behavioral_pattern_candidates(events)
+        summary = summarize_behavioral_pattern_progress(events)
+        from memory.behavioral_initiative_state import InitiativeStore
+
+        return {
+            "candidates": candidates,
+            "count": len(candidates),
+            "summary": summary,
+            "initiative": InitiativeStore(os.path.join(BASE_DIR, "behavioral_initiative_state.json")).load_diagnostics(),
+        }
+    except Exception:
+        return {
+            "candidates": [],
+            "count": 0,
+            "error": _api_internal_error("debug_behavioral_patterns"),
+        }
 
 
 @server.get("/debug")

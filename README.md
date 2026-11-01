@@ -4,14 +4,15 @@
 
 ### Your own proactive AI assistant, running from your computer.
 
-**Download it, start it with Docker, choose your AI provider, and chat through the Web UI or Telegram.**
+**Download it, start it with Docker, choose your AI provider, and chat through the Web UI and your selected external app: Telegram or Element / Matrix.**
 
-Astakos remembers useful context, learns recurring routines, follows up naturally, creates files, uses tools, and keeps its long-term memory and runtime state on your machine.
+Astakos remembers useful context, learns recurring routines, follows up naturally, creates files and images, uses tools, supports Jarvis-style live voice, and keeps its long-term memory and runtime state on your machine.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Docker](https://img.shields.io/badge/Docker-Automatic_Updates-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-FF6B6B?style=for-the-badge&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/alexneverland/badge.svg)](https://hub.xerj.org/contributors/alexneverland.html)
 
 [**Latest Release & Downloads**](https://github.com/alexneverland/Astakos-AI-Agent/releases/latest) · [Beginner Setup Guide](SETUP_GUIDE.md) · [Screenshots](#screenshots) · [Features](#what-astakos-can-do) · [Architecture](#architecture)
 
@@ -19,11 +20,26 @@ Astakos remembers useful context, learns recurring routines, follows up naturall
 
 ---
 
+## Documentation checkpoint
+
+This README describes **v2.8.0** (2026-10-09), including the fresh-install
+readiness changes from PR #240. Use the versioned release image or ZIP for this
+checkpoint; source `main` may later contain newer changes. See [release notes](CHANGELOG.md),
+[routines and context](docs/routines-and-context.md),
+[data backups](docs/daily-data-backup.md) and the
+[v2.8.0 verification and upgrade notes](docs/release-readiness.md).
+
+Release availability is separate from this documentation checkpoint. Until the
+v2.8.0 tag's publishing workflow succeeds and its GitHub release is published,
+`latest` downloads/images may still provide v2.7.0. Check the
+[v2.8.0 release](https://github.com/alexneverland/Astakos-AI-Agent/releases/tag/v2.8.0)
+before following this version's setup instructions.
+
 ## Recommended: Docker with Automatic Updates
 
 The release deployment uses the official GHCR image and Watchtower. Watchtower checks for a newer image every five minutes, replaces only the application container, and preserves the Astakos data volume.
 
-Download `docker-compose.release.yml` from the **[Latest Release](https://github.com/alexneverland/Astakos-AI-Agent/releases/latest)**, place it in an empty folder, and run:
+Download the `docker-compose.release.yml` asset from the **[Latest Release](https://github.com/alexneverland/Astakos-AI-Agent/releases/latest)**, place it in an empty folder, and run:
 
 ```bash
 docker compose -f docker-compose.release.yml up -d
@@ -37,9 +53,12 @@ http://localhost:8000
 
 The Setup Wizard is local-only by default. Docker keeps port 8000 bound to `127.0.0.1`; do not expose it publicly without a trusted authenticated reverse proxy.
 
-The Web Setup Wizard guides you through provider selection and configuration.
+The Web Setup Wizard guides you through provider selection, configuration, and
+choosing one active external app: Telegram or Element / Matrix. The Web UI stays
+available with either choice; the complete private Matrix and family-room setup
+is in the [Beginner Setup Guide](SETUP_GUIDE.md#external-messaging-telegram-or-element--matrix).
 
-> **Note:** Web/API setup works with only one configured AI provider. Telegram is optional until `TELEGRAM_TOKEN` is configured. Docker can start Astakos in Web/API mode even before Telegram is configured. If `TELEGRAM_TOKEN` is missing, Astakos starts the Web Setup Wizard and Web UI only; Telegram features become available after Telegram is configured.
+> **Note:** Web/API setup works with only one configured AI provider. Telegram is optional until `TELEGRAM_TOKEN` is configured. Docker can start Astakos in Web/API mode even before Telegram is configured. Select Matrix only after its dedicated service account, encrypted room, and persistent crypto store are configured in the Setup Wizard.
 
 > **Vertex AI + Docker note:** if you choose `Vertex AI`, you must mount a real Google service-account JSON file into the container and set `GOOGLE_APPLICATION_CREDENTIALS` to the in-container path. A local Windows/macOS/Linux path by itself is not enough for the release Docker setup.
 
@@ -51,7 +70,17 @@ The Web Setup Wizard guides you through provider selection and configuration.
 - logs, uploads, generated files, backups, and runtime data
 - credentials and OAuth token files
 
-The release image refreshes application code while keeping those user-owned files in the persistent `astakos_data` Docker volume.
+The release image refreshes application code while preserving runtime files in
+`astakos_data`. Host credentials remain in the mounted `credentials/` directory;
+Google Workspace OAuth tokens use the separate `astakos_workspace` volume.
+Persistence through an update is not a backup. The Windows
+[data-only backup](docs/daily-data-backup.md) and
+[encrypted Matrix backup](docs/matrix-backup-recovery.md) are separate operator
+workflows, with different inventories and recovery requirements.
+
+Optional background Android GPS through OwnTracks is available in source:
+[private Tailscale setup and phone configuration](docs/owntracks-location.md).
+This Unreleased feature is not yet included in the published v2.8.0 image.
 
 ### Useful release commands
 
@@ -112,12 +141,13 @@ Most assistants wait for a prompt, forget the conversation, and start from zero 
 | | Astakos |
 |---|---|
 | **Runs from your computer** | Long-term memory, databases, routines, logs, settings, and uploads remain in your local runtime storage. |
-| **Remembers across channels** | Telegram and Web UI share conversation history and long-term context. |
+| **Remembers across channels** | Web, Telegram, and Matrix share conversation history and long-term context. |
 | **Learns routines** | It detects recurring habits and can remind you before they happen. |
 | **Follows up naturally** | It can revisit purchases, outings, tasks, and goals when a follow-up still makes sense. |
 | **Uses real tools** | Files, Gmail, Calendar, web research, GitHub, local projects, reminders, and more. |
 | **Asks before risky actions** | SAFE, WARNING, NOTIFY, and CRITICAL approval levels control execution. |
 | **Works with multiple providers** | Vertex AI, Gemini API, OpenAI, and Anthropic. |
+| **Talks hands-free** | Live Voice waits for your chosen wake name, then continues the conversation naturally. |
 
 Astakos combines memory, agents, schedulers, approvals, analytics, and tools into one local-first system.
 
@@ -143,12 +173,26 @@ Astakos combines memory, agents, schedulers, approvals, analytics, and tools int
 
 ### Memory and proactive assistance
 
-- Shared Telegram and Web conversation history in SQLite.
+- Shared Web, Telegram, and Matrix conversation history in SQLite.
+- Web messages are mirrored to the selected external app; original attachments and generated files are not copied between apps.
 - ChromaDB semantic memory for facts, goals, sessions, documents, and photos.
+- Source maintenance follows the [reviewed memory cleanup procedure](docs/memory-maintenance.md).
 - Hybrid recall combining recent context, SQLite history, and semantic memory.
-- Recurring-routine learning with context-aware reminders and adaptive anti-spam cooldowns.
+- Trusted behavioral observations and specific entity/action patterns supporting ordinary conversational comments and guarded spontaneous openers, with Debug evidence and topic preferences.
+- Semantic reassessment of related context flags using current owner reports and bounded history, with event-time, provenance and stale-write safeguards.
+- Context-aware routines, clarification questions and optional notes when a routine action is blocked.
+- Dated routine delivery, acknowledgement and completion with separate silence/refusal backoff, with dated storage provisioned by normal startup. See [activation and status meanings](docs/routines-and-context.md).
 - Delayed conversational follow-ups that cancel when the topic is already resolved.
-- Long-term goal tracking and follow-up after inactivity.
+- Conversational partial goal updates and follow-ups based on recent relevant activity.
+  In Unreleased source, Chat/Web draft preparation also retains the existing
+  milestone updater for an independent owner progress report in the same message.
+  Scores are milestone results, not completion percentages; Debug and goal
+  follow-ups read those updated milestones alongside the original goal description.
+  If earlier external content requires approval for the goal update, an
+  independently authorized local draft can still be prepared; its confirmation
+  and the pending goal approval are reported separately.
+  Editing an active Messenger draft remains isolated, and sending keeps its
+  separate approval boundary.
 
 ### Multi-agent tools
 
@@ -156,15 +200,34 @@ LangGraph routes work to specialized Chat, Home, Web, Tech, Git, Mail, and Dev a
 
 - Gmail search, reading, drafting, and sending
 - Google Calendar and Drive workflows
-- web research, weather, places, and navigation
+- multi-result web research with Reddit, YouTube and LinkedIn evidence, recent-date filtering where supported, source links and supplied-link failure handling
+- weather, places, and navigation
 - local project and GitHub actions
-- reminders, routines, files, documents, images, voice, receipts, stories, and health summaries
+- bounded reading of explicitly approved local projects
+- provider-aware image generation and voice input/output
+- reminders, routines, native file/document workflows with Office CLI support, receipts, stories, and health summaries
+- approved terminal-result continuation and read-only bug diagnosis separated from code repair
+
+### Live Voice
+
+Select **LIVE** in the Web UI to enter hands-free mode. While in standby,
+Astakos waits for the wake name configured in the Setup Wizard (for example,
+“Astakos”). After waking, you can continue the conversation without repeating
+the name before every sentence. Astakos pauses microphone capture while its own
+reply is playing so background audio does not interrupt it.
 
 ### Planning and safety
 
 Planner v2 supports automatic multi-step detection, confirmation before execution, progress reporting, validation, re-planning, and final reflection.
 
-Astakos includes SAFE, WARNING, NOTIFY, and CRITICAL action levels, approval expiry, terminal-command protection, execution traces, tool statistics, `/doctor`, and runtime dashboards.
+Astakos includes SAFE, WARNING, NOTIFY, and CRITICAL action levels, approval expiry, terminal-command protection, provenance handling for external content, execution traces, tool statistics, `/doctor`, and runtime dashboards.
+
+The Home Agent can save named locations from fresh GPS alongside configured
+home/work. Matrix, Web and Telegram share diagnostic execution traces and print
+correlated agent/tool/result/timing evidence in their terminals with redacted previews. See
+[known places and execution evidence](docs/known-places-and-traces.md).
+Text-turn latency traces also show pre-graph processing, provider/model calls,
+retry backoffs and named stages in the debug panel and terminal.
 
 ---
 
@@ -188,6 +251,30 @@ You control the machine, credentials, enabled integrations, and stored runtime s
 | Vertex AI | Google credentials JSON, project ID, and location |
 
 Only one provider is required to start.
+
+Semantic memory is configured independently in the Setup Wizard. Leave **Embeddings Provider** on **Auto** for Gemini API, OpenAI, or Vertex AI. Anthropic needs a separate Vertex, Gemini, OpenAI, or manually prepared Local E5 embeddings backend for long-term semantic memory. The complete choices, Google Workspace connection, and provider-switch behavior are in the [Beginner Setup Guide](SETUP_GUIDE.md).
+
+Voice is configured independently too. Leave **Voice Provider** on **Auto** to
+reuse Vertex AI, Gemini API, or OpenAI chat credentials. If Anthropic is your
+chat provider, select Vertex AI, Gemini API, or OpenAI for voice and provide
+that provider's credential. Vertex speech output uses Google Cloud
+Text-to-Speech, so that API must be enabled for the configured Google Cloud
+project. Gemini API and OpenAI voice use their corresponding API keys.
+
+### Optional Gemini model selection
+
+Gemini API and Vertex AI use `gemini-3.5-flash` for everyday interactions and
+`gemini-3.1-pro-preview` for heavier reasoning by default. To test a newer
+Google model without changing the shared defaults, set only the model you want
+to override in your local `.env`:
+
+```env
+ASTAKOS_GEMINI_FAST_MODEL=gemini-3.7-flash
+```
+
+Remove that line (or leave it blank) and restart Astakos to return immediately
+to the tested default. `ASTAKOS_GEMINI_HEAVY_MODEL` is available separately,
+but should normally be left unset.
 
 ### Vertex AI with Docker
 
@@ -259,7 +346,7 @@ See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for full instructions.
 ## Architecture
 
 ```text
- Telegram Bot          Web UI             CLI
+ Telegram / Matrix     Web UI             CLI
       │                   │                │
       └──────────── Shared conversation ───┘
                           │
@@ -286,14 +373,14 @@ See **[SETUP_GUIDE.md](SETUP_GUIDE.md)** for full instructions.
 
 ## Releases and Docker Images
 
-Every `v*` Git tag triggers GitHub Actions to build multi-architecture images for AMD64 and ARM64:
+Every `v*` Git tag triggers GitHub Actions to validate the tag against `VERSION` and build multi-architecture images for AMD64 and ARM64:
 
 ```text
 ghcr.io/alexneverland/astakos-ai-agent:<version>
 ghcr.io/alexneverland/astakos-ai-agent:latest
 ```
 
-The release compose file tracks `latest`; Watchtower downloads a new image and restarts Astakos automatically. Versioned tags remain available for users who prefer pinned deployments.
+The release compose file tracks `latest`; Watchtower downloads a new image and restarts Astakos automatically. Versioned tags remain available for users who prefer pinned deployments. Manual dispatch of the publishing workflow also updates `latest`; it is a publication action, not a preview. See [release readiness](docs/release-readiness.md) for the current proposal and upgrade gates.
 
 ---
 
@@ -301,10 +388,19 @@ The release compose file tracks `latest`; Watchtower downloads a new image and r
 
 MIT — see [LICENSE](LICENSE).
 
+Copyright (c) 2026 Lazaros Avramidis (alexneverland). Third-party components
+retain their own licenses and attribution notices.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the fork/PR workflow and offline
+verification requirements. Report security issues privately as described in
+[SECURITY.md](SECURITY.md).
+
 <div align="center">
 
 *Built with care by a Maker, for Makers.*
 
-**[alexneverland](https://github.com/alexneverland)**
+**[Lazaros Avramidis (alexneverland)](https://github.com/alexneverland)**
 
 </div>

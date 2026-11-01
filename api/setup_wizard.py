@@ -1,11 +1,15 @@
 import os
+import threading
+import time
+import math
+import re
+from urllib.parse import urlparse
+
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import threading
-import time
 
 app = FastAPI(title="Astakos Setup Wizard")
 
@@ -19,6 +23,8 @@ PERSONA_FILE = os.path.join(BASE_DIR, "persona.md")
 PERSONA_EXAMPLE = os.path.join(BASE_DIR, "persona.md.example")
 INTENTS_FILE = os.path.join(BASE_DIR, "astakos_custom_intents.json")
 INTENTS_EXAMPLE = os.path.join(BASE_DIR, "astakos_custom_intents.json.example")
+ROUTINES_FILE = os.path.join(BASE_DIR, "astakos_routines.json")
+ROUTINES_EXAMPLE = os.path.join(BASE_DIR, "astakos_routines.json.example")
 SETUP_GUIDE_FILE = os.path.join(BASE_DIR, "SETUP_GUIDE.md")
 
 SETTINGS_FILE = os.path.join(BASE_DIR, "astakos_settings.json")
@@ -26,9 +32,233 @@ SETTINGS_EXAMPLE = os.path.join(BASE_DIR, "astakos_settings.json.example")
 PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")
 
 class SetupPayload(BaseModel):
+    """Validated data submitted by the local Setup Wizard."""
+
     basic: dict
     advanced: dict
     prompts: dict
+    routines: str = ""
+
+_SENSITIVE_ENV_KEYS = frozenset({
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "TELEGRAM_TOKEN",
+    "TELEGRAM_CHAT_ID",
+    "MATRIX_ACCESS_TOKEN",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "SPOTIFY_CLIENT_SECRET",
+    "SPOTIFY_CLIENT_ID",
+    "SPOTIPY_CLIENT_SECRET",
+    "SPOTIPY_CLIENT_ID",
+    "GITHUB_TOKEN",
+    "EMAIL_PASSWORD",
+    "VACUUM_TOKEN",
+    "LINKEDIN_TOKEN",
+    "GOOGLE_PLACES_API_KEY",
+})
+
+_OPTIONAL_ENV_FIELDS = {
+    "project_id": "PROJECT_ID", "vertex_location": "LOCATION",
+    "github_token": "GITHUB_TOKEN", "vacuum_ip": "VACUUM_IP",
+    "vacuum_token": "VACUUM_TOKEN", "linkedin_token": "LINKEDIN_TOKEN",
+    "spotify_client_id": "SPOTIPY_CLIENT_ID", "spotify_client_secret": "SPOTIPY_CLIENT_SECRET",
+    "spotify_redirect_uri": "SPOTIPY_REDIRECT_URI", "google_places_api_key": "GOOGLE_PLACES_API_KEY",
+}
+
+_PROVIDER_SECRET_KEYS = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "vertex": "GOOGLE_APPLICATION_CREDENTIALS",
+}
+
+
+def _validate_guided_settings(settings: dict) -> None:
+    """Validate optional structured location and backup fields before any write."""
+    for key in ("home_coords", "work_coords"):
+        if key not in settings:
+            continue
+        coordinates = settings[key]
+        if (not isinstance(coordinates, (list, tuple)) or len(coordinates) != 2
+                or any(type(value) not in (int, float) or not math.isfinite(value) for value in coordinates)
+                or not -90 <= coordinates[0] <= 90 or not -180 <= coordinates[1] <= 180):
+            raise HTTPException(status_code=422, detail=f"Invalid {key}: enter latitude and longitude.")
+    for key in ("home_radius_m", "work_radius_m"):
+        if key in settings and (type(settings[key]) not in (int, float)
+                or not math.isfinite(settings[key]) or settings[key] <= 0):
+            raise HTTPException(status_code=422, detail=f"Invalid {key}: use a positive radius in metres.")
+    folder = settings.get("backup_drive_folder_id")
+    if folder is not None and (not isinstance(folder, str)
+            or (folder and not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", folder))):
+        raise HTTPException(status_code=422, detail="Enter a Drive folder ID, not a URL, for backups.")
+
+
+def _office_setup_status() -> dict[str, object]:
+    """Report local provisioning without executing a binary or contacting upstream."""
+    from services.officecli_installation import VERSION, verified_officecli_path
+    verified = verified_officecli_path(BASE_DIR) is not None
+    return {"present": verified, "version": VERSION if verified else None}
+
+_MATRIX_ENV_FIELDS = {
+    "matrix_homeserver_url": "MATRIX_HOMESERVER_URL",
+    "matrix_service_user_id": "MATRIX_SERVICE_USER_ID",
+    "matrix_access_token": "MATRIX_ACCESS_TOKEN",
+    "matrix_allowed_user_id": "MATRIX_ALLOWED_USER_ID",
+    "matrix_allowed_device_ids": "MATRIX_ALLOWED_DEVICE_IDS",
+    "matrix_room_id": "MATRIX_ROOM_ID",
+    "matrix_store_path": "MATRIX_STORE_PATH",
+}
+
+
+def _resolve_provider_secrets(basic: dict) -> dict[str, str]:
+    """Return one unambiguous submitted credential for each selected provider."""
+    provider_values: dict[str, set[str]] = {}
+    selections = (
+        (basic.get("llm_provider"), basic.get("api_key")),
+        (basic.get("embeddings_provider"), basic.get("embeddings_api_key")),
+        (basic.get("voice_provider"), basic.get("voice_api_key")),
+    )
+
+    for provider, value in selections:
+        if provider not in _PROVIDER_SECRET_KEYS or not value or value == "********":
+            continue
+        provider_values.setdefault(provider, set()).add(value)
+
+    if any(len(values) > 1 for values in provider_values.values()):
+        raise HTTPException(
+            status_code=422,
+            detail="Services sharing a provider must use the same credential.",
+        )
+
+    return {
+        _PROVIDER_SECRET_KEYS[provider]: next(iter(values))
+        for provider, values in provider_values.items()
+    }
+
+
+def _parse_env_text(raw_env: str) -> dict[str, str]:
+    """Parse simple KEY=VALUE lines from Setup Wizard environment text."""
+    parsed: dict[str, str] = {}
+    for line in raw_env.splitlines():
+        if "=" in line and not line.strip().startswith("#"):
+            key, value = line.split("=", 1)
+            parsed[key.strip()] = value.strip()
+    return parsed
+
+
+def _validate_external_channel_setup(
+    basic: dict,
+    submitted_env: dict[str, str],
+    existing_env: dict[str, str],
+) -> str:
+    """Validate the selected external transport before writing configuration."""
+    from core.messaging_channel import (
+        ExternalChannelConfigurationError,
+        resolve_external_channel,
+    )
+
+    raw_channel = (
+        basic.get("external_channel")
+        or submitted_env.get("ASTAKOS_EXTERNAL_CHANNEL")
+        or existing_env.get("ASTAKOS_EXTERNAL_CHANNEL")
+    )
+    try:
+        channel = resolve_external_channel(raw_channel)
+    except ExternalChannelConfigurationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    if channel != "matrix":
+        return channel
+
+    def _effective(field: str) -> str:
+        env_key = _MATRIX_ENV_FIELDS[field]
+        submitted = str(basic.get(field, "")).strip()
+        if submitted and submitted != "********":
+            return submitted
+        raw_value = submitted_env.get(env_key, "").strip()
+        if raw_value and raw_value != "********":
+            return raw_value
+        return existing_env.get(env_key, "").strip()
+
+    values = {field: _effective(field) for field in _MATRIX_ENV_FIELDS}
+    missing = [field for field, value in values.items() if not value]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail="Matrix setup is incomplete. Fill every required Matrix field.",
+        )
+
+    homeserver = urlparse(values["matrix_homeserver_url"])
+    if homeserver.scheme not in {"http", "https"} or not homeserver.netloc:
+        raise HTTPException(
+            status_code=422,
+            detail="Matrix homeserver must be a valid HTTP or HTTPS URL.",
+        )
+    loopback_hosts = {"localhost", "127.0.0.1", "::1"}
+    if homeserver.scheme != "https" and homeserver.hostname not in loopback_hosts:
+        raise HTTPException(
+            status_code=422,
+            detail="Remote Matrix homeserver URLs must use HTTPS.",
+        )
+
+    for field, label in (
+        ("matrix_service_user_id", "Matrix service user ID"),
+        ("matrix_allowed_user_id", "Matrix allowed user ID"),
+    ):
+        value = values[field]
+        if not value.startswith("@") or ":" not in value[1:]:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{label} must use the full @user:server format.",
+            )
+
+    room_id = values["matrix_room_id"]
+    if not room_id.startswith("!") or ":" not in room_id[1:]:
+        raise HTTPException(
+            status_code=422,
+            detail="Matrix room ID must use the full !room:server format.",
+        )
+
+    device_ids = [
+        value.strip()
+        for value in values["matrix_allowed_device_ids"].split(",")
+        if value.strip()
+    ]
+    if not device_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="Add at least one trusted owner Device ID from Element.",
+        )
+
+    return channel
+
+def sanitize_env_text(raw_env: str) -> str:
+    """Masks secret values in .env so raw keys/tokens are never exposed over the API/UI."""
+    if not raw_env:
+        return ""
+    lines = []
+    for line in raw_env.splitlines():
+        trimmed = line.strip()
+        if trimmed and not trimmed.startswith("#") and "=" in line:
+            key, val = line.split("=", 1)
+            key_clean = key.strip()
+            val_clean = val.strip()
+            if (
+                key_clean in _SENSITIVE_ENV_KEYS
+                or key_clean.endswith("_KEY")
+                or key_clean.endswith("_SECRET")
+                or key_clean.endswith("_TOKEN")
+                or key_clean.endswith("_PASSWORD")
+            ):
+                if val_clean:
+                    lines.append(f"{key_clean}=********")
+                else:
+                    lines.append(f"{key_clean}=")
+                continue
+        lines.append(line)
+    return "\n".join(lines)
 
 def get_file_content(filepath, fallback_filepath=None):
     if os.path.exists(filepath):
@@ -45,124 +275,406 @@ def write_file_content(filepath, content):
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_setup_page():
-    html_path = os.path.join(STATIC_DIR, "setup.html")
-    if os.path.exists(html_path):
-        with open(html_path, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="Error: setup.html not found.")
+    try:
+        html_path = os.path.join(STATIC_DIR, "setup.html")
+        if os.path.exists(html_path):
+            with open(html_path, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="Error: setup.html not found.", status_code=404)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to load setup page.") from None
+
+@app.get("/api/diagnostics")
+async def get_diagnostics():
+    """Returns non-sensitive runtime health and provider readiness."""
+    try:
+        from core.diagnostics import get_system_diagnostics_summary
+        return get_system_diagnostics_summary()
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to retrieve system diagnostics.") from None
+
+@app.post("/api/workspace/connect")
+async def connect_workspace(request: Request):
+    """Explicit user-triggered Google Workspace OAuth authorization."""
+    from core.workspace_oauth import (
+        WorkspaceAuthError,
+        authorize_workspace_oauth,
+        get_workspace_oauth_flow,
+    )
+    try:
+        if os.getenv("ASTAKOS_CONTAINER") == "1":
+            start_res = await start_workspace_oauth(request)
+            return {"status": "redirect", "auth_url": start_res["auth_url"]}
+
+        authorize_workspace_oauth()
+        return {"status": "success", "message": "Google Workspace connected successfully."}
+    except WorkspaceAuthError:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Workspace authorization failed. Please check client_secrets.json and try again.",
+        ) from None
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Google Workspace authorization encountered an internal error.",
+        ) from None
+
+
+@app.get("/api/workspace/oauth/start")
+async def start_workspace_oauth(request: Request):
+    """Starts browser-based OAuth consent flow routed through setup wizard port with CSRF state protection."""
+    from core.workspace_oauth import (
+        WorkspaceAuthError,
+        create_workspace_oauth_authorization_url,
+    )
+    try:
+        base_url = str(request.base_url).rstrip('/')
+        auth_url = create_workspace_oauth_authorization_url(
+            f"{base_url}/api/workspace/oauth/callback",
+        )
+        return {"auth_url": auth_url}
+    except WorkspaceAuthError:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Workspace OAuth client secrets file not found. Please check credentials/client_secrets.json.",
+        ) from None
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to initiate Google Workspace OAuth flow.") from None
+
+
+@app.get("/api/workspace/oauth/callback", response_class=HTMLResponse)
+async def workspace_oauth_callback(request: Request, code: str = "", state: str = ""):
+    """Handles OAuth redirect callback, verifies CSRF state, and persists token.json."""
+    from core.workspace_oauth import (
+        WorkspaceOAuthStateError,
+        WorkspaceOAuthTokenExchangeError,
+        WorkspaceOAuthTokenPersistenceError,
+        complete_workspace_oauth_authorization,
+    )
+    try:
+        base_url = str(request.base_url).rstrip('/')
+        complete_workspace_oauth_authorization(
+            f"{base_url}/api/workspace/oauth/callback",
+            code,
+            state,
+        )
+        return HTMLResponse(
+            """<!DOCTYPE html>
+<html>
+<head><title>Authorization Successful</title></head>
+<body style="font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:50px 20px;background:#181825;color:#cdd6f4;">
+  <div style="max-width:450px;margin:0 auto;background:#1e1e2e;padding:30px;border-radius:12px;border:1px solid #313244;">
+    <h2 style="color:#a6e3a1;margin-top:0;">✅ Google Workspace Connected!</h2>
+    <p style="color:#bac2de;font-size:14px;line-height:1.5;">Your authorization token has been saved successfully.</p>
+    <p style="color:#6c7086;font-size:12px;">This window will close automatically...</p>
+  </div>
+  <script>
+    if (window.opener) {
+      try { window.opener.postMessage("oauth_complete", "*"); } catch(e) {}
+    }
+    setTimeout(() => window.close(), 1500);
+  </script>
+</body>
+</html>"""
+        )
+    except WorkspaceOAuthStateError:
+        return HTMLResponse(
+            "<h3>Invalid or expired OAuth state. Please restart authorization from the Setup Wizard.</h3>",
+            status_code=400,
+        )
+    except WorkspaceOAuthTokenExchangeError:
+        return HTMLResponse(
+            "<h3>Google could not complete authorization. Please restart connection and finish the Google consent screen.</h3>",
+            status_code=400,
+        )
+    except WorkspaceOAuthTokenPersistenceError:
+        return HTMLResponse(
+            "<h3>Google approved access, but Astakos could not save the token. Please check the local credentials folder permissions.</h3>",
+            status_code=500,
+        )
+    except Exception:
+        return HTMLResponse("<h3>Authorization could not be completed. Please restart connection and try again.</h3>", status_code=400)
+
+
 
 @app.get("/api/raw_files")
 async def get_raw_files():
-    env_content = get_file_content(ENV_FILE)
-    if not env_content:
-        env_content = """# --- LLM Provider Selection ---
+    try:
+        env_content = get_file_content(ENV_FILE)
+        if not env_content:
+            env_content = """# --- LLM Provider Selection ---
 LLM_PROVIDER=openai
+EMBEDDINGS_PROVIDER=auto
+VOICE_PROVIDER=auto
 
 # --- API Keys ---
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 GEMINI_API_KEY=
 
-# --- Core Settings (Google Cloud & Telegram) ---
+# --- Core Settings (Google Cloud & External Messaging) ---
 PROJECT_ID=your-gcp-project-id
 LOCATION=us-central1
+ASTAKOS_EXTERNAL_CHANNEL=telegram
 TELEGRAM_TOKEN=
 TELEGRAM_CHAT_ID=
+MATRIX_HOMESERVER_URL=
+MATRIX_SERVICE_USER_ID=
+MATRIX_ACCESS_TOKEN=
+MATRIX_ALLOWED_USER_ID=
+MATRIX_ROOM_ID=
+MATRIX_STORE_PATH=matrix_store
 """
-    
-    prompts_data = {}
-    if os.path.exists(PROMPTS_DIR):
-        for fname in os.listdir(PROMPTS_DIR):
-            if fname.endswith(".md"):
-                fpath = os.path.join(PROMPTS_DIR, fname)
-                with open(fpath, "r", encoding="utf-8") as f:
-                    prompts_data[f"prompts/{fname}"] = f.read()
-                    
-    import json
-    try:
-        settings_raw = get_file_content(SETTINGS_FILE, SETTINGS_EXAMPLE)
-        settings_json = json.loads(settings_raw) if settings_raw else {}
+
+        prompts_data = {}
+        if os.path.exists(PROMPTS_DIR):
+            for fname in os.listdir(PROMPTS_DIR):
+                if fname.endswith(".md"):
+                    fpath = os.path.join(PROMPTS_DIR, fname)
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        prompts_data[f"prompts/{fname}"] = f.read()
+
+        import json
+        try:
+            settings_raw = get_file_content(SETTINGS_FILE, SETTINGS_EXAMPLE)
+            settings_json = json.loads(settings_raw) if settings_raw else {}
+        except Exception:
+            settings_json = {}
+
+        return {
+            "persona": get_file_content(PERSONA_FILE, PERSONA_EXAMPLE),
+            "intents": get_file_content(INTENTS_FILE, INTENTS_EXAMPLE),
+            "routines": get_file_content(ROUTINES_FILE, ROUTINES_EXAMPLE),
+            "env": sanitize_env_text(env_content),
+            "settings": settings_json,
+            "prompts": prompts_data,
+            "setup_guide": get_file_content(SETUP_GUIDE_FILE),
+            "installation": {"officecli": _office_setup_status()},
+        }
     except Exception:
-        settings_json = {}
-    
-    return {
-        "persona": get_file_content(PERSONA_FILE, PERSONA_EXAMPLE),
-        "intents": get_file_content(INTENTS_FILE, INTENTS_EXAMPLE),
-        "env": env_content,
-        "settings": settings_json,
-        "prompts": prompts_data,
-        "setup_guide": get_file_content(SETUP_GUIDE_FILE)
-    }
+        raise HTTPException(status_code=500, detail="Failed to load configuration files.") from None
 
 @app.post("/api/setup")
 async def save_setup(payload: SetupPayload):
-    adv = payload.advanced
-    basic = payload.basic
-    prompts = payload.prompts
-    
-    # Process ENV
-    new_env = basic.get("env", "").strip()
-    if basic.get("llm_provider") or basic.get("telegram_token"):
-        env_lines = new_env.split('\n') if new_env else []
-        env_map = {}
-        for line in env_lines:
-            if '=' in line and not line.strip().startswith('#'):
-                k, v = line.split('=', 1)
-                env_map[k.strip()] = v.strip()
-        
-        if basic.get("llm_provider"):
-            env_map["LLM_PROVIDER"] = basic["llm_provider"]
-            provider = basic["llm_provider"]
-            if provider == "openai":
-                env_map["OPENAI_API_KEY"] = basic.get("api_key", "")
-            elif provider == "anthropic":
-                env_map["ANTHROPIC_API_KEY"] = basic.get("api_key", "")
-            elif provider == "gemini":
-                env_map["GEMINI_API_KEY"] = basic.get("api_key", "")
-            elif provider == "vertex":
-                env_map["GOOGLE_APPLICATION_CREDENTIALS"] = basic.get("api_key", "")
-                
-        if basic.get("telegram_token"):
-            env_map["TELEGRAM_TOKEN"] = basic["telegram_token"]
-        if basic.get("telegram_chat_id"):
-            env_map["TELEGRAM_CHAT_ID"] = basic["telegram_chat_id"]
-            
-        output_env = ""
-        for k, v in env_map.items():
-            output_env += f"{k}={v}\n"
-        new_env = output_env
+    """Persist validated setup data and import first-run routine declarations once."""
+    try:
+        adv = payload.advanced
+        basic = payload.basic
+        for field in _OPTIONAL_ENV_FIELDS:
+            if field in basic and (not isinstance(basic[field], str)
+                                  or any(char in basic[field] for char in "\r\n\0")):
+                raise HTTPException(status_code=422, detail="Invalid integration setting.")
+        prompts = payload.prompts
+        routines_text = payload.routines.strip()
+        if "settings" in basic:
+            if not isinstance(basic["settings"], dict):
+                raise HTTPException(status_code=422, detail="Settings must be an object.")
+            _validate_guided_settings(basic["settings"])
+        validated_routines: list[dict[str, str]] | None = None
 
-    write_file_content(ENV_FILE, new_env)
-    
-    # Write Settings
-    import json
-    if basic.get("settings"):
-        write_file_content(SETTINGS_FILE, json.dumps(basic["settings"], indent=4))
-    
-    # Write other basics
-    if basic.get("persona"):
-        write_file_content(PERSONA_FILE, basic["persona"])
-    if basic.get("intents"):
-        write_file_content(INTENTS_FILE, basic["intents"])
-        
-    # Write prompts
-    for p_path, content in prompts.items():
-        if p_path.startswith("prompts/") and p_path.endswith(".md"):
-            fname = os.path.basename(p_path)
-            if fname in ("", ".", "..") or fname != p_path.removeprefix("prompts/"):
-                continue
-            full_path = os.path.join(PROMPTS_DIR, fname)
-            write_file_content(full_path, content)
+        if routines_text:
+            from memory.routine_importer import RoutineImportError, validate_routine_import_text
 
-    def shutdown():
-        time.sleep(2)
-        os._exit(0)
-    
-    threading.Thread(target=shutdown).start()
+            try:
+                validated_routines = validate_routine_import_text(routines_text)
+            except RoutineImportError:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Routine validation failed. Please check routine definitions.",
+                ) from None
 
-    return {"status": "success"}
+        # Process ENV
+        new_env = basic.get("env", "").strip()
+        existing_env_raw = get_file_content(ENV_FILE)
+        existing_env_map: dict[str, str] = {}
+        if existing_env_raw:
+            existing_env_map = _parse_env_text(existing_env_raw)
+
+        submitted_env_map = _parse_env_text(new_env)
+        external_channel = _validate_external_channel_setup(
+            basic,
+            submitted_env_map,
+            existing_env_map,
+        )
+
+        env_map: dict[str, str] = {}
+        if (
+            basic.get("llm_provider")
+            or basic.get("embeddings_provider")
+            or basic.get("voice_provider")
+            or basic.get("telegram_token")
+            or basic.get("external_channel")
+            or basic.get("matrix_access_token")
+            or any(field in basic for field in _OPTIONAL_ENV_FIELDS)
+            or new_env
+        ):
+            env_map.update(submitted_env_map)
+
+            # Merge unmentioned existing env keys
+            for k, v in existing_env_map.items():
+                if k not in env_map:
+                    env_map[k] = v
+
+            def _set_secret(key: str, new_val: str | None) -> None:
+                """
+                Sets a configuration secret in the environment map while preserving existing masked values.
+
+                If `new_val` is provided and is not the mask placeholder '********', updates `env_map[key]`.
+                If `new_val` is empty or '********', retains the previously stored value from `existing_env_map`.
+                """
+                if new_val and new_val != "********":
+                    env_map[key] = new_val
+                elif key not in env_map and key in existing_env_map:
+                    env_map[key] = existing_env_map[key]
+                elif env_map.get(key) == "********":
+                    env_map[key] = existing_env_map.get(key, "")
+
+            provider_secrets = _resolve_provider_secrets(basic)
+            for field, key in _OPTIONAL_ENV_FIELDS.items():
+                if field not in basic:
+                    continue
+                value = basic[field].strip()
+                if key in _SENSITIVE_ENV_KEYS:
+                    _set_secret(key, value)
+                elif value:
+                    env_map[key] = value
+                else:
+                    # Explicit guided clearing overrides old and raw-editor values.
+                    env_map.pop(key, None)
+
+            if basic.get("llm_provider"):
+                env_map["LLM_PROVIDER"] = basic["llm_provider"]
+
+            if basic.get("embeddings_provider"):
+                env_map["EMBEDDINGS_PROVIDER"] = basic["embeddings_provider"]
+
+            if basic.get("voice_provider"):
+                env_map["VOICE_PROVIDER"] = basic["voice_provider"]
+
+            selected_secret_keys = {
+                _PROVIDER_SECRET_KEYS[provider]
+                for provider in (
+                    basic.get("llm_provider"),
+                    basic.get("embeddings_provider"),
+                    basic.get("voice_provider"),
+                )
+                if provider in _PROVIDER_SECRET_KEYS
+            }
+            for secret_key in selected_secret_keys:
+                _set_secret(secret_key, provider_secrets.get(secret_key))
+
+            if basic.get("telegram_token"):
+                _set_secret("TELEGRAM_TOKEN", basic["telegram_token"])
+            if basic.get("telegram_chat_id"):
+                _set_secret("TELEGRAM_CHAT_ID", basic["telegram_chat_id"])
+
+            env_map["ASTAKOS_EXTERNAL_CHANNEL"] = external_channel
+            _set_secret("MATRIX_ACCESS_TOKEN", basic.get("matrix_access_token"))
+            for field, env_key in _MATRIX_ENV_FIELDS.items():
+                if field == "matrix_access_token":
+                    continue
+                value = str(basic.get(field, "")).strip()
+                if value:
+                    env_map[env_key] = value
+
+            # If Vertex is selected anywhere, resolve the project ID from its credentials.
+            if (
+                env_map.get("LLM_PROVIDER") == "vertex"
+                or env_map.get("EMBEDDINGS_PROVIDER") == "vertex"
+                or env_map.get("VOICE_PROVIDER") == "vertex"
+            ):
+                current_proj = env_map.get("PROJECT_ID", "").strip()
+                if not current_proj or current_proj.lower() == "your-gcp-project-id":
+                    from core.ai_provider import resolve_vertex_project_id
+                    cred_target = env_map.get("GOOGLE_APPLICATION_CREDENTIALS")
+                    resolved_proj = resolve_vertex_project_id(cred_file=cred_target)
+                    if resolved_proj and resolved_proj.lower() != "your-gcp-project-id":
+                        env_map["PROJECT_ID"] = resolved_proj
+
+            # Resolve any remaining masked keys
+            for k, v in list(env_map.items()):
+                if v == "********":
+                    env_map[k] = existing_env_map.get(k, "")
+
+            output_env = ""
+            for k, v in env_map.items():
+                output_env += f"{k}={v}\n"
+            new_env = output_env
+        else:
+            env_map = dict(existing_env_map)
+
+        write_file_content(ENV_FILE, new_env)
+
+        # Write Settings (preserve unedited existing settings while removing cleared child names)
+        import json
+        if basic.get("settings") is not None:
+            existing_settings_raw = get_file_content(SETTINGS_FILE)
+            try:
+                existing_settings = json.loads(existing_settings_raw) if existing_settings_raw else {}
+            except Exception:
+                existing_settings = {}
+            merged_settings = {**existing_settings, **basic["settings"]}
+            if "kid1_name" not in basic["settings"]:
+                merged_settings.pop("kid1_name", None)
+            if "kid2_name" not in basic["settings"]:
+                merged_settings.pop("kid2_name", None)
+            write_file_content(SETTINGS_FILE, json.dumps(merged_settings, indent=4))
+
+
+        # Write other basics
+        if basic.get("persona"):
+            write_file_content(PERSONA_FILE, basic["persona"])
+        if basic.get("intents"):
+            write_file_content(INTENTS_FILE, basic["intents"])
+
+        routine_import: dict[str, int | str] | None = None
+        if routines_text and validated_routines is not None:
+            write_file_content(ROUTINES_FILE, f"{routines_text}\n")
+            try:
+                from memory.routine_importer import RoutineImportError, import_validated_routines
+
+                routine_import = import_validated_routines(validated_routines)
+            except RoutineImportError:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Routine validation failed. Please check routine definitions.",
+                ) from None
+
+        # Write prompts
+        for p_path, content in prompts.items():
+            if p_path.startswith("prompts/") and p_path.endswith(".md"):
+                fname = os.path.basename(p_path)
+                if fname in ("", ".", "..") or fname != p_path.removeprefix("prompts/"):
+                    continue
+                full_path = os.path.join(PROMPTS_DIR, fname)
+                write_file_content(full_path, content)
+
+        from core.diagnostics import get_system_diagnostics_summary
+        diagnostics = get_system_diagnostics_summary(
+            chat_provider=basic.get("llm_provider"),
+            embeddings_provider=basic.get("embeddings_provider"),
+            env_snapshot=env_map,
+        )
+
+        def shutdown():
+            time.sleep(2)
+            os._exit(0)
+
+        threading.Thread(target=shutdown).start()
+
+        return {
+            "status": "success",
+            "routine_import": routine_import,
+            "diagnostics": diagnostics,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to persist setup configuration.") from None
+
 
 def run_wizard():
+
     host = os.getenv("ASTAKOS_SETUP_HOST", "127.0.0.1")
     port = int(os.getenv("ASTAKOS_SETUP_PORT", "8000"))
     print(f"Setup Wizard: http://{host}:{port}")

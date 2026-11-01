@@ -13,16 +13,29 @@ env/
 
 # Environment files
 .env
+.env.*
+!.env.example
 credentials/
+credentials.json
+token.json
+local_only/
 persona.md
 astakos_settings.json
 astakos_custom_intents.json
+astakos_routines.json
 .astakos_token
 .calendar_briefing_sent
 .ai_briefing_sent
 .fit_briefing_sent
 .goal_followup_sent
 run_telegram.lock
+run_matrix.lock
+matrix_store/
+matrix_media/
+scheduler_state.json
+astakos_pending_approval.json
+astakos_pending_approval.json.lock
+.approval-*.tmp
 last_location.json
 linkedin_draft.json
 runtime_snapshot.json
@@ -34,7 +47,11 @@ agent-permissions.json
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 chroma_db/
+chroma_db - Copy/
+.vscode/chroma_db/
 logs/
 telegram_photos/
 telegram_uploads/
@@ -44,9 +61,37 @@ tmp/
 _cleaner_backups/
 .pytest_cache/
 .pytest_tmp/
+.pytest_tmp*/
 __pycache__/
 *.backup
+debug_voice.webm
+astakos_skills/messenger_profile/
 
 # MacOS
 .DS_Store
 .hn_briefing_sent
+# Native tools are provisioned for the image's target platform during build.
+vendor/officecli/*.exe
+vendor/officecli/officecli
+vendor/officecli/.officecli-install-*/
+
+# Only versioned source JSON belongs in a distributable image.
+**/*.json
+**/*.jsonl
+**/*.ndjson
+!astakos_context_schema.json
+!astakos_nlp.json
+!core/capability_registry.json
+!core/intents_*.json
+!locales/*.json
+!vendor/agent-skills/*.json
+!vendor/agent-skills/**/*.json
+!data/routine_tokens.json
+backups/
+.cache/
+*.lock
+.daily-backup-*
+.matrix-backup-*
+.behavioral-*
+.pytest_temp*/
+bootstrap_*.log

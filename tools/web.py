@@ -1,7 +1,8 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 import config
@@ -16,10 +17,11 @@ import html
 import xml.etree.ElementTree as ET
 from config import NLP_CONFIG
 from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 from typing import Annotated
 from playwright.sync_api import sync_playwright
-from services.messenger_intent import classify_messenger_intent
 from core.messenger_draft import active_draft_status
+from core.utils import WEB_SEARCH_UNVERIFIED_LINKS_MARKER
 try:
     from playwright_stealth import stealth_sync
 except ImportError:
@@ -46,6 +48,16 @@ def _greek_to_latin(s: str) -> str:
     """
     _MAP = NLP_CONFIG.get("general", {}).get("greek_to_latin_map", {})
     return ''.join(_MAP.get(c, c) for c in s.lower())
+
+
+def _messenger_target_aliases(target_entity: str) -> set[str]:
+    """Return normalized Greek and Latin aliases for one Messenger recipient."""
+    normalized = remove_accents(str(target_entity or "").strip())
+    if not normalized:
+        return set()
+    latin = _greek_to_latin(normalized)
+    phonetic = lambda value: value.replace("ph", "f").replace("ck", "k")
+    return {normalized, latin, phonetic(normalized), phonetic(latin)}
 
 
 _AMBIGUOUS_MESSENGER_TARGETS = set(NLP_CONFIG.get("web", {}).get("ambiguous_messenger_targets", []))
@@ -82,41 +94,93 @@ def _load_messenger_contacts() -> dict[str, str]:
         return {}
 
 
-def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
+def _resolve_messenger_target(
+    target_entity: str,
+    *,
+    contacts: dict[str, str] | None = None,
+) -> tuple[str | None, str]:
+    """Resolve a supplied recipient to the canonical Messenger destination."""
     target = (target_entity or "").strip()
     normalized = remove_accents(target)
     if not target:
-        return False, "missing target"
+        return None, "missing target"
     if normalized in _AMBIGUOUS_MESSENGER_TARGETS:
-        return False, f"ambiguous target '{target_entity}'"
+        return None, f"ambiguous target '{target_entity}'"
     if target.startswith("http") or target.isdigit():
-        return True, "direct target"
+        return target, "direct target"
 
+    contacts = contacts if contacts is not None else _load_messenger_contacts()
+    target_aliases = _messenger_target_aliases(target)
+    for alias in contacts:
+        alias_forms = _messenger_target_aliases(alias)
+        if target_aliases & alias_forms:
+            return str(contacts[alias]), "known contact"
+        if any(
+            candidate and (candidate in other or other in candidate)
+            for candidate in target_aliases
+            for other in alias_forms
+        ):
+            return str(contacts[alias]), "known contact"
+    return None, f"unknown Messenger contact '{target_entity}'"
+
+
+def _messenger_target_status(target_entity: str) -> tuple[bool, str]:
+    """Return whether one recipient resolves to a safe Messenger destination."""
+    destination, reason = _resolve_messenger_target(target_entity)
+    return destination is not None, reason
+
+
+def has_known_messenger_contact_reference(text: str) -> bool:
+    """Return whether text contains a recipient accepted by the canonical resolver."""
+    raw_text = str(text or "").strip()
+    if not raw_text:
+        return False
     contacts = _load_messenger_contacts()
-    # 1) Exact match (accent-normalized)
-    if normalized in contacts:
-        return True, "known contact"
-    # 2) Partial alias match
-    if any(alias and (alias in normalized or normalized in alias) for alias in contacts):
-        return True, "known contact"
-    # 3) Greek↔Latin transliteration fallback:
-    #    If the query is in Latin characters (e.g. "Sophia"), transliterate the Greek contact keys
-    #    and compare. Also, "ph" → "f" phonetic equivalence (sophia → sofia).
-    _is_latin_query = all(ord(c) < 0x0370 or c.isdigit() or not c.isalpha() for c in normalized)
-    if _is_latin_query:
-        # phonetic variants: ph→f, ck→k, c→k (before a/o/u/l/r)
-        def _phonetic(s: str) -> str:
-            s = s.replace("ph", "f").replace("ck", "k").replace("th", "th")
-            return s
-        normalized_ph = _phonetic(normalized)
-        for alias in contacts:
-            alias_latin = _greek_to_latin(alias)
-            alias_latin_ph = _phonetic(alias_latin)
-            if alias_latin == normalized or alias_latin_ph == normalized_ph:
-                return True, "known contact"
-            if alias_latin in normalized or normalized in alias_latin:
-                return True, "known contact"
-    return False, f"unknown Messenger contact '{target_entity}'"
+    valid_aliases = [
+        alias for alias in contacts
+        if _resolve_messenger_target(alias, contacts=contacts)[1] == "known contact"
+    ]
+
+    text_forms = _messenger_target_aliases(raw_text)
+    if any(
+        re.search(rf"(?<!\w){re.escape(alias_form)}(?!\w)", text_form)
+        for alias in valid_aliases
+        for alias_form in _messenger_target_aliases(alias)
+        for text_form in text_forms
+        if alias_form
+    ):
+        return True
+
+    alias_component_forms = {
+        form
+        for alias in valid_aliases
+        for alias_token in re.findall(r"\w+", alias)
+        for form in _messenger_target_aliases(alias_token)
+    }
+    candidates = [
+        token for token in re.findall(r"\w+", raw_text)
+        if (
+            len(remove_accents(token)) >= 4
+            or (
+                len(remove_accents(token)) == 3
+                and token[:1].isupper()
+                and bool(_messenger_target_aliases(token) & alias_component_forms)
+            )
+        )
+    ]
+    return any(
+        _resolve_messenger_target(candidate, contacts=contacts)[1] == "known contact"
+        for candidate in candidates
+    )
+
+
+def _messenger_targets_match(left: str, right: str) -> bool:
+    """Return whether two recipient spellings resolve to the same destination."""
+    left_destination, _ = _resolve_messenger_target(left)
+    right_destination, _ = _resolve_messenger_target(right)
+    if left_destination is not None and right_destination is not None:
+        return left_destination == right_destination
+    return bool(_messenger_target_aliases(left) & _messenger_target_aliases(right))
 
 
 _CHATBOT_NOISE_PATTERNS = NLP_CONFIG.get("web", {}).get("chatbot_noise_patterns", [])
@@ -255,25 +319,22 @@ def _score_place_match(place: dict, profile: dict) -> float:
 
 
 @tool
-def relay_local_payload(target_entity: str, payload_data: str, image_path: str = "") -> str:
+def relay_local_payload(target_entity: str, payload_data: str, image_path: str = "",
+                        state: Annotated[dict, InjectedState] = None) -> str:
     """
-    Saves a draft Messenger (Facebook) message.
-    Use this WHEN you propose to the user to send a message,
-    before obtaining their final approval.
-    Optionally, provide an image_path to attach an image along with the message.
+    Save a local reviewable Messenger draft requested by the latest owner turn.
+    Use for preparation or revision even inside a mixed conversational request.
+    Resolve target_entity and payload_data from that owner turn and its dialogue.
+    This never sends; show the actual saved receipt before separate send approval.
+    Do not use for declined offers, unrelated chat, quotes or bare send commands.
+    Optionally provide an existing image_path for the requested attachment.
     """
     from core.messenger_draft import save_draft
 
-    ok, reason = _messenger_target_status(target_entity)
-    if not ok:
+    destination, reason = _resolve_messenger_target(target_entity)
+    if destination is None:
         return t("tools.web.msg_draft_err_reason", reason=reason)
     
-    active, _, _ = active_draft_status()
-    intent = classify_messenger_intent(payload_data or "", has_active_draft=active)
-
-    if intent.intent in {"clarify_draft", "clear_draft"}:
-        return t("tools.web.msg_draft_err_clarify")
-
     if not (payload_data or "").strip():
         return t("tools.web.msg_draft_err_empty")
 
@@ -288,7 +349,24 @@ def relay_local_payload(target_entity: str, payload_data: str, image_path: str =
     if not clean_payload:
         return t("tools.web.msg_draft_err_sanitized")
 
-    save_draft(target_entity, clean_payload, image_path=image_path)
+    if state is not None:
+        if state.get("messenger_draft_preparation_authorized") is True:
+            from services.messenger_lifecycle import primary_preparation_available
+            if not primary_preparation_available(state, state.get("messages", [])):
+                return t("tools.web.msg_draft_err_reason", reason="Draft preparation context changed")
+        if state.get("messenger_draft_preparation_authorized") is False:
+            from core.approval import _is_explicit_messenger_draft_creation
+            if not _is_explicit_messenger_draft_creation(
+                {"name": "relay_local_payload", "args": {"target_entity": target_entity,
+                    "payload_data": payload_data, "image_path": image_path}}, state.get("messages", []),
+                routine_draft_offer_authorized=state.get("routine_draft_offer_authorized"),
+                active_draft_edit_context_isolated=state.get("active_draft_edit_context_isolated", False),
+            ):
+                return t("tools.web.msg_draft_err_reason", reason="No current draft preparation request")
+        save_draft(destination, clean_payload, image_path=image_path,
+                   write_guard=state.get("messenger_draft_write_guard", {"valid": False}))
+    else:
+        save_draft(destination, clean_payload, image_path=image_path)
 
     # We return clean output — the display instructions are in prompts.md
     img_info = f"\nimage: {image_path}" if image_path else ""
@@ -500,26 +578,38 @@ def search_goldmall_offers(query: str) -> str:
                 pass
 
 
+_MESSENGER_SEND_SUCCESS_PREFIX = "✅"
+
+
+def messenger_send_result_succeeded(result: object) -> bool:
+    """Return whether ``execute_local_pipeline`` reported a completed send."""
+    return isinstance(result, str) and result.lstrip().startswith(
+        _MESSENGER_SEND_SUCCESS_PREFIX
+    )
+
+
 @tool
-def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
+def execute_local_pipeline(target_name: str = "", message: str = "", expected_draft_revision: str = "") -> str:
     """Sends a message on Facebook Messenger by reading the saved draft.
-    CALL IT ONLY after {config.USER_NAME} confirms with 'yes/send'. WITHOUT ANY ARGUMENTS."""
+    Call only after owner confirmation; leave recipient and message empty.
+    The approval backend binds expected_draft_revision to the observed draft.
+    """
     import time
-    import json
     import os
-    from core.messenger_draft import active_draft_status, inactive_draft_message
-    from config import MESSENGER_DRAFT_FILE
     from playwright.sync_api import sync_playwright
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    draft_file = MESSENGER_DRAFT_FILE
 
     # 1. [MASTRO INTERCEPTOR]: Read the draft
     image_path = ""
+    claimed_revision = ""
     if not target_name or not message:
-        is_active, reason, draft = active_draft_status()
-        if not is_active:
-            return inactive_draft_message(reason)
+        from core.messenger_draft import claim_draft_send
+        try:
+            draft = claim_draft_send(expected_draft_revision)
+        except ValueError as exc:
+            return str(exc)
+        claimed_revision = draft["revision"]
         target_name = target_name or draft.get("target_name", "")
         message = message or draft.get("message", "")
         image_path = draft.get("image_path", "")
@@ -603,11 +693,9 @@ def execute_local_pipeline(target_name: str = "", message: str = "") -> str:
             browser.close()
         except:
             pass
-        if _sent_ok and os.path.exists(draft_file):
-            try:
-                os.remove(draft_file)
-            except OSError as _de:
-                print(f"⚠️ [execute_local_pipeline]: draft delete failed: {_de}")
+        if claimed_revision:
+            from core.messenger_draft import finish_draft_send
+            finish_draft_send(claimed_revision, succeeded=_sent_ok)
 
     # ── AUTO-CONFIRM pending routines ──────────────────────────────
     # If there is a TRIGGER_PENDING routine (e.g. "morning message Sophia"),_
@@ -688,46 +776,65 @@ def browse_url(url: str) -> str:
     except Exception as e:
         return t("tools.web.browse_error", error=str(e)) 
 @tool
-def duckduckgo_search(query: str) -> str:
-    """Web search.
-    FOR A SPECIFIC URL ALWAYS use browse_url."""
-    from ddgs import DDGS
-    from ddgs.exceptions import RatelimitException, TimeoutException, DDGSException
+def duckduckgo_search(query: str, max_results: int = 5) -> str:
+    """Search the Web and return up to 10 unique results.
 
-    # backend="auto" (the default) tries sequential/batched ALL engines (up to 8),
-    # something that in fail-cascades reached 20-30+ sec. per call. Pin to 2 fast ones,
-    # verified backends (verified live: duckduckgo ~1s, google ~0.5s) with 1 fallback.
-    backends_to_try = ["duckduckgo", "google"]
-    last_error = t("tools.web.search_err_unknown")
+    Use the requested count, capped at 10.
+    Use 10 only when no smaller count was specified. For a specific URL always
+    use ``browse_url``. If providers cannot verify results, return clearly
+    marked unverified live search links instead of treating links as evidence.
+    """
+    from services.web_providers import WebSearchProvider
+    from services.web_research import ProviderUnavailableError
 
-    for backend in backends_to_try:
-        try:
-            with DDGS(timeout=8) as ddgs:
-                results = list(ddgs.text(query, max_results=5, backend=backend))
-            if results:
-                output = []
-                for r in results:
-                    output.append(t("tools.web.search_format_result", title=r["title"], href=r["href"], body=r["body"]))
-                return "\n---\n".join(output)
-            last_error = t("tools.web.search_err_empty")
-        except RatelimitException:
-            last_error = "rate limit"
-        except TimeoutException:
-            last_error = "timeout"
-        except DDGSException as e:
-            last_error = str(e)
-        except Exception as e:
-            last_error = str(e)
+    try:
+        results = WebSearchProvider().search(query, max_results)
+    except ProviderUnavailableError as exc:
+        print("[Web Search]: All DDGS backends failed; returning live search links.")
+        return _format_unverified_search_fallback(query, exc.fallback_urls)
+    return _format_legacy_web_results(results)
 
-    return t("tools.web.search_all_failed", last_error=last_error, count=len(backends_to_try))
+
+def _format_legacy_web_results(results) -> str:
+    """Preserve the established localized Web-search tool response."""
+    return "\n---\n".join(
+        t(
+            "tools.web.search_format_result",
+            title=result.title,
+            href=result.url,
+            body=result.content,
+        )
+        for result in results
+    )
+
+
+def _format_unverified_search_fallback(query: str, fallback_urls) -> str:
+    """Render navigation links without presenting them as verified evidence."""
+    urls = list(fallback_urls)
+    encoded_query = urllib.parse.quote_plus(query)
+    google_url = urls[0] if urls else f"https://www.google.com/search?q={encoded_query}"
+    bing_url = urls[1] if len(urls) > 1 else f"https://www.bing.com/search?q={encoded_query}"
+    links = t(
+        "tools.web.search_fallback_links",
+        query=query,
+        google_url=google_url,
+        bing_url=bing_url,
+    )
+    return f"{WEB_SEARCH_UNVERIFIED_LINKS_MARKER}\n{links}"
+
+
 @tool
 def search_supermarket_prices(query: str) -> str:
     """Searches for product prices from all supermarkets (e-katanalotis.gov.gr).
     Example: 'lentils', 'milk', 'olive oil'"""
     import requests
-    from difflib import SequenceMatcher
 
     PRICES_URL = "https://warply.s3.amazonaws.com/applications/ed840ad545884deeb6c6b699176797ed/basket-retailers/prices.json?cid=1779969600000"
+
+    query_clean = remove_accents(query).upper()
+    query_tokens = tuple(re.findall(r"\w+", query_clean))
+    if not query_tokens:
+        return t("tools.web.ekat_not_found", query=query)
 
     try:
         r = requests.get(PRICES_URL, timeout=30)
@@ -737,11 +844,11 @@ def search_supermarket_prices(query: str) -> str:
         products = result['products']
 
         # Fuzzy search — removal of accents for correct matching
-        query_clean = remove_accents(query).upper()
         matches = []
         for p in products:
-            name = p.get('name', '')
-            if query_clean in remove_accents(name).upper():
+            name = p.get("name", "")
+            name_tokens = set(re.findall(r"\w+", remove_accents(name).upper()))
+            if all(token in name_tokens for token in query_tokens):
                 matches.append(p)
 
         if not matches:

@@ -1,14 +1,48 @@
 from datetime import datetime
+import socket
+import pytest
 import services.routine_context as rc
+
+
+@pytest.fixture(autouse=True)
+def isolated_context_resolvers(monkeypatch, tmp_path):
+    """Keep resolver regressions off real location/state and cloud providers."""
+    import memory.routine_db as routine_db
+    monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "resolver_state.db"))
+    routine_db.setup_db()
+    monkeypatch.setattr(rc, "GPS_STORAGE_FILE", str(tmp_path / "missing_location.json"))
+    monkeypatch.setattr(rc, "HOME_COORDS", (40.646558, 22.939036))
+    monkeypatch.setattr(rc, "HOME_RADIUS_M", 100)
+    def blocked(*args, **kwargs):
+        raise AssertionError("Resolver tests must stay offline")
+    monkeypatch.setattr(socket.socket, "connect", blocked)
+    monkeypatch.setattr(socket, "create_connection", blocked)
+
+
+def test_kid1_routine_unavailability_needs_explicit_absence_reason():
+    """A normal outing/school day is not a long absence from family routines."""
+    assert rc.kid1_unavailable_for_routine(True, "camp") is True
+    assert rc.kid1_unavailable_for_routine(True, "grandmother") is True
+    assert rc.kid1_unavailable_for_routine(True, None) is False
+    assert rc.kid1_unavailable_for_routine(True, "school") is False
+    assert rc.kid1_unavailable_for_routine(False, "camp") is False
+
+
+def test_canonical_absence_scope_overrides_legacy_flags():
+    """One scoped state decides availability even when old flags disagree."""
+    assert rc.kid1_unavailable_for_routine(True, "camp", "temporary") is False
+    assert rc.kid1_unavailable_for_routine(False, None, "extended") is True
 
 
 def test_build_runtime_routine_context_returns_expected_keys(monkeypatch):
     monkeypatch.setattr(rc, "resolve_kid1_away_state", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_kid1_away_reason", lambda now=None: "camp")
+    monkeypatch.setattr(rc, "resolve_kid1_absence_scope", lambda now=None: "extended")
     monkeypatch.setattr(rc, "resolve_football_season", lambda now=None: False)
     monkeypatch.setattr(rc, "resolve_school_open", lambda now=None: False)
     monkeypatch.setattr(rc, "resolve_current_shift", lambda now=None: "afternoon")
     monkeypatch.setattr(rc, "resolve_partner_work_mode", lambda now=None: "home")
+    monkeypatch.setattr(rc, "resolve_context_bool", lambda key, now=None: True if key == "partner_at_work" else None)
     monkeypatch.setattr(rc, "resolve_user_at_work", lambda now=None: True)
     monkeypatch.setattr(rc, "resolve_quiet_hours", lambda now=None: False)
 
@@ -16,10 +50,12 @@ def test_build_runtime_routine_context_returns_expected_keys(monkeypatch):
 
     assert result["kid1_away_from_home"] is True
     assert result["kid1_away_reason"] == "camp"
+    assert result["kid1_unavailable_for_routine"] is True
     assert result["football_season"] is False
     assert result["school_open"] is False
     assert result["current_shift"] == "afternoon"
     assert result["partner_work_mode"] == "home"
+    assert result["partner_at_work"] is True
     assert result["user_at_work"] is True
     assert result["quiet_hours"] is False
 
@@ -41,7 +77,10 @@ def test_current_shift_ignores_invalid_value(monkeypatch):
 
 def test_current_shift_e2e_pipeline(tmp_path, monkeypatch):
     import memory.routine_db as routine_db
+    import services.routine_reconciler as reconciler
     from services.routine_reconciler import apply_routine_reconciliation_directives
+    # This is the deterministic fallback/resolver test, not provider verification.
+    monkeypatch.setattr(reconciler, "_infer_llm_reconciliation_candidates", lambda *a, **k: [])
     
     # 1. Setup a fresh temporary DB
     temp_db = tmp_path / "test_routines.db"

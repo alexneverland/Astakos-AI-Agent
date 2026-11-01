@@ -1,0 +1,69 @@
+"""Synchronous external-delivery adapter for a running Matrix client."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from hashlib import sha256
+
+from core.approval import record_pending_delivery
+from services.external_delivery import ApprovalDeliveryRequest
+
+MatrixTextSender = Callable[[str], str | int | None]
+MatrixTransactionSender = Callable[[str, str], str | int | None]
+
+
+class MatrixExternalTransport:
+    """Adapt one running encrypted Matrix room to external-delivery contracts."""
+
+    def __init__(
+        self,
+        *,
+        send_text: MatrixTextSender,
+        send_transaction_text: MatrixTransactionSender | None = None,
+        approval_reaction_hint: str,
+    ) -> None:
+        self._send_text = send_text
+        self._send_transaction_text = send_transaction_text
+        self._approval_reaction_hint = str(approval_reaction_hint or "").strip()
+        if not self._approval_reaction_hint:
+            raise ValueError("Matrix approval delivery requires a reaction hint")
+
+    def send_text(self, text: str, *, silent: bool = False) -> str | int | None:
+        """Send text through the injected encrypted-room sender."""
+        del silent  # Matrix has no Telegram-equivalent silent flag in this adapter.
+        normalized = str(text or "").strip()
+        if not normalized:
+            raise ValueError("Matrix delivery requires text")
+        return self._send_text(normalized)
+
+    def send_mirror_chunk(self, text: str, *, transaction_id: str) -> str | int:
+        """Send one mirror chunk idempotently through the Matrix room sender."""
+        return self.send_idempotent_text(text, transaction_id=transaction_id)
+
+    def send_idempotent_text(self, text: str, *, transaction_id: str) -> str | int | None:
+        """Reuse the encrypted sender for a durable transaction-aware message."""
+        if not text.strip() or not transaction_id.strip():
+            raise ValueError("Matrix idempotent delivery requires text and identity")
+        if self._send_transaction_text is None:
+            raise RuntimeError("Matrix transaction-aware sender is unavailable")
+        return self._send_transaction_text(text, transaction_id)
+
+    def send_approval(self, request: ApprovalDeliveryRequest) -> str | int:
+        """Send and durably correlate one actionable Matrix approval prompt."""
+        text = f"{request.prompt.strip()}\n\n{self._approval_reaction_hint}"
+        transaction_id = "astakos-approval-" + sha256(
+            request.call_id.encode("utf-8")
+        ).hexdigest()
+        external_id = (
+            self._send_transaction_text(text, transaction_id)
+            if self._send_transaction_text is not None
+            else self.send_text(text)
+        )
+        if external_id is None or not str(external_id).strip():
+            raise RuntimeError("Matrix approval delivery returned no event id")
+        record_pending_delivery(
+            request.call_id,
+            delivery_channel="matrix",
+            external_message_id=str(external_id),
+        )
+        return external_id

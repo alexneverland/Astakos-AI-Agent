@@ -1,8 +1,9 @@
 # ================================================================
 # Project: Astakos AI Agent 🦞
-# Developer: User
+# Developer: Lazaros Avramidis (alexneverland)
 # Description: Modular LLM-agnostic multi-agent framework
-# Copyright (c) 2026 - All Rights Reserved
+# Copyright (c) 2026 Lazaros Avramidis (alexneverland)
+# SPDX-License-Identifier: MIT
 # ================================================================
 
 """
@@ -37,6 +38,7 @@ from core.agents import clean_message
 from memory.working_memory import update_working_memory, update_capabilities_from_exchange
 from core.utils import load_agent_prompt
 from memory.session_memory import trigger_memory_sifter, log_exchange, _run_session_summary
+from services.context_extractor import extract_and_update_context_flags
 from tools.telegram import send_telegram_msg
 
 console = Console()
@@ -199,15 +201,27 @@ def _do_session_summary():
 def main():
     global last_interaction_time
 
+    from memory.list_store import init_list_store
+    from memory.reminder_store import init_reminder_store
+    init_list_store()
+    init_reminder_store()
+
     # Start workers
     threading.Thread(target=reminder_worker,  daemon=True).start()
     threading.Thread(target=proactive_worker, daemon=True).start()
     threading.Thread(target=queue_worker,     daemon=True).start()
 
+    try:
+        from core.diagnostics import format_boot_diagnostics_text
+        print("\n" + format_boot_diagnostics_text())
+    except Exception:
+        pass
+
     print("\n" + "━" * 52)
     print("  🦞  Astakos — CLI Mode")
     print("  Type 'exit' or press Ctrl+C to quit.")
     print("━" * 52 + "\n")
+
 
     try:
         while not shutdown_event.is_set():
@@ -231,7 +245,8 @@ def main():
             handling_agent    = "Chat_Agent"
 
             try:
-                for event in graph.stream({"messages": [HumanMessage(content=inp)]}):
+                events = list(graph.stream({"messages": [HumanMessage(content=inp)]}))
+                for event in events:
                     for node, data in event.items():
                         if data is None:
                             continue
@@ -248,10 +263,20 @@ def main():
                                     )
 
                 if final_ai_response:
-                    enqueue_task(update_working_memory,             inp, final_ai_response)
-                    enqueue_task(trigger_memory_sifter,             inp, final_ai_response, handling_agent, "terminal")
-                    enqueue_task(log_exchange,                      inp, final_ai_response, handling_agent, "terminal")
-                    enqueue_task(update_capabilities_from_exchange, inp, final_ai_response, handling_agent)
+                    from core.untrusted_content import external_tool_names_from_events
+                    external_content_sources = external_tool_names_from_events(events)
+                    if external_content_sources:
+                        print("[Security]: external-derived reply - use trusted user text only for background state")
+                        enqueue_task(extract_and_update_context_flags, inp, "", "terminal")
+                        enqueue_task(update_working_memory, inp, "")
+                        enqueue_task(trigger_memory_sifter, inp, "", handling_agent, "terminal", False)
+                        enqueue_task(log_exchange, inp, "", handling_agent, "terminal")
+                    else:
+                        enqueue_task(extract_and_update_context_flags, inp, "", "terminal")
+                        enqueue_task(update_working_memory,             inp, final_ai_response)
+                        enqueue_task(trigger_memory_sifter,             inp, final_ai_response, handling_agent, "terminal")
+                        enqueue_task(log_exchange,                      inp, final_ai_response, handling_agent, "terminal")
+                        enqueue_task(update_capabilities_from_exchange, inp, final_ai_response, handling_agent)
 
             except Exception as e:
                 import traceback
@@ -263,6 +288,13 @@ def main():
         shutdown_event.set()
     finally:
         shutdown_event.set()
+        
+        try:
+            from memory.vector_store import close_vector_store
+            close_vector_store()
+        except Exception:
+            pass
+            
         _do_session_summary()
 
     print("[System]: Goodbye! 🦞")
