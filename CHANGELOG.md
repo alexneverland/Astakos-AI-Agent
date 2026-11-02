@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- Upgrade protobuf and Google Cloud Text-to-Speech together; old manual
+  environments using the retired google-generativeai SDK need the migration
+  guidance in the setup guide before installing the new dependency set.
+
 - Update the supported LangGraph range to 1.2.19 through the 1.2 series while
   retaining the current LangChain Core pin and revision-bound tool approvals.
 

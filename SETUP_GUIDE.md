@@ -417,6 +417,24 @@ The release compose deployment instead uses `astakos_data` and
 
 Use this path when you want direct access to the Python environment or plan to develop Astakos.
 
+### Updating an older manual environment
+
+Current source uses the unified `google-genai` SDK for Gemini and Vertex AI.
+The retired `google-generativeai` and `google-ai-generativelanguage` packages
+are not Astakos dependencies. Older manually maintained environments may still
+contain them and their protobuf<6 restriction conflicts with current source.
+Prefer a fresh virtual environment using the current requirements. If reusing
+an existing environment, first check that your own extensions do not import
+these retired SDKs, then remove only those two packages before installing:
+
+```bash
+python -m pip uninstall google-generativeai google-ai-generativelanguage
+python -m pip install -r requirements.txt
+python -m pip check
+```
+
+This dependency migration does not require deleting memories, databases or settings.
+
 ## Step 1 — Requirements
 
 Install:
