@@ -8,6 +8,10 @@ This guide covers **v2.8.0** (2026-10-09), including the guided Wizard and nativ
 Office provisioning. Optional services still require the explicit setup below.
 See [release verification and upgrade notes](docs/release-readiness.md).
 
+Current `main`/Unreleased source requires Python 3.12 or newer. Published
+v2.8.0 artifacts retain their original Python/dependency baseline; these source
+changes do not update an already published image.
+
 Use this guide with the v2.8.0 source/tag or verified release artifacts. Until
 its publishing workflow and GitHub release complete, `latest` may still deliver
 v2.7.0; confirm the [v2.8.0 release](https://github.com/alexneverland/Astakos-AI-Agent/releases/tag/v2.8.0)
@@ -23,7 +27,7 @@ is available before using the release downloads.
 |---|---|---|
 | **Docker — recommended** | Most users, Windows/macOS/Linux, clean installation | Docker Desktop only |
 | **Docker release image** | Users who want automatic image updates | Docker Desktop only |
-| **Manual Python setup** | Developers who want to modify or debug the code directly | Python 3.11+, virtual environment, dependencies |
+| **Manual Python setup** | Developers who want to modify or debug the code directly | Python 3.12+, virtual environment, dependencies |
 
 Astakos supports these model providers:
 
@@ -421,7 +425,7 @@ Use this path when you want direct access to the Python environment or plan to d
 
 Install:
 
-- Python 3.11 or newer
+- Python 3.12 or newer
 - Git
 - A supported AI provider credential
 

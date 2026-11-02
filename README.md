@@ -8,7 +8,7 @@
 
 Astakos remembers useful context, learns recurring routines, follows up naturally, creates files and images, uses tools, supports Jarvis-style live voice, and keeps its long-term memory and runtime state on your machine.
 
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Docker](https://img.shields.io/badge/Docker-Automatic_Updates-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-FF6B6B?style=for-the-badge&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
@@ -313,7 +313,7 @@ If you do not want to mount a JSON credentials file into Docker, use `Gemini API
 
 ## Manual Developer Setup
 
-Docker is recommended for normal use. Developers can run Astakos directly with Python 3.11+:
+Docker is recommended for normal use. Developers can run Astakos directly with Python 3.12+:
 
 ```bash
 git clone https://github.com/alexneverland/Astakos-AI-Agent.git

@@ -24,7 +24,7 @@ description: A modular, local-first, LLM-agnostic multi-agent companion framewor
 ## Constraints
 
 - Local-first execution: All `.db` and memory states reside strictly on the local machine.
-- Environment: Python 3.11+ required.
+- Environment: Python 3.12+ required.
 - Approval Gates: CRITICAL operations require the configured approval flow before execution. Delivery uses the selected external transport; Matrix requires an exact Reply to the approval request, not a reaction.
 
 ## Key documentation

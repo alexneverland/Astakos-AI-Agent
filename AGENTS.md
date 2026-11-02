@@ -136,6 +136,6 @@ verifying every resolved target. Preserve code, live data, credentials and backu
 do not broaden deletion or work around the policy through another shell.
 
 ## Coding Conventions
-- Python >= 3.11 required.
+- Python >= 3.12 required.
 - Provide type hints (typing) and professional docstrings for all functions.
 - Ensure terminal commands respect the constraints defined in `core/safe_executor.py`.

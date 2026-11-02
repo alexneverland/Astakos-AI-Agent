@@ -1,4 +1,4 @@
-FROM python:3.11-slim-trixie
+FROM python:3.12-slim-trixie
 
 # Prevent python from writing pyc files and enable unbuffered logging
 ENV PYTHONDONTWRITEBYTECODE=1
