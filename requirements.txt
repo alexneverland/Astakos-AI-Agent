@@ -7,7 +7,7 @@ fpdf2==2.8.8
 google-genai==2.34.0
 google_api_python_client==2.198.0
 google_auth_oauthlib==1.4.0
-google-cloud-texttospeech==2.35.0
+google-cloud-texttospeech==2.38.0
 gTTS==2.5.4
 jieba==0.42.1
 langchain_chroma==1.1.0
@@ -25,7 +25,7 @@ pandas==3.0.3
 Pillow==13.0.0
 playwright==1.59.0
 playwright_stealth==2.0.3
-protobuf==5.29.6
+protobuf==7.36.2
 pydantic==2.13.4
 pypdf==6.21.4
 PyGithub==2.9.1
