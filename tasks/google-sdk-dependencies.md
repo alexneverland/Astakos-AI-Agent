@@ -32,7 +32,7 @@ Do not remove other Google packages to silence a dependency conflict.
 - [x] Verify a clean candidate environment and Linux resolver.
 - [x] Run real protobuf/Cloud TTS serialization without outbound transport.
 - [x] Run focused application regressions before and after the change.
-- [ ] Inspect scoped diff and publish a reviewable PR; do not merge it implicitly.
+- [x] Inspect scoped diff and publish a reviewable PR; do not merge it implicitly.
 
 The LangChain core/integration update and Python-baseline/NumPy update are
 separate slices. Existing historical task specifications remain unchanged.
@@ -43,3 +43,10 @@ Four new real-codec cases also pass on the old environment. Full fresh
 Linux/Python 3.11 requirements resolution succeeds. Local installation removes
 only the two verified obsolete SDKs; their exact wheels and the baseline package
 inventory are retained outside the repository for rollback.
+
+Review follow-up: add four default-gRPC cases that retain the production client
+factory, gRPC transport, interceptors and SDK-selected binary codecs, replacing
+only channel I/O. Greek/English success and PERMISSION_DENIED paths pass. The
+19 codec/API/voice cases pass on Windows; all eight codec cases also pass inside
+the combined Linux/Python 3.12 image with network disabled. A temporary wrong
+audio-encoding mutation is rejected by all four gRPC cases, then fully restored.
