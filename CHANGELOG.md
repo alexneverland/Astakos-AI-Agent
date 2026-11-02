@@ -25,6 +25,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   PDF generation retains the default rejection of untrusted image URLs without
   enabling permissive host or evaluation settings.
 
+### Removed
+
+- Current-source support for Python 3.11: the minimum and both Docker build
+  baselines are now Python 3.12, allowing NumPy 2.5.4. Published v2.8.0 artifacts
+  keep their original Python/dependency baseline until a new image is released.
+
 ### Added
 
 - End-to-end latency spans for Web, Matrix and Telegram text turns, named
