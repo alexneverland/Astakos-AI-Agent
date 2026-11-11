@@ -26,7 +26,14 @@ arrival, old presence, habit, or intention does not qualify. A plan alone cannot
 prove execution: connect it with an actual completed/current transition.
 Both people working does not alone establish separate workplaces; remote work
 or a shared workplace may mean they are together. Infer separation only when the
-sources support it. Later contrary or ambiguous reports require omitting the
+sources support it. Off-work status, a weekend or a household habit does not
+prove a location, companion or day-long commitment. An explicit plan to remain
+home can support separation after a genuine owner departure, provided no shared
+travel or later contrary report contradicts it. A current location observation
+must be fresh; mere timestamp refreshes do not establish a new transition.
+Include the source of the applicable commitment and its supported ending.
+Never substitute an assumed end-of-day or work schedule for a stated duration.
+Later contrary or ambiguous reports require omitting the
 flag, even if a plan previously covered today. Prefer the ordinary three-field
 form for recent momentary evidence, and the empty form whenever uncertain.
 This alternative records a separate expiring proof; it must never pretend the

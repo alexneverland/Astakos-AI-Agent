@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 from services.routine_context_evidence import (
-    ContextEvidence, VOLATILE_FLAGS, _recorded_time, evaluate_stored_evidence,
+    ContextEvidence, VOLATILE_FLAGS, STORED_VALIDITY, _recorded_time, evaluate_stored_evidence,
 )
 
 DURATION_KEY = "routine_context_duration_proof"
@@ -111,6 +111,9 @@ def commit_duration_resolution(
     if (event_at is None or until is None or event_at.date() != now.date()
             or not event_at.timestamp() <= now.timestamp() < until.timestamp() <= midnight.timestamp()):
         return None
+    if expected.get("user_out_of_home") is not None and evaluate_stored_evidence(
+            expected["user_out_of_home"], now=now).status != "known":
+        return None
     schedule_bound = None
     if "schedule_routine_id" in payload:
         rid = payload["schedule_routine_id"]
@@ -124,6 +127,11 @@ def commit_duration_resolution(
         prior = expected.get(flag)
         if prior:
             prior_at = _recorded_time(prior.get("updated_at"), now)
+            departure_at = current_owner_transition(expected.get, now, departure_only=True)
+            if (prior_at is not None and flag == "partner_with_user"
+                    and flags[flag] is False and prior.get("value") == "true"
+                    and departure_at is not None and prior_at.timestamp() < departure_at.timestamp()):
+                event_at = max(event_at, departure_at, key=lambda item: item.timestamp())
             if (prior_at is None or prior_at.timestamp() > event_at.timestamp()
                     or (prior_at.timestamp() == event_at.timestamp()
                         and prior.get("value") != str(flags[flag]).lower())):
@@ -139,6 +147,32 @@ def commit_duration_resolution(
                 expected, recorded_at=event_at)):
         return None
     return frozenset(flags)
+
+
+def current_owner_transition(
+    state_reader: Callable[[str], Mapping[str, Any] | None], now: datetime, *, departure_only: bool = False,
+) -> datetime | None:
+    """Return a fresh canonical location transition, never a same-value ping."""
+    from memory.routine_db import CONTEXT_LOCATION_TRANSITION_KEY
+    try:
+        record = state_reader(CONTEXT_LOCATION_TRANSITION_KEY)
+        if not record or record.get("expires_at") != now.date().isoformat():
+            return None
+        transition = json.loads(record.get("value", "{}"))
+        if (not isinstance(transition, dict) or {transition.get("from"), transition.get("to")} != {"false", "true"}
+                or (departure_only and transition["to"] != "true")):
+            return None
+        stamp = _recorded_time(transition.get("event_at"), now)
+        owner = evaluate_stored_evidence(state_reader("user_out_of_home"), now=now)
+        if (stamp is None or not 0 <= now.timestamp()-stamp.timestamp() < STORED_VALIDITY.total_seconds()
+                or owner.effective_value is not (transition["to"] == "true") or owner.recorded_at is None
+                or owner.recorded_at.timestamp() < stamp.timestamp()):
+            return None
+        return stamp
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("Owner departure evidence unavailable; retaining ordinary evidence")
+        return None
 
 
 def apply_duration_evidence(
@@ -175,6 +209,14 @@ def apply_duration_evidence(
         if (event_at is None or until is None or event_at.date() != now.date()
                 or not event_at.timestamp() <= now.timestamp() < until.timestamp() <= midnight.timestamp()
                 or any(state_reader(k) != v for k, v in proof["anchors"].items())):
+            return evidence
+        location_anchor = proof["anchors"].get("user_out_of_home")
+        if location_anchor is not None and evaluate_stored_evidence(
+                state_reader("user_out_of_home"), now=now).status != "known":
+            return evidence
+        if location_anchor is not None and "user_out_of_home" in evidence and (
+                evidence["user_out_of_home"].status != "known"
+                or str(evidence["user_out_of_home"].effective_value).lower() != location_anchor.get("value")):
             return evidence
         if "schedule_bound" in proof:
             bound = proof["schedule_bound"]

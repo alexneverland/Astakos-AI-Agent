@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve grounded partner presence through continuous GPS refreshes, invalidate
+  duration proofs on actual location changes, and keep off-work status separate
+  from location. Shared-workplace and mixed reports use semantic presence
+  extraction rather than keyword-based reconciliation fallbacks.
+
 ### Changed
 
 - Upgrade protobuf and Google Cloud Text-to-Speech together; old manual

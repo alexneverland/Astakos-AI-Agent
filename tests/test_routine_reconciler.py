@@ -354,7 +354,13 @@ def test_sofia_work_does_not_suppress_messenger_routine():
     )
 
 
-def test_sofia_together_suppresses_messenger_routine():
+def test_sofia_together_suppresses_messenger_routine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Presence reconciliation consumes the existing semantic result."""
+    semantic = [{"kind": "context_state_set", "key": "partner_with_user",
+                 "value": "true", "until_date": "2026-06-24"}]
+    semantic.append({"kind": "condition_add", "condition_payload": {"flag": "partner_with_user", "equals": True},
+                     "condition_mode": "suppress_when_true"})
+    monkeypatch.setattr("services.routine_reconciler._infer_llm_reconciliation_candidates", lambda *a, **k: semantic)
     fact = "[USER_FACT]: Είμαι μαζί με τη Partner τώρα."
 
     directives = infer_routine_reconciliation_candidates(
@@ -378,7 +384,11 @@ def test_sofia_together_suppresses_messenger_routine():
     )
 
 
-def test_sofia_left_clears_together_flag():
+def test_sofia_left_clears_together_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Presence reconciliation consumes the existing semantic result."""
+    semantic = [{"kind": "context_state_set", "key": "partner_with_user",
+                 "value": "false", "until_date": "2026-06-24"}]
+    monkeypatch.setattr("services.routine_reconciler._infer_llm_reconciliation_candidates", lambda *a, **k: semantic)
     fact = "[USER_FACT]: Η Partner έφυγε και δεν είναι εδώ τώρα."
 
     directives = infer_routine_reconciliation_candidates(
@@ -396,7 +406,11 @@ def test_sofia_left_clears_together_flag():
     )
 
 
-def test_not_together_phrase_clears_only_when_sofia_context_is_active():
+def test_not_together_phrase_clears_only_when_sofia_context_is_active(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Presence reconciliation consumes the existing semantic result."""
+    semantic = [{"kind": "context_state_set", "key": "partner_with_user",
+                 "value": "false", "until_date": "2026-06-24"}]
+    monkeypatch.setattr("services.routine_reconciler._infer_llm_reconciliation_candidates", lambda *a, **k: semantic)
     fact = "[USER_FACT]: Δεν είμαστε μαζί τώρα."
 
     with patch("memory.routine_db.get_context_state", return_value={"value": "true", "expires_at": "2026-06-24"}):
@@ -1013,15 +1027,14 @@ def test_llm_context_key_rejects_non_canonical_keys():
     directives = _llm_impact_to_directives(impact)
     assert directives == []
 
-def test_partner_with_user_group_outing_reinforces_existing_state(monkeypatch):
+def test_partner_with_user_group_outing_uses_semantic_presence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shared travel uses the semantic path rather than a phrase-based fallback."""
     from services import routine_reconciler as rr
-
-    monkeypatch.setattr(rr, "_partner_state_is_active", lambda now: True)
-
-    out = rr._rule_partner_with_user("ηρθαμε θαλασσα ολοι μαζι", [], datetime(2026, 6, 28))
-
-    assert out
-    assert any(d.get("kind") == "context_state_set" and d.get("key") == "partner_with_user" for d in out)
+    monkeypatch.setattr(rr, "_infer_llm_reconciliation_candidates", lambda *a, **k: [
+        {"kind": "context_state_set", "key": "partner_with_user", "value": "true", "until_date": "2026-06-28"}])
+    out = rr.infer_routine_reconciliation_candidates("ηρθαμε θαλασσα ολοι μαζι", category="family",
+        reason="user_stated", now=datetime(2026, 6, 28))
+    assert any(d.get("key") == "partner_with_user" and d.get("value") == "true" for d in out)
 
 
 def test_family_outing_without_child_still_sets_user_out_of_home():
@@ -1207,4 +1220,25 @@ def test_future_bedtime_does_not_enable_quiet_hours():
         candidate.get("kind") == "context_state_set"
         and candidate.get("key") == "quiet_hours"
         for candidate in candidates
+    )
+
+
+def test_rhetorical_work_separation_statement_does_not_set_partner_with_user() -> None:
+    """A rhetorical question must not become a positive presence fallback."""
+    from services.routine_reconciler import infer_routine_reconciliation_candidates
+    from datetime import datetime
+
+    text = "Αφού σου είπα ότι εγώ πάω στη δουλειά και η Σοφία είναι στη δουλειά, πώς γίνεται να είμαι μαζί της"
+    now = datetime(2026, 11, 6, 10, 54)
+
+    candidates = infer_routine_reconciliation_candidates(
+        text,
+        category="family",
+        reason="user_stated",
+        now=now,
+    )
+
+    assert not any(
+        c.get("key") == "partner_with_user" and str(c.get("value")).lower() == "true"
+        for c in candidates
     )

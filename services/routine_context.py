@@ -38,13 +38,21 @@ def build_routine_context_evidence(
         location_resolver=location_resolver,
     )
     if canonical_reader:
+        from dataclasses import replace
         from memory.conversation_history import get_latest_trusted_user_rowid
-        from services.routine_duration_context import DURATION_KEY, apply_duration_evidence
+        from services.routine_duration_context import apply_duration_evidence
         from config import CONVERSATION_DB_FILE
         try:
-            if state_reader(DURATION_KEY) is not None:
-                evidence = apply_duration_evidence(evidence, now=now, state_reader=state_reader,
-                    history_marker=get_latest_trusted_user_rowid(db_path=CONVERSATION_DB_FILE))
+            from services.routine_duration_context import current_owner_transition
+            partner_ev = evidence.get("partner_with_user")
+            departure_at = current_owner_transition(state_reader, now)
+            if (departure_at is not None and partner_ev is not None
+                    and partner_ev.effective_value is True and partner_ev.recorded_at is not None
+                    and departure_at.timestamp() > partner_ev.recorded_at.timestamp()):
+                evidence = {**evidence, "partner_with_user": replace(
+                    partner_ev, effective_value=None, status="unknown", reason="stale")}
+            evidence = apply_duration_evidence(evidence, now=now, state_reader=state_reader,
+                history_marker=get_latest_trusted_user_rowid(db_path=CONVERSATION_DB_FILE))
         except Exception:
             pass  # A failed optional proof read never changes ordinary evidence.
     return evidence

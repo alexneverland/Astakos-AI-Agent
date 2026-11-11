@@ -351,9 +351,10 @@ def test_explicit_current_quiet_hours_are_persisted(mocked_context_pipeline):
 def test_context_extractor_records_partner_at_work_without_assuming_child_location(
     mocked_context_pipeline,
 ):
+    """Grounded child absence does not imply separation between the adults."""
     mock_llm, mock_set, _ = mocked_context_pipeline
     mock_llm.return_value = MagicMock(
-        text='{"partner_at_work": true, "partner_work_mode": "office"}'
+        text='{"partner_at_work": true, "partner_work_mode": "office", "kid1_with_partner": false, "family_at_home": false}'
     )
 
     extract_and_update_context_flags("Η Σοφία είναι στη δουλειά και τα παιδιά είναι σπίτι μόνα τους.")
@@ -361,7 +362,7 @@ def test_context_extractor_records_partner_at_work_without_assuming_child_locati
     calls = _state_calls(mock_set)
     assert calls["partner_at_work"] == "true"
     assert calls["partner_work_mode"] == "office"
-    assert calls["partner_with_user"] == "false"
+    assert "partner_with_user" not in calls
     assert calls["kid1_with_partner"] == "false"
     assert calls["family_at_home"] == "false"
     assert "kid1_away_from_home" not in calls
