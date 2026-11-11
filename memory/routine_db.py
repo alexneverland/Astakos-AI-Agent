@@ -2419,6 +2419,43 @@ def get_context_states(keys: list[str]) -> dict[str, dict]:
             out[key] = item
     return out
 
+CONTEXT_LOCATION_TRANSITION_KEY = "routine_context_location_transition"
+
+
+def _maintain_context_proof(
+    conn: sqlite3.Connection, key: str, value: str, expires_at: str | None, stamp: str,
+) -> None:
+    """Maintain proof continuity in the same transaction as every context write."""
+    if key in {"routine_context_duration_proof", CONTEXT_LOCATION_TRANSITION_KEY}:
+        return
+    row = conn.execute("SELECT value, expires_at, updated_at FROM context_state WHERE key=?", (key,)).fetchone()
+    prior = None if row is None else {"value": row[0], "expires_at": row[1], "updated_at": row[2]}
+    if key == "user_out_of_home" and row and row[0] != value:
+        transition = json.dumps({"from": row[0], "to": value, "event_at": stamp})
+        conn.execute(
+            "INSERT INTO context_state (key,value,expires_at,updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, expires_at=excluded.expires_at, updated_at=excluded.updated_at",
+            (CONTEXT_LOCATION_TRANSITION_KEY, transition, expires_at, stamp))
+    proof_row = conn.execute("SELECT value FROM context_state WHERE key=?", ("routine_context_duration_proof",)).fetchone()
+    if not proof_row:
+        return
+    try:
+        proof = json.loads(proof_row[0])
+        anchors = proof.get("anchors") if isinstance(proof, dict) else None
+        if not isinstance(anchors, dict) or key not in anchors:
+            return
+        # Only continuous same-value location refreshes can advance an anchor.
+        if (key == "user_out_of_home" and prior is not None and anchors[key] == prior
+                and prior["value"] == value and prior["expires_at"] == expires_at):
+            anchors[key] = {"value": value, "expires_at": expires_at, "updated_at": stamp}
+            conn.execute("UPDATE context_state SET value=? WHERE key=?",
+                         (json.dumps(proof), "routine_context_duration_proof"))
+        else:
+            conn.execute("DELETE FROM context_state WHERE key=?", ("routine_context_duration_proof",))
+    except (ValueError, TypeError):
+        conn.execute("DELETE FROM context_state WHERE key=?", ("routine_context_duration_proof",))
+
+
 def set_context_states_if_unchanged(
     updates: dict[str, tuple[str, str | None]],
     expected: dict[str, dict | None],
@@ -2449,6 +2486,7 @@ def set_context_states_if_unchanged(
                     return False
             now_str = (recorded_at or datetime.now()).isoformat()
             for key, (value, expires_at) in updates.items():
+                _maintain_context_proof(conn, key, value, expires_at, now_str)
                 conn.execute(
                     "INSERT INTO context_state (key, value, expires_at, updated_at) VALUES (?, ?, ?, ?) "
                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
@@ -2471,6 +2509,8 @@ def set_context_state(key: str, value: str, expires_at: str | None = None) -> No
     now_str = datetime.now().isoformat()
     try:
         with db_write_lock:
+            conn.execute("BEGIN IMMEDIATE")
+            _maintain_context_proof(conn, key, value, expires_at, now_str)
             cursor.execute(
                 """
                 INSERT INTO context_state (key, value, expires_at, updated_at) 

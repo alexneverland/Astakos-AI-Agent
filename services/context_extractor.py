@@ -66,14 +66,14 @@ Rules:
   transitions from guesses about another person's location.
 - DO NOT convert future intention into a current state.
 - If the user says they will leave in a bit, that they will go somewhere later, or that they are planning to go, this DOES NOT mean they are already out of the house.
-- Preparing, eating, drinking coffee, or getting ready in order to leave for work means the user is still at their current location until they explicitly say they left or arrived at work. Expressions of preparation or imminent departure such as getting ready ("ετοιμάζομαι") or leaving in a bit ("θα φύγω σε λίγο") NEVER set user_at_work=true or user_out_of_home=true.
-- When a single message reports multiple facts together (e.g., completing a household chore/routine such as cleaning the rabbit cage, the child being at school, the user being at home having coffee or at work, and whether the partner works today), extract ALL grounded context flags from every clause without letting one clause or a routine completion suppress the others.
+- Preparation and imminent intention do not establish a completed departure or arrival. Preserve the latest grounded current location until a completed transition is reported.
+- When a message reports multiple facts, extract all grounded context flags across its clauses; a routine completion must not suppress independent location or work facts.
 - If the user is talking about a draft message, a plan, an idea, or what to write, this DOES NOT necessarily mean that the state is currently true.
 - If the user says they are all out together now, then user_out_of_home=true and partner_with_user=true may apply.
 - If the user is at work, then usually user_at_work=true and user_out_of_home=true.
 - If the user directly confirms they are at work now, their active shift may be current_shift="morning", current_shift="afternoon", or current_shift="night". Do not infer a shift from a routine name, a future plan, or a past shift.
 - An active work statement supersedes older co-presence: do not leave partner_with_user=true or kid1_with_user=true unless the user explicitly says they are also at work with the user.
-- If the user directly says the partner is at work now or working today (unless explicitly remote/from home or at a shared workplace), set partner_at_work=true, partner_work_mode="office", partner_with_user=false, kid1_with_partner=false, and family_at_home=false. If the user says the partner is at home or not working today (e.g., has a day off / "δεν δουλεύει σήμερα" / "είναι σπίτι"), set partner_at_work=false; if the user is currently at home, also set partner_with_user=true, whereas if the user is currently out of home or at work without the partner, set partner_with_user=false.
+- A partner work report establishes partner_at_work only for its actual temporal scope. Set partner_work_mode only when the sources establish it; work alone does not prove an office, separate workplaces, or separation. A day off establishes partner_at_work=false, not a location. Resolve partner_with_user semantically from explicit current reports and trusted dated plans. A declared household habit can guide a tentative response but cannot alone establish a persisted presence flag or day-long proof. Later explicit shared travel, remote work, shared workplaces or visits take precedence.
 - Treat a clear, current statement that the whole household is home as family_at_home=true. The user's own presence at home alone does not establish anyone else's location.
 
 - If the user says they are with {kid1_name} now, then kid1_with_user=true may apply.
@@ -223,7 +223,9 @@ def extract_and_update_context_flags(
                     _CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES) | {"kid1_away_reason"}}
         if daily_resolution_flags is not None:
             from services.routine_duration_context import DURATION_KEY, load_daily_schedule_reference
+            from memory.routine_db import CONTEXT_LOCATION_TRANSITION_KEY
             expected[DURATION_KEY] = get_context_state(DURATION_KEY)
+            expected[CONTEXT_LOCATION_TRANSITION_KEY] = get_context_state(CONTEXT_LOCATION_TRANSITION_KEY)
             schedule_reference = load_daily_schedule_reference(current)
         if daily_resolution_flags is not None:
             prompt = ("Resolve unknown routine context from the dated reference sources below.\n"
@@ -404,22 +406,8 @@ def extract_and_update_context_flags(
                 payload["partner_with_user"] = False
                 payload["kid1_with_user"] = False
 
-        if payload.get("partner_at_work") is True:
-            if payload.get("partner_work_mode") not in valid_partner_work_modes:
-                payload["partner_work_mode"] = "office"
-            if payload["partner_work_mode"] == "office":
-                payload["family_at_home"] = False
-                if source_event_at is not None:
-                    payload.setdefault("partner_with_user", False)
-                    payload.setdefault("kid1_with_partner", False)
-                else:
-                    payload["partner_with_user"] = False
-                    payload["kid1_with_partner"] = False
-        elif payload.get("partner_at_work") is False:
-            if payload.get("user_out_of_home") is True or payload.get("user_at_work") is True:
-                payload.setdefault("partner_with_user", False)
-            elif payload.get("user_out_of_home") is False and payload.get("user_at_work") is not True:
-                payload.setdefault("partner_with_user", True)
+        # Work status does not identify a workplace or anyone's companion.
+        # Preserve the semantic result, including shared-workplace reports.
 
         if payload.get("kid1_with_user") is True:
             payload["kid1_away_from_home"] = False

@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 import json
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 
@@ -205,8 +206,8 @@ def test_duration_resolution_rejects_invalid_or_racing_evidence(tmp_path, monkey
 
 @pytest.mark.parametrize("morning_offset_minutes", [121, 95])
 def test_weekday_morning_partner_home_and_later_gps_departure_resolves_separation_and_survives_gps_refresh(
-    tmp_path, monkeypatch, morning_offset_minutes,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, morning_offset_minutes: int,
+) -> None:
     """When Sofia is off work at home and GPS later shows the owner left home, they are not together."""
     from memory import conversation_history as history, routine_db as db
     from memory.routine_context_clarification import ClarificationStore
@@ -222,7 +223,7 @@ def test_weekday_morning_partner_home_and_later_gps_departure_resolves_separatio
     morning_at = NOW - timedelta(minutes=morning_offset_minutes)
     source = history.append_message(
         role="user", channel="telegram", timestamp=morning_at,
-        content="καλημερα φιλε καθαρισα το κουνελι ο αλεξανδροσ ειναι σχολειο και εγω σπιτι καφεδακι η σοφια δεν δουλευει σημερα",
+        content="Είμαστε μαζί σπίτι, η Σοφία θα μείνει εδώ μέχρι τις 15:30 σήμερα.",
         db_path=path,
     )
     db.set_context_states_if_unchanged(
@@ -245,7 +246,8 @@ def test_weekday_morning_partner_home_and_later_gps_departure_resolves_separatio
     initial_evidence = build_routine_context_evidence(NOW, gps_loader=lambda: None)
     assert initial_evidence["partner_with_user"].effective_value is None
 
-    def model(prompt):
+    def model(prompt: str) -> SimpleNamespace:
+        """Return the explicitly bounded semantic decision for this episode."""
         assert '"is_weekend": false' in prompt
         return SimpleNamespace(text=json.dumps({
             "flags": {"partner_with_user": False},
@@ -260,7 +262,8 @@ def test_weekday_morning_partner_home_and_later_gps_departure_resolves_separatio
         "condition_payload": {"flag": "partner_with_user", "equals": True}}
     routine = RoutineCandidate("4", "Partner message", NOW + timedelta(minutes=15), (condition,))
 
-    def snapshot(current):
+    def snapshot(current: datetime) -> PollSnapshot:
+        """Read fresh canonical evidence without external transport."""
         return PollSnapshot((routine,), {}, build_routine_context_evidence(current,
             gps_loader=lambda: None), str(history.get_max_rowid(db_path=path)))
 
@@ -294,10 +297,10 @@ def test_weekday_morning_partner_home_and_later_gps_departure_resolves_separatio
     assert build_routine_context_evidence(NOW + timedelta(minutes=20), gps_loader=lambda: None)["partner_with_user"].effective_value is None
 
 
-def test_weekend_morning_partner_not_working_resolves_together_and_suppresses_partner_message(
-    tmp_path, monkeypatch,
-):
-    """On a weekend when the owner is home and Sofia is off work, they remain together without asking."""
+def test_weekend_explicit_home_commitment_suppresses_partner_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit home commitment plus fresh location avoids a redundant weekend question."""
     from memory import conversation_history as history, routine_db as db
     from memory.routine_context_clarification import ClarificationStore
     from services import context_extractor as extractor
@@ -313,7 +316,7 @@ def test_weekend_morning_partner_not_working_resolves_together_and_suppresses_pa
     morning_at = weekend_now - timedelta(hours=2, minutes=15)
     source = history.append_message(
         role="user", channel="telegram", timestamp=morning_at,
-        content="Καλημέρα φίλε, είμαι σπίτι καφεδάκι και η Σοφία δεν δουλεύει σήμερα",
+        content="Θα μείνουμε μαζί σπίτι μέχρι τις 23:00 σήμερα.",
         db_path=path,
     )
     db.set_context_states_if_unchanged(
@@ -326,7 +329,12 @@ def test_weekend_morning_partner_not_working_resolves_together_and_suppresses_pa
         recorded_at=morning_at,
     )
 
-    def model(prompt):
+    db.set_context_states_if_unchanged(
+        {"user_out_of_home": ("false", weekend_now.date().isoformat())},
+        {"user_out_of_home": db.get_context_state("user_out_of_home")}, recorded_at=weekend_now)
+
+    def model(prompt: str) -> SimpleNamespace:
+        """Return the explicitly bounded semantic decision for this episode."""
         assert '"is_weekend": true' in prompt and '"effective_shift": "off"' in prompt
         return SimpleNamespace(text=json.dumps({
             "flags": {"partner_with_user": True},
@@ -341,7 +349,8 @@ def test_weekend_morning_partner_not_working_resolves_together_and_suppresses_pa
         "condition_payload": {"flag": "partner_with_user", "equals": True}}
     routine = RoutineCandidate("4", "Partner message", weekend_now + timedelta(minutes=15), (condition,))
 
-    def snapshot(current):
+    def snapshot(current: datetime) -> PollSnapshot:
+        """Read fresh canonical evidence without external transport."""
         return PollSnapshot((routine,), {}, build_routine_context_evidence(current,
             gps_loader=lambda: None), str(history.get_max_rowid(db_path=path)))
 

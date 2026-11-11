@@ -99,9 +99,16 @@ their freshness limits; date/shift conditions keep their own typed contracts.
 Ordinary presence still expires after two hours. The original observation and its
 timestamp stay unchanged; an internal proof uses the canonical conditional writer
 without a schema migration. New trusted owner history or changed canonical state
-(including GPS flag refreshes) invalidates the proof conservatively and requires
-reassessment. Missing, corrupt or expired proof leaves ordinary clarification in
-place. External action approval requirements are unaffected.
+invalidates the proof and requires reassessment. Continuous same-value owner GPS
+flag refreshes can preserve its anchor through the canonical writer's transaction;
+an intervening location change invalidates it permanently, even after a return.
+Location-dependent proofs require fresh location evidence. A genuine location
+transition can make older co-presence uncertain; a timestamp refresh alone cannot.
+Missing, corrupt or expired proof never erases fresh direct presence evidence.
+Work status and household habits, including weekend expectations, are separate
+from confirmed location and company. Shared travel and workplace reports use the
+semantic context path, without lexical presence fallbacks. External action
+approval requirements are unaffected.
 
 Web draft preparation, like Chat, can resolve a recipient from the bounded
 conversation when the owner accepts a message offer without repeating the name.

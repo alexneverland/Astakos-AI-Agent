@@ -826,21 +826,6 @@ def _rule_shift_logic(normalized: str, dates: list[str], now: datetime) -> list[
     return directives
 
 
-def _partner_state_is_active(now: datetime) -> bool:
-    from memory.routine_db import get_context_state
-
-    state_data = get_context_state("partner_with_user")
-    if not state_data:
-        return False
-
-    expires_at = state_data.get("expires_at")
-    today = now.strftime("%Y-%m-%d")
-    if expires_at and expires_at < today:
-        return False
-
-    return str(state_data.get("value", "")).lower() == "true"
-
-
 def _rule_kid1_with_partner_without_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     has_partner = _contains_any(normalized, _PARTNER_TOKENS)
     has_child = _contains_any(normalized, _KID1_TOKENS)
@@ -894,115 +879,6 @@ def _rule_kid1_with_partner_without_user(normalized: str, dates: list[str], now:
             "exclude_tokens": [],
         },
     ]
-
-def _rule_partner_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    t("prompts.ext_phase_3a_partner_with_user_facts")
-    has_partner = _contains_any(normalized, _PARTNER_TOKENS)
-    has_together = _contains_any(normalized, _TOGETHER_TOKENS)
-
-    has_home_marker = _contains_any(normalized, _inline.get("home", []))
-    has_kid1 = _contains_any(normalized, _KID1_TOKENS)
-    has_user_work_context = _contains_any(
-        normalized,
-        _WORK_TOKENS + _SHIFT_AM_TOKENS + _SHIFT_PM_TOKENS + _WORK_TOKENS
-    )
-
-    if (
-        has_user_work_context
-        or _contains_any(normalized, _NOT_TOGETHER_TOKENS)
-        or _contains_any(normalized, _ABSENCE_TOKENS)
-    ):
-        return []
-
-    if has_partner and has_together:
-        if _is_draft_or_past_reference_context(normalized) and not _looks_like_live_presence_statement(normalized):
-            return []
-
-    group_outing_tokens = [
-        *_inline.get("together_group", []), *_inline.get("outing_extra", []), *_inline.get("pool_sea", [])
-    ]
-    has_group_outing = _contains_any(normalized, group_outing_tokens)
-
-    # Strong path: explicit Partner + together
-    if has_partner and has_together:
-        pass
-    # Softer path: group outing wording can reinforce an already-active Partner context
-    elif has_group_outing and _partner_state_is_active(now) and _looks_like_live_presence_statement(normalized):
-        pass
-    else:
-        return []
-    until = None
-    if dates:
-        until = max(dates)
-    elif _contains_any(normalized, _WEEK_TOKENS):
-        until = _infer_week_until(now)
-    else:
-        until = now.strftime("%Y-%m-%d")
-    if not until:
-        return []
-        
-    d_state = {
-        "kind": "context_state_set",
-        "key": "partner_with_user",
-        "value": "true",
-        "until_date": until,
-        "reason": "partner_with_user",
-        "subject_tokens": _PARTNER_TOKENS,
-        "include_tokens": _inline.get("partner_aliases", []) + _DRAFT_CONTEXT_TOKENS,
-        "exclude_tokens": _MESSENGER_EXCLUDE,
-    }
-    
-    cond = _build_condition_directive(
-        subject_tokens=_PARTNER_TOKENS,
-        include_tokens=_inline.get("partner_aliases", []) + _DRAFT_CONTEXT_TOKENS,
-        exclude_tokens=_MESSENGER_EXCLUDE,
-        condition_type="context_flag",
-        condition_payload={"flag": "partner_with_user", "equals": True},
-        condition_mode="suppress_when_true",
-        reason="partner_with_user_condition",
-    )
-    
-    return [d_state] + ([cond] if cond else [])
-
-
-def _rule_partner_not_with_user(normalized: str, dates: list[str], now: datetime) -> list[dict]:
-    """
-    Phase 3A — partner_not_with_user:
-    Facts: "Partner left", "Partner is not here", "we are not together now"
-    Target: clear Messenger/Partner suppress context immediately
-    Action: State only (partner_with_user = false)
-    """
-    has_partner = _contains_any(normalized, _PARTNER_TOKENS)
-    has_absence = has_partner and _contains_any(normalized, _ABSENCE_TOKENS)
-    has_not_together = _contains_any(normalized, _NOT_TOGETHER_TOKENS)
-
-    if not (has_absence or has_not_together):
-        return []
-
-    if has_not_together and not has_partner:
-        from memory.routine_db import get_context_state
-        state_data = get_context_state("partner_with_user")
-        is_active = False
-        if state_data:
-            expires_at = state_data.get("expires_at")
-            today = now.strftime("%Y-%m-%d")
-            if not expires_at or expires_at >= today:
-                is_active = str(state_data.get("value")).lower() == "true"
-        if not is_active:
-            return []
-
-    d_state = {
-        "kind": "context_state_set",
-        "key": "partner_with_user",
-        "value": "false",
-        "until_date": None,
-        "reason": "partner_not_with_user",
-        "subject_tokens": _PARTNER_TOKENS,
-        "include_tokens": _inline.get("partner_aliases", []) + _DRAFT_CONTEXT_TOKENS,
-        "exclude_tokens": _MESSENGER_EXCLUDE,
-    }
-    return [d_state]
-
 
 def _rule_child_activity_pause(normalized: str, dates: list[str], now: datetime) -> list[dict]:
     """
@@ -1749,22 +1625,6 @@ def infer_routine_reconciliation_candidates(
         **({"shift_reference": shift_reference} if shift_reference is not None else {}),
     )
 
-    filtered_llm = []
-    for d in llm_candidates:
-        if d.get("kind") == "context_state_set" and d.get("key") == "partner_with_user" and (d.get("value") is False or str(d.get("value")).lower() == "false"):
-            from memory.routine_db import get_context_state
-            state_data = get_context_state("partner_with_user")
-            is_active = False
-            if state_data:
-                expires_at = state_data.get("expires_at")
-                today = current.strftime("%Y-%m-%d")
-                if not expires_at or expires_at >= today:
-                    is_active = str(state_data.get("value")).lower() == "true"
-            if not is_active:
-                continue
-        filtered_llm.append(d)
-    llm_candidates = filtered_llm
-
     # llm_candidates is the primary semantic path
     # the rule candidates are conservative fallback heuristics
     rules = [
@@ -1776,8 +1636,6 @@ def infer_routine_reconciliation_candidates(
         ("school_break",                   _rule_school_break,                   (normalized_fact, dates, current)),
         ("child_activity_pause",           _rule_child_activity_pause,           (normalized_fact, dates, current)),
         ("kid1_with_partner_without_user", _rule_kid1_with_partner_without_user, (normalized_fact, dates, current)),
-        ("partner_with_user",                _rule_partner_with_user,                (normalized_fact, dates, current)),
-        ("partner_not_with_user",            _rule_partner_not_with_user,            (normalized_fact, dates, current)),
         ("shift_logic",                    _rule_shift_logic,                    (normalized_fact, dates, current)),
         ("user_at_work",                   _rule_user_at_work,                   (normalized_fact, dates, current)),
     ]
