@@ -124,6 +124,14 @@ def commit_duration_resolution(
         prior = expected.get(flag)
         if prior:
             prior_at = _recorded_time(prior.get("updated_at"), now)
+            if (prior_at is not None and flag in {"partner_with_user", "kid1_with_user", "family_at_home"}
+                    and flags[flag] is False and prior.get("value") == "true"):
+                for dep_key in ("user_out_of_home", "user_at_work"):
+                    dep = expected.get(dep_key)
+                    dep_at = _recorded_time(dep.get("updated_at"), now) if isinstance(dep, Mapping) else None
+                    if (isinstance(dep, Mapping) and dep.get("value") == "true" and dep_at is not None
+                            and prior_at.timestamp() < dep_at.timestamp() <= now.timestamp()):
+                        event_at = max(event_at, dep_at, key=lambda item: item.timestamp())
             if (prior_at is None or prior_at.timestamp() > event_at.timestamp()
                     or (prior_at.timestamp() == event_at.timestamp()
                         and prior.get("value") != str(flags[flag]).lower())):
@@ -139,6 +147,20 @@ def commit_duration_resolution(
                 expected, recorded_at=event_at)):
         return None
     return frozenset(flags)
+
+
+def _anchor_matches(key: str, expected_val: Any, current_val: Any, now: datetime) -> bool:
+    """Allow same-value owner-location refreshes while rejecting state or expiry changes."""
+    if current_val == expected_val:
+        return True
+    if (key == "user_out_of_home" and isinstance(expected_val, Mapping)
+            and isinstance(current_val, Mapping)
+            and current_val.get("value") == expected_val.get("value")
+            and current_val.get("expires_at") == expected_val.get("expires_at")):
+        old_at = _recorded_time(expected_val.get("updated_at"), now)
+        new_at = _recorded_time(current_val.get("updated_at"), now)
+        return old_at is not None and new_at is not None and new_at.timestamp() >= old_at.timestamp()
+    return False
 
 
 def apply_duration_evidence(
@@ -174,7 +196,7 @@ def apply_duration_evidence(
         midnight = datetime.combine(now.date() + timedelta(days=1), time(), now.tzinfo)
         if (event_at is None or until is None or event_at.date() != now.date()
                 or not event_at.timestamp() <= now.timestamp() < until.timestamp() <= midnight.timestamp()
-                or any(state_reader(k) != v for k, v in proof["anchors"].items())):
+                or any(not _anchor_matches(k, v, state_reader(k), now) for k, v in proof["anchors"].items())):
             return evidence
         if "schedule_bound" in proof:
             bound = proof["schedule_bound"]

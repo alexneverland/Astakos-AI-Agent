@@ -907,7 +907,11 @@ def _rule_partner_with_user(normalized: str, dates: list[str], now: datetime) ->
         _WORK_TOKENS + _SHIFT_AM_TOKENS + _SHIFT_PM_TOKENS + _WORK_TOKENS
     )
 
-    if has_partner and has_kid1 and has_home_marker and has_user_work_context:
+    if (
+        has_user_work_context
+        or _contains_any(normalized, _NOT_TOGETHER_TOKENS)
+        or _contains_any(normalized, _ABSENCE_TOKENS)
+    ):
         return []
 
     if has_partner and has_together:

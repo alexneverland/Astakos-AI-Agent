@@ -38,11 +38,38 @@ def build_routine_context_evidence(
         location_resolver=location_resolver,
     )
     if canonical_reader:
+        from dataclasses import replace
         from memory.conversation_history import get_latest_trusted_user_rowid
         from services.routine_duration_context import DURATION_KEY, apply_duration_evidence
         from config import CONVERSATION_DB_FILE
         try:
-            if state_reader(DURATION_KEY) is not None:
+            from services.routine_context_evidence import _recorded_time
+            partner_work = state_reader("partner_at_work")
+            partner_ev = evidence.get("partner_with_user")
+            out_ev = evidence.get("user_out_of_home")
+            duration_rec = state_reader(DURATION_KEY)
+            superseded_by_departure = False
+            if (isinstance(partner_work, Mapping)
+                    and str(partner_work.get("value", "")).lower() == "false"
+                    and partner_ev is not None and partner_ev.effective_value is True
+                    and partner_ev.recorded_at is not None):
+                if (out_ev is not None and out_ev.effective_value is True
+                        and out_ev.recorded_at is not None
+                        and out_ev.recorded_at.timestamp() > partner_ev.recorded_at.timestamp()):
+                    superseded_by_departure = True
+                elif isinstance(duration_rec, Mapping) and duration_rec.get("expires_at") == now.date().isoformat():
+                    proof_obj = json.loads(str(duration_rec.get("value") or "{}"))
+                    proof_at = _recorded_time(proof_obj.get("event_at"), now) if isinstance(proof_obj, Mapping) else None
+                    if (isinstance(proof_obj, Mapping)
+                            and isinstance(proof_obj.get("flags"), Mapping)
+                            and proof_obj["flags"].get("partner_with_user") is False
+                            and proof_at is not None
+                            and proof_at.timestamp() > partner_ev.recorded_at.timestamp()):
+                        superseded_by_departure = True
+            if superseded_by_departure:
+                evidence = {**evidence, "partner_with_user": replace(
+                    partner_ev, effective_value=None, status="unknown", reason="stale")}
+            if duration_rec is not None:
                 evidence = apply_duration_evidence(evidence, now=now, state_reader=state_reader,
                     history_marker=get_latest_trusted_user_rowid(db_path=CONVERSATION_DB_FILE))
         except Exception:

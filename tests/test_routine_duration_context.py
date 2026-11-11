@@ -201,3 +201,167 @@ def test_duration_resolution_rejects_invalid_or_racing_evidence(tmp_path, monkey
     assert not extractor.resolve_daily_context_before_question(("partner_with_user",), now=NOW,
         still_current=lambda: invalid != "snapshot_race", channel="matrix", conversation_db_path=path)
     assert db.get_context_state("routine_context_duration_proof") is None
+
+
+@pytest.mark.parametrize("morning_offset_minutes", [121, 95])
+def test_weekday_morning_partner_home_and_later_gps_departure_resolves_separation_and_survives_gps_refresh(
+    tmp_path, monkeypatch, morning_offset_minutes,
+):
+    """When Sofia is off work at home and GPS later shows the owner left home, they are not together."""
+    from memory import conversation_history as history, routine_db as db
+    from memory.routine_context_clarification import ClarificationStore
+    from services import context_extractor as extractor
+    from services.routine_conditions import evaluate_routine_conditions
+    from services.routine_context import build_routine_context_evidence, build_runtime_routine_context, project_routine_context
+    from services.routine_context_clarification import RoutineCandidate
+    from services.routine_context_clarification_poll import PollSnapshot, run_clarification_poll
+    path = str(tmp_path / "history.db")
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "routines.db"))
+    monkeypatch.setattr(extractor.config, "CONVERSATION_DB_FILE", path)
+    db.setup_db()
+    morning_at = NOW - timedelta(minutes=morning_offset_minutes)
+    source = history.append_message(
+        role="user", channel="telegram", timestamp=morning_at,
+        content="καλημερα φιλε καθαρισα το κουνελι ο αλεξανδροσ ειναι σχολειο και εγω σπιτι καφεδακι η σοφια δεν δουλευει σημερα",
+        db_path=path,
+    )
+    db.set_context_states_if_unchanged(
+        {
+            "user_out_of_home": ("false", NOW.date().isoformat()),
+            "partner_at_work": ("false", NOW.date().isoformat()),
+            "partner_with_user": ("true", NOW.date().isoformat()),
+        },
+        {"user_out_of_home": None, "partner_at_work": None, "partner_with_user": None},
+        recorded_at=morning_at,
+    )
+    # Later at 09:50, owner leaves home for work and GPS updates user_out_of_home=true.
+    departure_at = NOW - timedelta(minutes=55)
+    db.set_context_states_if_unchanged(
+        {"user_out_of_home": ("true", NOW.date().isoformat())},
+        {"user_out_of_home": db.get_context_state("user_out_of_home")},
+        recorded_at=departure_at,
+    )
+    # Even when morning_at was <2h ago (95 min), newer GPS departure invalidates at-home co-presence.
+    initial_evidence = build_routine_context_evidence(NOW, gps_loader=lambda: None)
+    assert initial_evidence["partner_with_user"].effective_value is None
+
+    def model(prompt):
+        assert '"is_weekend": false' in prompt
+        return SimpleNamespace(text=json.dumps({
+            "flags": {"partner_with_user": False},
+            "event_rowid": source["rowid"],
+            "support_rowids": [source["rowid"]],
+            "duration_source_rowids": [source["rowid"]],
+            "valid_until": NOW.replace(hour=15, minute=30).isoformat(),
+        }))
+
+    monkeypatch.setattr(extractor, "safe_gemini_call", model)
+    condition = {"condition_type": "context_flag", "condition_mode": "suppress_when_true",
+        "condition_payload": {"flag": "partner_with_user", "equals": True}}
+    routine = RoutineCandidate("4", "Partner message", NOW + timedelta(minutes=15), (condition,))
+
+    def snapshot(current):
+        return PollSnapshot((routine,), {}, build_routine_context_evidence(current,
+            gps_loader=lambda: None), str(history.get_max_rowid(db_path=path)))
+
+    outcome = run_clarification_poll(
+        store=ClarificationStore(tmp_path / "questions.json"), clock=lambda: NOW,
+        selected_channel=lambda: "telegram", snapshot_loader=snapshot,
+        unavailable=lambda: False, classify=lambda _: pytest.fail("Should not ask question"),
+        budget=lambda: True, sender=lambda *a: pytest.fail("Should not send question"),
+        record=lambda **k: None,
+        resolve_context=lambda state, now, fresh: extractor.resolve_daily_context_before_question(
+            ("partner_with_user",), now=now, still_current=fresh, channel="telegram", conversation_db_path=path),
+    )
+    assert outcome == "not_due"
+    # Subsequent live GPS ping with the same out-of-home value does not invalidate duration proof.
+    refresh_at = NOW + timedelta(minutes=10)
+    db.set_context_states_if_unchanged(
+        {"user_out_of_home": ("true", NOW.date().isoformat())},
+        {"user_out_of_home": db.get_context_state("user_out_of_home")},
+        recorded_at=refresh_at,
+    )
+    ev_at_11 = build_routine_context_evidence(NOW + timedelta(minutes=15), gps_loader=lambda: None)
+    assert ev_at_11["partner_with_user"].effective_value is False
+    rt_ctx = project_routine_context(build_runtime_routine_context(NOW + timedelta(minutes=15)), ev_at_11)
+    assert evaluate_routine_conditions([condition], rt_ctx, now=NOW + timedelta(minutes=15))["allowed"] is True
+    # Returning home via GPS invalidates the separation proof.
+    db.set_context_states_if_unchanged(
+        {"user_out_of_home": ("false", NOW.date().isoformat())},
+        {"user_out_of_home": db.get_context_state("user_out_of_home")},
+        recorded_at=NOW + timedelta(minutes=20),
+    )
+    assert build_routine_context_evidence(NOW + timedelta(minutes=20), gps_loader=lambda: None)["partner_with_user"].effective_value is None
+
+
+def test_weekend_morning_partner_not_working_resolves_together_and_suppresses_partner_message(
+    tmp_path, monkeypatch,
+):
+    """On a weekend when the owner is home and Sofia is off work, they remain together without asking."""
+    from memory import conversation_history as history, routine_db as db
+    from memory.routine_context_clarification import ClarificationStore
+    from services import context_extractor as extractor
+    from services.routine_conditions import evaluate_routine_conditions
+    from services.routine_context import build_routine_context_evidence, build_runtime_routine_context, project_routine_context
+    from services.routine_context_clarification import RoutineCandidate
+    from services.routine_context_clarification_poll import PollSnapshot, run_clarification_poll
+    weekend_now = datetime(2026, 10, 17, 10, 45, tzinfo=ATHENS)  # Saturday
+    path = str(tmp_path / "history.db")
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "routines.db"))
+    monkeypatch.setattr(extractor.config, "CONVERSATION_DB_FILE", path)
+    db.setup_db()
+    morning_at = weekend_now - timedelta(hours=2, minutes=15)
+    source = history.append_message(
+        role="user", channel="telegram", timestamp=morning_at,
+        content="Καλημέρα φίλε, είμαι σπίτι καφεδάκι και η Σοφία δεν δουλεύει σήμερα",
+        db_path=path,
+    )
+    db.set_context_states_if_unchanged(
+        {
+            "user_out_of_home": ("false", weekend_now.date().isoformat()),
+            "partner_at_work": ("false", weekend_now.date().isoformat()),
+            "partner_with_user": ("true", weekend_now.date().isoformat()),
+        },
+        {"user_out_of_home": None, "partner_at_work": None, "partner_with_user": None},
+        recorded_at=morning_at,
+    )
+
+    def model(prompt):
+        assert '"is_weekend": true' in prompt and '"effective_shift": "off"' in prompt
+        return SimpleNamespace(text=json.dumps({
+            "flags": {"partner_with_user": True},
+            "event_rowid": source["rowid"],
+            "support_rowids": [source["rowid"]],
+            "duration_source_rowids": [source["rowid"]],
+            "valid_until": weekend_now.replace(hour=23, minute=0).isoformat(),
+        }))
+
+    monkeypatch.setattr(extractor, "safe_gemini_call", model)
+    condition = {"condition_type": "context_flag", "condition_mode": "suppress_when_true",
+        "condition_payload": {"flag": "partner_with_user", "equals": True}}
+    routine = RoutineCandidate("4", "Partner message", weekend_now + timedelta(minutes=15), (condition,))
+
+    def snapshot(current):
+        return PollSnapshot((routine,), {}, build_routine_context_evidence(current,
+            gps_loader=lambda: None), str(history.get_max_rowid(db_path=path)))
+
+    outcome = run_clarification_poll(
+        store=ClarificationStore(tmp_path / "questions.json"), clock=lambda: weekend_now,
+        selected_channel=lambda: "telegram", snapshot_loader=snapshot,
+        unavailable=lambda: False, classify=lambda _: pytest.fail("Should not ask question"),
+        budget=lambda: True, sender=lambda *a: pytest.fail("Should not send question"),
+        record=lambda **k: None,
+        resolve_context=lambda state, now, fresh: extractor.resolve_daily_context_before_question(
+            ("partner_with_user",), now=now, still_current=fresh, channel="telegram", conversation_db_path=path),
+    )
+    assert outcome == "not_due"
+    # Same-value home GPS refresh keeps the proof intact; at 11:00 Routine #4 is suppressed.
+    db.set_context_states_if_unchanged(
+        {"user_out_of_home": ("false", weekend_now.date().isoformat())},
+        {"user_out_of_home": db.get_context_state("user_out_of_home")},
+        recorded_at=weekend_now + timedelta(minutes=10),
+    )
+    ev_at_11 = build_routine_context_evidence(weekend_now + timedelta(minutes=15), gps_loader=lambda: None)
+    assert ev_at_11["partner_with_user"].effective_value is True
+    rt_ctx = project_routine_context(build_runtime_routine_context(weekend_now + timedelta(minutes=15)), ev_at_11)
+    assert evaluate_routine_conditions([condition], rt_ctx, now=weekend_now + timedelta(minutes=15))["allowed"] is False

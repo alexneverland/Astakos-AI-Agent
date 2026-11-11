@@ -26,7 +26,11 @@ arrival, old presence, habit, or intention does not qualify. A plan alone cannot
 prove execution: connect it with an actual completed/current transition.
 Both people working does not alone establish separate workplaces; remote work
 or a shared workplace may mean they are together. Infer separation only when the
-sources support it. Later contrary or ambiguous reports require omitting the
+sources support it:
+- When the owner reported today that the partner is working (partner_at_work=true, partner_work_mode="office" and no shared workplace or remote work was stated), her workday is a day-scoped duration establishing partner_with_user=false (use the applicable schedule bound or end of workday / midnight in valid_until and the morning report rowid in event_rowid, support_rowids, and duration_source_rowids).
+- When the owner reported today that the partner is at home or not working today (partner_at_work=false) and stored_context shows the owner is now out of home or at work (user_out_of_home="true" from GPS/context or user_at_work="true"), return the explicit-duration form with partner_with_user=false (using the morning source rowid in event_rowid, support_rowids, and duration_source_rowids, and valid_until set to the applicable schedule bound or end of day).
+- When it is a weekend or day off (is_weekend=true or effective_shift="off") and stored_context shows the owner is at home (user_out_of_home="false" and user_at_work is not "true") and the owner reported today that the partner is at home or not working today (partner_at_work=false), return the explicit-duration form with partner_with_user=true through the end of the day.
+Later contrary or ambiguous reports require omitting the
 flag, even if a plan previously covered today. Prefer the ordinary three-field
 form for recent momentary evidence, and the empty form whenever uncertain.
 This alternative records a separate expiring proof; it must never pretend the

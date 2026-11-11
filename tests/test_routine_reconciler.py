@@ -1208,3 +1208,23 @@ def test_future_bedtime_does_not_enable_quiet_hours():
         and candidate.get("key") == "quiet_hours"
         for candidate in candidates
     )
+
+
+def test_rhetorical_work_separation_statement_does_not_set_partner_with_user():
+    from services.routine_reconciler import infer_routine_reconciliation_candidates
+    from datetime import datetime
+
+    text = "Αφού σου είπα ότι εγώ πάω στη δουλειά και η Σοφία είναι στη δουλειά, πώς γίνεται να είμαι μαζί της"
+    now = datetime(2026, 11, 6, 10, 54)
+
+    candidates = infer_routine_reconciliation_candidates(
+        text,
+        category="family",
+        reason="user_stated",
+        now=now,
+    )
+
+    assert not any(
+        c.get("key") == "partner_with_user" and str(c.get("value")).lower() == "true"
+        for c in candidates
+    )
