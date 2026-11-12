@@ -50,10 +50,11 @@ def is_current_context_question_target(target: str) -> bool:
     if not path.is_file():
         return False
     try:
-        pending = ClarificationStore(path).snapshot()["pending"]
-        return bool(pending and pending["status"] == "sent" and pending["history_recorded"]
-                    and pending["channel"] == "matrix" and pending["external_id"] == target
-                    and datetime.now(ATHENS) < datetime.fromisoformat(pending["slot_at"]))
+        now = datetime.now(ATHENS)
+        return any(row["status"] in {"sent", "resolved"} and row["history_recorded"]
+                   and row["channel"] == "matrix" and row["external_id"] == target
+                   and now < datetime.fromisoformat(row["slot_at"])
+                   for row in ClarificationStore(path).snapshot()["requests"])
     except (OSError, ValueError, RuntimeError, TimeoutError):
         return False
 

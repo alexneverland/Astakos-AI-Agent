@@ -8,19 +8,21 @@ from services.context_extractor import extract_and_update_context_flags
 @pytest.mark.parametrize(("enabled", "payload", "expected"), [
     (True, {"partner_at_work": True, "partner_work_mode": "office"}, "false"),
     (False, {"partner_at_work": True, "partner_work_mode": "office"}, None),
+    (None, {"partner_at_work": True, "partner_work_mode": "office"}, None),
     (True, {"partner_at_work": True, "partner_work_mode": "remote"}, None),
     (True, {"partner_at_work": True}, None),
     (True, {"partner_at_work": True, "partner_work_mode": "office", "partner_with_user": True}, "true"),
 ])
 @pytest.mark.usefixtures("offline_behavioral_io")
 def test_household_workplace_rule_preserves_explicit_company(
-    monkeypatch: pytest.MonkeyPatch, enabled: bool, payload: dict, expected: str | None,
+    monkeypatch: pytest.MonkeyPatch, enabled: bool | None, payload: dict, expected: str | None,
 ) -> None:
     """Only opted-in, current office evidence can supply an otherwise missing relationship."""
     import json
     import config
 
-    monkeypatch.setattr(config, "NLP_CONFIG", {"routines": {"partner_workplace_excludes_company": enabled}})
+    routines = None if enabled is None else {"partner_workplace_excludes_company": enabled}
+    monkeypatch.setattr(config, "NLP_CONFIG", {"routines": routines})
     with (
         patch("services.context_extractor.safe_gemini_call", return_value=MagicMock(text=json.dumps(payload))),
         patch("services.context_extractor.get_context_state", return_value=None),

@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from pathlib import Path
 from threading import Barrier
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -92,6 +93,19 @@ def test_cancel_message_is_left_to_dated_feedback(
     assert not result.consumed and result.outcome == "routine_feedback"
     assert delivered.snapshot()["pending"]["status"] == "sent"
     assert routine_db.get_context_state("partner_with_user") is None
+
+
+def test_resolved_question_stays_a_matrix_context_reply_target(
+    delivered: ClarificationStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reply keeps its context scope after GPS resolves the upcoming question."""
+    import config
+    from services.routine_context_clarification import is_current_context_question_target
+
+    monkeypatch.setattr(config, "BASE_DIR", str(tmp_path))
+    assert delivered.close("q1", outcome="resolved", now=NOW + timedelta(seconds=1))
+    assert is_current_context_question_target("$q1")
+    assert not is_current_context_question_target("$another")
 
 
 def test_mixed_answer_batch_conflict_keeps_real_ledger_pending(delivered, monkeypatch):

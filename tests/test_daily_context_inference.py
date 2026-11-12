@@ -12,7 +12,7 @@ NOW = datetime(2026, 10, 8, 10, 9, 47, tzinfo=ATHENS)
 
 
 @pytest.mark.usefixtures("offline_behavioral_io")
-@pytest.mark.parametrize("scenario", ["departure", "refresh", "returned", "work_only"])
+@pytest.mark.parametrize("scenario", ["departure", "refresh", "returned", "work_only", "stale_partner"])
 def test_daily_resolution_uses_actual_departure_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str,
 ) -> None:
@@ -25,7 +25,7 @@ def test_daily_resolution_uses_actual_departure_time(
     db.setup_db()
     report = "Η Σοφία δουλεύει σήμερα" if scenario == "work_only" else "Η Σοφία είναι στο δικό της γραφείο μέχρι το μεσημέρι."
     source = history.append_message(role="user", channel="matrix", content=report,
-        timestamp=NOW-timedelta(hours=3), db_path=path)
+        timestamp=NOW-timedelta(minutes=180 if scenario == "stale_partner" else 145), db_path=path)
     departure = NOW-timedelta(minutes=35)
     for value, at in [("true" if scenario == "refresh" else "false", departure-timedelta(minutes=10)),
                       ("true", departure)] + ([("false", NOW)] if scenario == "returned" else []):

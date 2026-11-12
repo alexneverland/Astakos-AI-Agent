@@ -5,7 +5,7 @@ from services.turn_timing import trace_stage
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Callable, Literal, TYPE_CHECKING
+from typing import Any, Callable, Literal, TYPE_CHECKING
 from collections.abc import Mapping
 from copy import deepcopy
 from datetime import timedelta
@@ -165,22 +165,34 @@ class PersistedRoutineFeedbackHandler:
             reference = _feedback_conversation_reference(now=now, rowid=rowid,
                 db_path=self._conversation_db_path)
             selector = partial(self._selector, conversation_context=reference) if reference else self._selector
-            active_context_reply = next((item for item in reference
+            context_reply = next((item for item in reference
                 if reply_event_id is not None and item.get("kind") == "context_question_reference"
-                and item.get("status") == "sent" and item.get("channel") == self._channel
-                and item.get("external_id") == reply_event_id
-                and aware(datetime.fromisoformat(item["slot_at"])) > now), None)
-            if active_context_reply is not None:
-                target_ids = {int(item) for item in active_context_reply["routine_ids"]}
+                and item.get("channel") == self._channel
+                and item.get("external_id") == reply_event_id), None)
+            context_reply_is_current = None
+            scoped_reply = context_reply is not None and context_reply.get("status") in {"sent", "resolved"}
+            if scoped_reply:
+                slot = aware(datetime.fromisoformat(context_reply["slot_at"]))
+                if slot.date() != now.date() or slot <= now:
+                    return build_dated_routine_feedback_context(FeedbackTurnResult("none"))
+                target_ids = {int(item) for item in context_reply["routine_ids"]}
                 original_selector = selector
 
-                def select_context_cancellation(*args, **kwargs) -> DatedRoutineSelection:
-                    """An exact reply to a state question can cancel only its own occurrence."""
+                def select_context_cancellation(*args: Any, **kwargs: Any) -> DatedRoutineSelection | DatedRoutineBatch:
+                    """Accept only cancellations for the referenced occurrences."""
                     selection = original_selector(*args, **kwargs)
-                    if (isinstance(selection, DatedRoutineSelection) and selection.action == "skip_today"
-                            and selection.routine_id in target_ids and selection.occurrence_date == now.date()):
+                    selections = selection.selections if isinstance(selection, DatedRoutineBatch) else (selection,)
+                    if selections and all(isinstance(item, DatedRoutineSelection)
+                            and item.action == "skip_today" and item.routine_id in target_ids
+                            and item.occurrence_date == slot.date() for item in selections):
                         return selection
                     return DatedRoutineSelection("none")
+
+                def context_reply_is_current() -> bool:
+                    """Recheck the delivered question and its time before recording feedback."""
+                    current = aware(self._clock())
+                    return current < slot and context_reply in _feedback_conversation_reference(
+                        now=current, rowid=rowid, db_path=self._conversation_db_path)
 
                 selector = select_context_cancellation
             expired_reply = reply_event_id is not None and any(
@@ -199,12 +211,12 @@ class PersistedRoutineFeedbackHandler:
                                 and selection.action in {"complete", "none", "clarify"})
                             else DatedRoutineSelection("none"))
                 selector = select_execution
-            catalog_reply_id = None if expired_reply or active_context_reply is not None else reply_event_id
+            catalog_reply_id = None if expired_reply or scoped_reply else reply_event_id
             result = process_catalog_feedback_turn(user_text, store=self._store,
                 selector=selector, now=now, clock=self._clock,
                 trusted=True, user_rowid=rowid, conversation_db_path=self._conversation_db_path,
                 reply_channel=self._channel if catalog_reply_id is not None else None,
-                reply_event_id=catalog_reply_id)
+                reply_event_id=catalog_reply_id, context_reply_is_current=context_reply_is_current)
         except Exception:
             result = FeedbackTurnResult("error")
         return build_dated_routine_feedback_context(result)
@@ -367,6 +379,7 @@ def process_catalog_feedback_turn(
     clock: Callable[[], datetime], trusted: bool, user_rowid: int,
     conversation_db_path: str, reply_channel: str | None = None,
     reply_event_id: str | None = None,
+    context_reply_is_current: Callable[[], bool] | None = None,
 ) -> FeedbackTurnResult:
     """Compose canonical candidates and persisted-turn guards for every channel.
 
@@ -380,6 +393,8 @@ def process_catalog_feedback_turn(
 
         def catalog_is_current() -> bool:
             """Reject identity decisions when any compared candidate has changed."""
+            if context_reply_is_current is not None and not context_reply_is_current():
+                return False
             return store.feedback_candidate_revisions() == {
                 item.routine_id: item.revision for item in snapshot}
 

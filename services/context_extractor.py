@@ -1,5 +1,7 @@
 import config
 import json
+import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -31,7 +33,11 @@ _CONTEXT_ENUM_VALUES = {
 
 def _partner_workplace_excludes_company() -> bool:
     """Read the household's opt-in rule for current presence at the partner's workplace."""
-    return config.NLP_CONFIG.get("routines", {}).get("partner_workplace_excludes_company") is True
+    routines = config.NLP_CONFIG.get("routines", {})
+    if not isinstance(routines, Mapping):
+        logging.getLogger(__name__).warning("Ignoring malformed routines settings for workplace presence")
+        return False
+    return routines.get("partner_workplace_excludes_company") is True
 
 _CONTEXT_EXTRACTION_PROMPT = """
 You are {bot_name}, an AI assistant. The user ({user_name}) sends you a message.
@@ -583,7 +589,8 @@ def _validate_context_resolution(
         from services.routine_duration_context import current_owner_transition
         departure = current_owner_transition(expected.get, now, departure_only=True)
         if (flags != {"partner_with_user": False} or departure is None
-                or event_at.date() != now.date() or event_at.timestamp() > departure.timestamp()):
+                or event_at.date() != now.date()
+                or not 0 <= departure.timestamp() - event_at.timestamp() < STORED_VALIDITY.total_seconds()):
             return None
         event_at = departure
     if not 0 <= now.timestamp() - event_at.timestamp() < STORED_VALIDITY.total_seconds():

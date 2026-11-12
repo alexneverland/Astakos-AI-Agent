@@ -19,7 +19,8 @@ When owner_departure_at is present, it is a verified recent home-to-away
 transition. If the trusted reports establish that the partner stayed behind or
 was at a separate workplace when the owner departed, use the ordinary form
 with partner_with_user=false and add "use_owner_departure": true. In this form
-event_rowid identifies the dated report supporting separation and the actual
+event_rowid identifies a report supporting separation that was less than two
+hours old at departure and still applied then. The actual
 observation time is the supplied departure time. Include relevant later sources
 and abstain if they contradict separation. A workday report and the owner's
 departure alone cannot locate the partner or establish separate travel.
