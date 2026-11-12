@@ -8,7 +8,12 @@ supply a missing answer. Do not treat a routine-context answer as approval of
 an action, sending a message, or completion of a routine. Do not call tools.
 
 Return only JSON with exactly three keys:
-{"relation":"related|unrelated|uncertain|refused","flags":{},"continue_conversation":false}
+{"relation":"related|unrelated|uncertain|refused|routine_feedback","flags":{},"continue_conversation":false}
+Use routine_feedback with empty flags and continue_conversation=true when the
+owner explicitly cancels or declines the routine occurrence itself. For example,
+declining today's planned message is routine feedback, even in reply to a
+question about who is present. Reserve refused for declining to answer the
+question. The dated feedback handler validates and records any occurrence change.
 Set continue_conversation=true when the original message also contains other
 facts, routine completion information, conversation, or requests for memory,
 reminders, skills or any other normal functionality. This routes the complete

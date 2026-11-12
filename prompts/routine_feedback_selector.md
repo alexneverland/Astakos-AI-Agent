@@ -16,8 +16,10 @@ normally done is not evidence of execution today. Resolve it against the
 preceding conversational question even when scheduled briefings intervene or
 the owner answers from another channel. Do not turn a habitual present tense
 into current participation. If current execution remains ambiguous, clarify.
-An expired context_question_reference can explain which routine a later report
-refers to; it is not a pending reminder, approval or permission to replay a send.
+A current context_question_reference can identify which routine an explicit
+cancellation concerns before its slot. Declining the question itself does not
+cancel the routine. An expired reference may explain a later execution report.
+Neither reference grants approval to send.
 Its routine_ids may identify candidates only; never select an ID outside candidates.
 Use the authoritative now/timezone and allowed_dates; never invent dates.
 allowed_dates lists known occurrences and today, not all days the owner may

@@ -110,6 +110,12 @@ from confirmed location and company. Shared travel and workplace reports use the
 semantic context path, without lexical presence fallbacks. External action
 approval requirements are unaffected.
 
+Households can opt in to `routines.partner_workplace_excludes_company` in the
+local `astakos_custom_intents.json` overlay. Enable it only if the owner confirms
+that being at the partner's own workplace establishes separation. The rule uses
+current workplace evidence without requiring owner location. A day schedule,
+remote work or uncertain arrival is insufficient, and explicit company wins.
+
 Web draft preparation, like Chat, can resolve a recipient from the bounded
 conversation when the owner accepts a message offer without repeating the name.
 Preparation still uses the canonical saved-draft tool. A bare send command without

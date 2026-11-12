@@ -1,16 +1,62 @@
 """Mixed completion/cancellation uses isolated native ledger transactions."""
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 import json
 
 import pytest
 
 from services.routine_feedback import ATHENS
+from memory.routine_feedback import RoutineFeedbackStore
 from tests.test_routine_feedback_runtime import store
 
 NOW = datetime(2026, 10, 13, 15, 39, 55, tzinfo=ATHENS)
 REPORT = "Σχολασα φίλε αλλά ο καιρός χάλια βρέχει πολύ ούτε ο Αλέξανδρος έχει ποδόσφαιρο"
 pytestmark = pytest.mark.usefixtures("offline_behavioral_io")
+
+
+@pytest.mark.parametrize("selection", ["skip_today", "complete", "none", "batch", "wrong_target", "resolved", "status_race", "slot_race"])
+def test_exact_context_question_reply_records_only_occurrence_cancellation(
+    store: RoutineFeedbackStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str,
+) -> None:
+    """An exact Matrix reply can close today without a routine-delivery receipt."""
+    from memory.conversation_history import append_message
+    from services import routine_completion_selector as adapter, routine_feedback_turn as turn
+
+    text = "Δεν θα χρειαστώ μήνυμα σήμερα φίλε"
+    path = str(tmp_path / "history.db")
+    owner = append_message(role="user", channel="matrix", content=text, timestamp=NOW, db_path=path)
+    with store.connection_factory() as connection:
+        connection.execute("INSERT INTO routines VALUES (2,'Other routine',0,0,0,1,'active',1,NULL,NULL,0,'Tuesday','17:00')")
+    reference = {
+        "kind": "context_question_reference", "status": "resolved" if selection == "resolved" else "sent", "channel": "matrix",
+        "external_id": "$presence", "routine_ids": ["1", "2"] if selection == "batch" else ["1"],
+        "slot_at": (NOW+timedelta(minutes=10)).isoformat(),
+    }
+    monkeypatch.setattr(turn, "_feedback_conversation_reference", lambda **_: [dict(reference)])
+    current = NOW
+    action = selection if selection in {"complete", "none"} else "skip_today"
+    payload = {"action": action, "routine_id": 2 if selection == "wrong_target" else (1 if selection != "none" else None),
+               "occurrence_date": NOW.date().isoformat() if selection != "none" else None}
+
+    def model(_: str) -> SimpleNamespace:
+        """Simulate a semantic decision and a possible concurrent question change."""
+        nonlocal current
+        if selection == "status_race":
+            reference["status"] = "declined"
+        if selection == "slot_race":
+            current = NOW + timedelta(minutes=10)
+        result = {"selections": [payload, {**payload, "routine_id": 2}]} if selection == "batch" else payload
+        return SimpleNamespace(text=json.dumps(result))
+
+    monkeypatch.setattr(adapter, "safe_gemini_call", model)
+    handler = turn.PersistedRoutineFeedbackHandler(store=store, selector=adapter.select_dated_routine,
+        clock=lambda: current, channel="matrix", trusted_owner=True, conversation_db_path=path)
+    handler(text, owner, reply_event_id="$presence")
+    expected = {1, 2} if selection == "batch" else {1} if selection in {"skip_today", "resolved"} else set()
+    assert store.closed_occurrence_ids(NOW.date()) == expected
+    for rid in (1, 2):
+        assert [item.feedback for item in store.occurrences(rid)] == (["skip_today"] if rid in expected else [])
 
 
 @pytest.mark.parametrize("channel", ["matrix", "web", "telegram"])

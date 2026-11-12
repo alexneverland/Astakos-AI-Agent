@@ -15,6 +15,16 @@ event_rowid identifies the actual recent owner event, and support_rowids lists
 its source plus the explicit daily-plan/other relevant source IDs. No actions,
 routine completion, messages, tool use, invented source IDs or new permissions.
 
+When owner_departure_at is present, it is a verified recent home-to-away
+transition. If the trusted reports establish that the partner stayed behind or
+was at a separate workplace when the owner departed, use the ordinary form
+with partner_with_user=false and add "use_owner_departure": true. In this form
+event_rowid identifies a report supporting separation that was less than two
+hours old at departure and still applied then. The actual
+observation time is the supplied departure time. Include relevant later sources
+and abstain if they contradict separation. A workday report and the owner's
+departure alone cannot locate the partner or establish separate travel.
+
 Explicit-duration alternative: a current-day statement about an ongoing situation
 can remain applicable beyond the two-hour observation limit when the owner gives
 a duration or a clear day-scoped commitment. Assess this semantically, across all

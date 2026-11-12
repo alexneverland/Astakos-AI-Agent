@@ -880,7 +880,7 @@ async def test_context_reply_reaches_final_canonical_flags_without_approval(tmp_
     monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "routines.db"))
     routine_db.setup_db()
     monkeypatch.setattr(clarification, "context_confirmation_conflict", lambda: False)
-    monkeypatch.setattr(context_extractor, "load_recent_trusted_user_messages", lambda **_: [])
+    monkeypatch.setattr(context_extractor, "load_recent_state_messages", lambda **_: [])
 
     def model(prompt):
         assert "👍" in prompt

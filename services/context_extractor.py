@@ -1,5 +1,7 @@
 import config
 import json
+import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -27,6 +29,15 @@ _CONTEXT_ENUM_VALUES = {
     "kid1_absence_scope": {"extended", "temporary", "home"},
     "state:kid1:outing": {"in_progress", "done"},
 }
+
+
+def _partner_workplace_excludes_company() -> bool:
+    """Read the household's opt-in rule for current presence at the partner's workplace."""
+    routines = config.NLP_CONFIG.get("routines", {})
+    if not isinstance(routines, Mapping):
+        logging.getLogger(__name__).warning("Ignoring malformed routines settings for workplace presence")
+        return False
+    return routines.get("partner_workplace_excludes_company") is True
 
 _CONTEXT_EXTRACTION_PROMPT = """
 You are {bot_name}, an AI assistant. The user ({user_name}) sends you a message.
@@ -127,7 +138,7 @@ Answer:
 Example 9:
 Message: "I have the kid here with me, I am having coffee and food before I leave for work. My partner is working today."
 Answer:
-{{"user_out_of_home": false, "user_at_work": false, "kid1_with_user": true, "partner_at_work": true, "partner_work_mode": "office", "partner_with_user": false}}
+{{"user_out_of_home": false, "user_at_work": false, "kid1_with_user": true}}
 
 Example 10:
 Message: "I am at work on the afternoon shift."
@@ -222,10 +233,11 @@ def extract_and_update_context_flags(
         expected = {key: get_context_state(key) for key in
                     _CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES) | {"kid1_away_reason"}}
         if daily_resolution_flags is not None:
-            from services.routine_duration_context import DURATION_KEY, load_daily_schedule_reference
+            from services.routine_duration_context import DURATION_KEY, current_owner_transition, load_daily_schedule_reference
             from memory.routine_db import CONTEXT_LOCATION_TRANSITION_KEY
             expected[DURATION_KEY] = get_context_state(DURATION_KEY)
             expected[CONTEXT_LOCATION_TRANSITION_KEY] = get_context_state(CONTEXT_LOCATION_TRANSITION_KEY)
+            departure_at = current_owner_transition(expected.get, current, departure_only=True)
             schedule_reference = load_daily_schedule_reference(current)
         if daily_resolution_flags is not None:
             prompt = ("Resolve unknown routine context from the dated reference sources below.\n"
@@ -242,6 +254,16 @@ def extract_and_update_context_flags(
             )
         prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
                             "daily_context_reference.md").read_text(encoding="utf-8")
+        workplace_excludes_company = _partner_workplace_excludes_company()
+        if workplace_excludes_company:
+            prompt += (
+                "\nThe owner has confirmed a household rule: current presence at the partner's own "
+                "workplace establishes partner_with_user=false without knowing the owner's location. "
+                "Apply only to grounded current presence at her own workplace, including a still-active "
+                "explicit work interval. A bare day schedule, remote work or unconfirmed arrival is insufficient. "
+                "Newer explicit co-presence or a reported exception takes precedence. Use the partner's "
+                "report as the source and preserve its actual time.\n"
+            )
         prompt += "\n" + format_untrusted_tool_result("daily owner context reference", json.dumps({
             "now": current.isoformat(),
             "sources": [{"rowid": row["rowid"], "at": row["timestamp"],
@@ -262,6 +284,7 @@ def extract_and_update_context_flags(
             prompt += "\nAllowed flags: " + json.dumps(daily_resolution_flags)
             prompt += "\n" + format_untrusted_tool_result("daily schedule reference", json.dumps(
                 {"daily_schedule": schedule_reference,
+                 "owner_departure_at": departure_at.isoformat() if departure_at else None,
                  "day_of_week": current.strftime("%A"),
                  "is_weekend": current.weekday() >= 5,
                  "effective_shift": resolve_current_shift(current)}, ensure_ascii=False))
@@ -338,13 +361,15 @@ def extract_and_update_context_flags(
             if (not isinstance(payload, dict)
                     or set(payload) not in ({"relation", "flags"}, {"relation", "flags", "continue_conversation"})
                     or not isinstance(payload["relation"], str)
-                    or payload["relation"] not in {"related", "unrelated", "uncertain", "refused"}
+                    or payload["relation"] not in {"related", "unrelated", "uncertain", "refused", "routine_feedback"}
                     or not isinstance(payload["flags"], dict)
                     or type(payload.get("continue_conversation", False)) is not bool):
                 return empty_result
             relation = payload["relation"]
             # Missing routing metadata is not evidence of a standalone answer.
             continue_conversation = payload.get("continue_conversation", True)
+            if relation == "routine_feedback" and (payload["flags"] or not continue_conversation):
+                return empty_result
             if relation != "related":
                 return ContextExtractionResult(relation, continue_conversation=continue_conversation)
             explicit_mixed = payload.get("continue_conversation") is True
@@ -406,8 +431,9 @@ def extract_and_update_context_flags(
                 payload["partner_with_user"] = False
                 payload["kid1_with_user"] = False
 
-        # Work status does not identify a workplace or anyone's companion.
-        # Preserve the semantic result, including shared-workplace reports.
+        if (not clarification and workplace_excludes_company
+                and payload.get("partner_at_work") is True and payload.get("partner_work_mode") == "office"):
+            payload.setdefault("partner_with_user", False)
 
         if payload.get("kid1_with_user") is True:
             payload["kid1_away_from_home"] = False
@@ -538,7 +564,7 @@ def reconcile_context_message(
 
 def _validate_context_resolution(
     payload: object, rows: list[dict], expected: dict, *, allowed: set[str],
-    now: datetime, allow_equal_timestamp: bool = False,
+    now: datetime, allow_equal_timestamp: bool = False, owner_departure: bool = False,
 ) -> tuple[dict, datetime] | None:
     """Validate typed state/time; equality requires a caller-verified latest source.
 
@@ -559,6 +585,14 @@ def _validate_context_resolution(
             or len(set(support)) != len(support) or event_id not in support):
         return None
     event_at = datetime.fromisoformat(sources[event_id]["timestamp"])
+    if owner_departure:
+        from services.routine_duration_context import current_owner_transition
+        departure = current_owner_transition(expected.get, now, departure_only=True)
+        if (flags != {"partner_with_user": False} or departure is None
+                or event_at.date() != now.date()
+                or not 0 <= departure.timestamp() - event_at.timestamp() < STORED_VALIDITY.total_seconds()):
+            return None
+        event_at = departure
     if not 0 <= now.timestamp() - event_at.timestamp() < STORED_VALIDITY.total_seconds():
         return None
     # Do not replace newer canonical evidence with an older interpreted event.
@@ -606,7 +640,11 @@ def _commit_daily_resolution(
     if payload == {"flags": {}, "event_rowid": None, "support_rowids": []}:
         _record_daily_resolution("model_unknown", allowed, channel)
         return None
-    resolved = _validate_context_resolution(payload, rows, expected, allowed=allowed, now=now)
+    uses_departure = isinstance(payload, dict) and payload.get("use_owner_departure") is True
+    if uses_departure:
+        payload = {key: value for key, value in payload.items() if key != "use_owner_departure"}
+    resolved = _validate_context_resolution(payload, rows, expected, allowed=allowed,
+                                            now=now, owner_departure=uses_departure)
     if resolved is None or not still_current():
         _record_daily_resolution("observation_rejected_or_superseded", allowed, channel)
         return None

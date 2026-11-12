@@ -11,6 +11,45 @@ from services.routine_feedback import ATHENS
 NOW = datetime(2026, 10, 8, 10, 9, 47, tzinfo=ATHENS)
 
 
+@pytest.mark.usefixtures("offline_behavioral_io")
+@pytest.mark.parametrize("scenario", ["departure", "refresh", "returned", "work_only", "stale_partner"])
+def test_daily_resolution_uses_actual_departure_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str,
+) -> None:
+    """A recent departure can anchor grounded separation; work alone stays uncertain."""
+    from memory import conversation_history as history, routine_db as db
+    from services import context_extractor as extractor
+
+    path = str(tmp_path / "history.db")
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "routines.db"))
+    db.setup_db()
+    report = "Η Σοφία δουλεύει σήμερα" if scenario == "work_only" else "Η Σοφία είναι στο δικό της γραφείο μέχρι το μεσημέρι."
+    source = history.append_message(role="user", channel="matrix", content=report,
+        timestamp=NOW-timedelta(minutes=180 if scenario == "stale_partner" else 145), db_path=path)
+    departure = NOW-timedelta(minutes=35)
+    for value, at in [("true" if scenario == "refresh" else "false", departure-timedelta(minutes=10)),
+                      ("true", departure)] + ([("false", NOW)] if scenario == "returned" else []):
+        assert db.set_context_states_if_unchanged({"user_out_of_home": (value, NOW.date().isoformat())},
+            {"user_out_of_home": db.get_context_state("user_out_of_home")}, recorded_at=at)
+
+    def model(prompt: str) -> SimpleNamespace:
+        """Simulate a grounded decision, an abstention, or a stale transition reference."""
+        assert '"owner_departure_at"' in prompt
+        if scenario == "work_only":
+            return SimpleNamespace(text='{"flags":{},"event_rowid":null,"support_rowids":[]}')
+        return SimpleNamespace(text=json.dumps({"flags": {"partner_with_user": False},
+            "event_rowid": source["rowid"], "support_rowids": [source["rowid"]], "use_owner_departure": True}))
+
+    monkeypatch.setattr(extractor, "safe_gemini_call", model)
+    assert extractor.resolve_daily_context_before_question(("partner_with_user",), now=NOW,
+        still_current=lambda: True, channel="matrix", conversation_db_path=path) is (scenario == "departure")
+    result = db.get_context_state("partner_with_user")
+    if scenario == "departure":
+        assert result["value"] == "false" and result["updated_at"] == departure.isoformat()
+    else:
+        assert result is None
+
+
 @pytest.mark.parametrize("noise", ["yesterday", "external"])
 def test_daily_bound_counts_only_eligible_athens_day_sources(tmp_path, noise):
     """Unrelated rows must not disable an otherwise complete owner-day view."""
