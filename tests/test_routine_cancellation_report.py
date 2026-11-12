@@ -13,6 +13,32 @@ REPORT = "Σχολασα φίλε αλλά ο καιρός χάλια βρέχε
 pytestmark = pytest.mark.usefixtures("offline_behavioral_io")
 
 
+@pytest.mark.parametrize("selection", ["skip_today", "complete", "none"])
+def test_exact_context_question_reply_records_only_occurrence_cancellation(
+    store, tmp_path, monkeypatch: pytest.MonkeyPatch, selection: str,
+) -> None:
+    """An exact Matrix reply can close today without a routine-delivery receipt."""
+    from memory.conversation_history import append_message
+    from services import routine_completion_selector as adapter, routine_feedback_turn as turn
+
+    text = "Δεν θα χρειαστώ μήνυμα σήμερα φίλε"
+    path = str(tmp_path / "history.db")
+    owner = append_message(role="user", channel="matrix", content=text, timestamp=NOW, db_path=path)
+    monkeypatch.setattr(turn, "_feedback_conversation_reference", lambda **_: [{
+        "kind": "context_question_reference", "status": "sent", "channel": "matrix",
+        "external_id": "$presence", "routine_ids": ["1"],
+        "slot_at": (NOW+timedelta(minutes=10)).isoformat(),
+    }])
+    payload = {"action": selection, "routine_id": 1 if selection != "none" else None,
+               "occurrence_date": NOW.date().isoformat() if selection != "none" else None}
+    monkeypatch.setattr(adapter, "safe_gemini_call", lambda _: SimpleNamespace(text=json.dumps(payload)))
+    handler = turn.PersistedRoutineFeedbackHandler(store=store, selector=adapter.select_dated_routine,
+        clock=lambda: NOW, channel="matrix", trusted_owner=True, conversation_db_path=path)
+    handler(text, owner, reply_event_id="$presence")
+    assert store.closed_occurrence_ids(NOW.date()) == ({1} if selection == "skip_today" else set())
+    assert [item.feedback for item in store.occurrences(1)] == (["skip_today"] if selection == "skip_today" else [])
+
+
 @pytest.mark.parametrize("channel", ["matrix", "web", "telegram"])
 def test_first_report_records_finished_work_and_cancelled_football(store, tmp_path, monkeypatch, channel):
     """No delivery/second reminder question is needed for either explicit report."""

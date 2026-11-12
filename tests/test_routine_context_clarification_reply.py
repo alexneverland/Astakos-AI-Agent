@@ -27,7 +27,7 @@ def delivered(tmp_path, monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", forbidden)
     monkeypatch.setattr(routine_db, "DB_PATH", str(tmp_path / "routines.db"))
     routine_db.setup_db()
-    monkeypatch.setattr(context_extractor, "load_recent_trusted_user_messages", lambda **_: [])
+    monkeypatch.setattr(context_extractor, "load_recent_state_messages", lambda **_: [])
     monkeypatch.setattr(context_extractor, "infer_routine_reconciliation_directives", forbidden)
     store = ClarificationStore(tmp_path / "astakos_routine_context_questions.json")
     request = QuestionRequest("q1", "presence", ("r1",), ("partner_with_user",),
@@ -78,6 +78,19 @@ def test_refusal_with_another_request_continues_without_claiming_flag_extraction
     assert result.outcome == "declined" and result.continue_conversation
     assert not result.context_flags_processed
     assert delivered.snapshot()["requests"][0]["status"] == "declined"
+    assert routine_db.get_context_state("partner_with_user") is None
+
+
+def test_cancel_message_is_left_to_dated_feedback(
+    delivered: ClarificationStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation bypasses the context-only acknowledgement and flag writer."""
+    monkeypatch.setattr(context_extractor, "safe_gemini_call", lambda _: SimpleNamespace(text=
+        '{"relation":"routine_feedback","flags":{},"continue_conversation":true}'))
+    result = process_question_answer(store=delivered, user_text="Δεν θα χρειαστώ μήνυμα σήμερα φίλε",
+        channel="matrix", now=NOW + timedelta(seconds=1), trusted_owner=True)
+    assert not result.consumed and result.outcome == "routine_feedback"
+    assert delivered.snapshot()["pending"]["status"] == "sent"
     assert routine_db.get_context_state("partner_with_user") is None
 
 

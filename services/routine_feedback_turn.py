@@ -165,6 +165,24 @@ class PersistedRoutineFeedbackHandler:
             reference = _feedback_conversation_reference(now=now, rowid=rowid,
                 db_path=self._conversation_db_path)
             selector = partial(self._selector, conversation_context=reference) if reference else self._selector
+            active_context_reply = next((item for item in reference
+                if reply_event_id is not None and item.get("kind") == "context_question_reference"
+                and item.get("status") == "sent" and item.get("channel") == self._channel
+                and item.get("external_id") == reply_event_id
+                and aware(datetime.fromisoformat(item["slot_at"])) > now), None)
+            if active_context_reply is not None:
+                target_ids = {int(item) for item in active_context_reply["routine_ids"]}
+                original_selector = selector
+
+                def select_context_cancellation(*args, **kwargs) -> DatedRoutineSelection:
+                    """An exact reply to a state question can cancel only its own occurrence."""
+                    selection = original_selector(*args, **kwargs)
+                    if (isinstance(selection, DatedRoutineSelection) and selection.action == "skip_today"
+                            and selection.routine_id in target_ids and selection.occurrence_date == now.date()):
+                        return selection
+                    return DatedRoutineSelection("none")
+
+                selector = select_context_cancellation
             expired_reply = reply_event_id is not None and any(
                 item.get("kind") == "context_question_reference"
                 and item.get("status") == "expired"
@@ -181,11 +199,12 @@ class PersistedRoutineFeedbackHandler:
                                 and selection.action in {"complete", "none", "clarify"})
                             else DatedRoutineSelection("none"))
                 selector = select_execution
+            catalog_reply_id = None if expired_reply or active_context_reply is not None else reply_event_id
             result = process_catalog_feedback_turn(user_text, store=self._store,
                 selector=selector, now=now, clock=self._clock,
                 trusted=True, user_rowid=rowid, conversation_db_path=self._conversation_db_path,
-                reply_channel=self._channel if reply_event_id is not None and not expired_reply else None,
-                reply_event_id=None if expired_reply else reply_event_id)
+                reply_channel=self._channel if catalog_reply_id is not None else None,
+                reply_event_id=catalog_reply_id)
         except Exception:
             result = FeedbackTurnResult("error")
         return build_dated_routine_feedback_context(result)
