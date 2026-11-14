@@ -270,6 +270,33 @@ def test_web_chat_early_saved_replies_return_both_history_row_ids(mode: str) -> 
     assert saved_roles == ["user", "assistant"]
 
 
+def test_web_chat_voice_mode_mirrors_both_user_and_assistant_to_selected_channel() -> None:
+    """Voice-transcribed Web messages must mirror both user and reply to the external channel."""
+    from api.server import LOCAL_TOKEN, server
+
+    saved_calls: list[tuple[str, str | None]] = []
+
+    def save_history(role: str, _content: str, **kwargs: object) -> dict[str, object]:
+        saved_calls.append((role, kwargs.get("mirror_target")))
+        return {"id": f"voice-msg-{len(saved_calls)}", "rowid": 800 + len(saved_calls)}
+
+    with (
+        patch("services.routine_context_clarification.try_context_question_reply",
+              return_value=SimpleNamespace(consumed=True, reply="Έγινε!", continue_conversation=False)),
+        patch("core.messaging_channel.resolve_external_channel", return_value="matrix"),
+        patch("api.server.append_to_chat_history", side_effect=save_history),
+        patch("api.server.enqueue_fast_task"),
+    ):
+        response = TestClient(server).post(
+            "/chat",
+            json={"message": "Καλημέρα φίλε", "voice_mode": True},
+            headers={"Authorization": f"Bearer {LOCAL_TOKEN}"},
+        )
+
+    assert response.status_code == 200
+    assert saved_calls == [("user", "matrix"), ("assistant", "matrix")]
+
+
 def test_external_scheduler_registers_mirror_consumer_without_importing_bot() -> None:
     """Guard Matrix/Telegram shared scheduler wiring without starting the bot."""
     source = Path(__file__).resolve().parents[1] / "clients" / "telegram_bot.py"

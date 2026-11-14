@@ -1034,15 +1034,14 @@ async def chat_endpoint(request: Request, _=Depends(require_token)):
     if not user_input:
         return JSONResponse({"error": t("api.server.empty_message")}, status_code=400)
 
-    # Pin the display target for this entire Web text turn, including its reply.
+    # Pin the display target for this entire Web turn (text or voice), including its reply.
     mirror_target = None
-    if not is_voice_mode:
-        from core.messaging_channel import resolve_external_channel
+    from core.messaging_channel import resolve_external_channel
 
-        try:
-            mirror_target = resolve_external_channel()
-        except ValueError as exc:
-            print(f"[WebMirror]: No valid external channel: {exc}")
+    try:
+        mirror_target = resolve_external_channel()
+    except ValueError as exc:
+        print(f"[WebMirror]: No valid external channel: {exc}")
 
     # 1. --- PROMPT INJECTION FIREWALL ---
     # We catch malicious intents before they ever touch the LLM or cost API tokens.
