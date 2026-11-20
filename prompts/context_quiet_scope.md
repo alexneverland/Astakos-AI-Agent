@@ -14,6 +14,11 @@ to resume notifications may emit quiet_hours=false without basis metadata.
 The basis is output-validation metadata, not a writable context-state flag.
 
 Resolve each subject and location separately. Family remaining at home does not
-place the owner there. A completed personal departure with relatives explicitly
+place the owner there. family_at_home means the whole household including the
+owner is home, so relatives home with the owner away establishes false. A new
+explicit reunion/homecoming should include the grounded owner location and
+individual co-presence flags, not just an aggregate family_at_home flag. Do not
+refresh or override older person-specific evidence from an ambiguous aggregate.
+A completed personal departure with relatives explicitly
 remaining home establishes separation; it does not establish arrival at work.
 Preserve explicit co-presence in joint travel and do not invent whereabouts.

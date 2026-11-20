@@ -44,5 +44,32 @@ verify extraction contracts and persistence, not a live model's interpretation.
 - 292 distinct relevant cases passed across these groups; git diff --check clean.
 - Existing Chroma asyncio deprecation warning observed in related tests.
 
-Changes remain local for user review. Today's erroneous live flags and routine
-ledger were not modified, and no message was sent or occurrence marked complete.
+## PR #291 review corrections
+
+Initial head 920390c received a completed Codex review with no findings. All five
+Sourcery inline findings on that head were examined; behavior reproductions
+failed six cases before the repairs (23 passed):
+
+- 4641983068: Allow an empty flags map only in the ordinary source-bound
+  validator. Still validate the exact envelope, latest source identity, support
+  IDs and event freshness before independent routine reconciliation. A native
+  temporary routine-pause test verifies the final saved pause; wrong, future,
+  superseded and malformed sources remain rejected.
+- 4641983078: Remove aggregate family-home defaults for individual location and
+  company. Fresh canonical owner-away evidence rejects an ungrounded aggregate
+  homecoming. A new explicit reunion still replaces earlier separation.
+- 4641983085: Keep the existing whole-household meaning of family_at_home,
+  including the owner. An explicit owner-away payload normalizes it to false,
+  agreeing with the existing evidence reader instead of creating a conflict.
+  Shared prompt guidance now states this contract for daily resolution too.
+- 4641983090: Assert the entire previous quiet record is unchanged, including
+  timestamp and expiry, after rejecting an unsupported sleep inference.
+- 4641983096: Annotate every new fixture/test parameter and return value.
+
+Verification after repairs: 303 relevant offline cases passed in one combined
+run, including 29 owner-quiet cases (11 additional review cases). Native stores,
+real clarification ledgers and blocked outbound transport remain in use.
+git diff --check passed. The same existing Chroma deprecation warning remains.
+
+Today's erroneous live flags and routine ledger were not modified, and no
+message was sent or occurrence marked complete. The PR remains open for review.

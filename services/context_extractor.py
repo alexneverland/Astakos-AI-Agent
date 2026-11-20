@@ -45,7 +45,7 @@ You need to understand from the context if any of the following states (context 
 
 Available flags:
 1. "user_out_of_home": (boolean) The user is out of the house now (e.g., walk, shopping, trip, swimming).
-2. "family_at_home": (boolean) The family is at home now.
+2. "family_at_home": (boolean) The whole household, including the owner, is at home now. Relatives remaining home without the owner do not establish this all-home state.
 3. "partner_with_user": (boolean) The partner is with the user now.
 4. "kid1_away_from_home": (boolean) The kid1 is away from home without being with the user.
 5. "user_at_work": (boolean) The user is at work now.
@@ -358,7 +358,7 @@ def extract_and_update_context_flags(
             # final history freshness and the canonical CAS still guard the write.
             resolved = _validate_context_resolution(payload, daily_rows, expected,
                 allowed=_CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES),
-                now=current, allow_equal_timestamp=True)
+                now=current, allow_equal_timestamp=True, allow_empty_flags=True)
             if resolved is None:
                 return None
             payload, source_event_at = resolved
@@ -443,15 +443,19 @@ def extract_and_update_context_flags(
         if payload.get("kid1_with_user") is True:
             payload["kid1_away_from_home"] = False
             
-        if (payload.get("family_at_home") is True and payload.get("user_at_work") is not True
-                and payload.get("user_out_of_home") is not True):
-            # Aggregate household reports cannot overwrite explicit personal facts.
-            payload.setdefault("kid1_with_user", True)
-            payload.setdefault("partner_with_user", True)
-            payload.setdefault("user_out_of_home", False)
-            payload.setdefault("user_at_work", False)
-            if payload["kid1_with_user"] is True:
-                payload.setdefault("kid1_away_from_home", False)
+        if payload.get("family_at_home") is True:
+            if payload.get("user_out_of_home") is True:
+                # The canonical flag means everyone is home, including the owner.
+                payload["family_at_home"] = False
+            elif "user_out_of_home" not in payload:
+                from services.routine_context_evidence import evaluate_stored_evidence
+                at = current if current.tzinfo is not None else current.replace(tzinfo=ZoneInfo("Europe/Athens"))
+                owner = evaluate_stored_evidence(expected.get("user_out_of_home"), now=at)
+                if owner.effective_value is True:
+                    # An aggregate report cannot supply an unreported homecoming.
+                    payload.pop("family_at_home")
+            # Individual whereabouts/company must come from semantic extraction,
+            # never defaults that replace earlier person-specific observations.
 
         if payload.get("kid1_with_user") is True and payload.get("partner_with_user") is True:
             payload["kid1_with_partner"] = True
@@ -464,6 +468,13 @@ def extract_and_update_context_flags(
             payload["kid1_away_from_home"] = True
         elif payload.get("kid1_absence_scope") not in valid_absence_scopes:
             payload.pop("kid1_absence_scope", None)
+
+        if not payload and not clarification:
+            # Rejected context inferences cannot cancel independent routine work.
+            # Source-bound envelopes have already passed provenance/time checks.
+            if get_latest_trusted_user_rowid(**history_options) == source_version:
+                reconcile_context_message(user_text, source_version, history_options["db_path"], current)
+            return None
 
         def persist() -> frozenset[str] | None:
             """Apply the already validated semantic state through canonical writers."""
@@ -593,19 +604,22 @@ def reconcile_context_message(
 def _validate_context_resolution(
     payload: object, rows: list[dict], expected: dict, *, allowed: set[str],
     now: datetime, allow_equal_timestamp: bool = False, owner_departure: bool = False,
+    allow_empty_flags: bool = False,
 ) -> tuple[dict, datetime] | None:
     """Validate typed state/time; equality requires a caller-verified latest source.
 
     Pre-question historical resolution retains strict timestamp ordering because
     its selected event need not be the latest source. Ordinary callers verify the
     latest row/text before permitting equality and recheck freshness before CAS.
+    Only ordinary callers may allow an empty flags map after a rejected inference;
+    envelope shape, support IDs and event freshness remain mandatory.
     """
     from services.routine_context_evidence import STORED_VALIDITY, _recorded_time
     if not isinstance(payload, dict) or set(payload) != {"flags", "event_rowid", "support_rowids"}:
         return None
     flags, event_id, support = payload["flags"], payload["event_rowid"], payload["support_rowids"]
     sources = {row["rowid"]: row for row in rows}
-    if (not isinstance(flags, dict) or not flags or not set(flags) <= allowed
+    if (not isinstance(flags, dict) or (not flags and not allow_empty_flags) or not set(flags) <= allowed
             or any(not _valid_context_flag_value(key, value) for key, value in flags.items())
             or type(event_id) is not int or event_id not in sources
             or not isinstance(support, list) or not support or len(support) > 12
