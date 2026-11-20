@@ -13,6 +13,25 @@ work can change work, home absence and co-presence state when the evidence suppo
 those changes. Joint travel, uncertainty and future plans must remain distinct:
 leaving home does not by itself prove that a companion stayed behind.
 
+An aggregate family-at-home report does not overwrite explicit owner whereabouts
+or individual co-presence facts. Relatives remaining home while the owner has
+left must remain separate subjects.
+`family_at_home` means the whole household including the owner: owner-away reports
+cannot leave it true. Ambiguous aggregate reports cannot supply a homecoming
+against fresh owner-away evidence. Individual presence updates come from the
+semantic report rather than aggregate defaults. A grounded new reunion can still
+supersede prior separation. If a rejected quiet inference leaves no context
+updates, an independently requested routine change still reaches reconciliation
+after the ordinary source and freshness checks.
+
+Quiet state applies to notifications to the owner. Semantic extraction supplies
+bounded `quiet_hours_basis` metadata for a new mute: an explicit owner request
+(`owner_request`) or current rest involving the owner/shared environment
+(`shared_rest`). Other people sleeping elsewhere, a future bedtime, missing scope
+or malformed scope cannot establish a mute. The metadata is validated within the
+existing extraction call and is never stored as a context flag. Unsupported
+inferences preserve prior explicit quiet state; an explicit resume can clear it.
+
 Selections are checked against source IDs, event times, freshness and the latest
 stored state before persistence. Location proves the owner's whereabouts, not
 another person's presence. These guards also apply to inferred related updates;

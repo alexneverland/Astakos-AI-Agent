@@ -283,7 +283,9 @@ def test_context_extractor_does_not_allow_reconciler_to_override_live_work_state
 
 def test_context_extractor_home_state_is_consistent(mocked_context_pipeline):
     mock_llm, mock_set, _ = mocked_context_pipeline
-    mock_llm.return_value = MagicMock(text='{"family_at_home": true}')
+    mock_llm.return_value = MagicMock(text=(
+        '{"family_at_home": true, "user_out_of_home": false, "user_at_work": false,'
+        '"partner_with_user": true, "kid1_with_user": true}'))
 
     extract_and_update_context_flags("Γυρίσαμε όλοι σπίτι.")
 
@@ -341,7 +343,7 @@ def test_future_bedtime_does_not_apply_reconciler_quiet_hours(mocked_context_pip
 def test_explicit_current_quiet_hours_are_persisted(mocked_context_pipeline):
     """A current quiet request can still silence proactive messages."""
     mock_llm, mock_set, _ = mocked_context_pipeline
-    mock_llm.return_value = MagicMock(text='{"quiet_hours": true}')
+    mock_llm.return_value = MagicMock(text='{"quiet_hours": true, "quiet_hours_basis": "owner_request"}')
 
     extract_and_update_context_flags("Θέλω ησυχία τώρα, μην έρθουν ειδοποιήσεις.")
 

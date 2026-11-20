@@ -45,7 +45,7 @@ You need to understand from the context if any of the following states (context 
 
 Available flags:
 1. "user_out_of_home": (boolean) The user is out of the house now (e.g., walk, shopping, trip, swimming).
-2. "family_at_home": (boolean) The family is at home now.
+2. "family_at_home": (boolean) The whole household, including the owner, is at home now. Relatives remaining home without the owner do not establish this all-home state.
 3. "partner_with_user": (boolean) The partner is with the user now.
 4. "kid1_away_from_home": (boolean) The kid1 is away from home without being with the user.
 5. "user_at_work": (boolean) The user is at work now.
@@ -54,7 +54,7 @@ Available flags:
 8. "current_shift": one of "morning", "afternoon", or "night" only when the user directly confirms their active work shift now.
 9. "partner_at_work": (boolean) The partner is at work now.
 10. "partner_work_mode": "office" or "remote" only when the user directly states that the partner is working at their workplace or remotely/from home.
-11. "quiet_hours": (boolean) The user requests quiet or no interruptions now, or clearly says the child is already asleep now. A future bedtime does not activate quiet hours.
+11. "quiet_hours": (boolean) Silence for the owner, supported by the quiet-scope contract below. Another person's sleep alone does not request owner silence.
 12. "kid1_absence_scope": "extended" when the child is explicitly away from the family for a stay/overnight period and cannot take part in their routines; "temporary" for school or a short outing; "home" when the child has returned or is with the user. Do not infer an extended absence merely from being outside the house. Omit this key when the new message does not establish a different absence scope.
 13. "state:kid1:outing": "in_progress" only when a current report establishes that an outing with the child has actually begun; "done" when the outing ended or the current report clearly places them back home. Playing together at home plus a later outing plan is not an outing in progress. Resolve each clause's time and subjects separately; omit ambiguous changes. This state is not a routine completion.
 
@@ -252,6 +252,9 @@ def extract_and_update_context_flags(
                 recent_user_context=_recent_user_context_hint(channel),
                 ai_text=ai_text,
             )
+        if daily_resolution_flags is None:
+            prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
+                                "context_quiet_scope.md").read_text(encoding="utf-8")
         prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
                             "daily_context_reference.md").read_text(encoding="utf-8")
         workplace_excludes_company = _partner_workplace_excludes_company()
@@ -319,6 +322,8 @@ def extract_and_update_context_flags(
             if daily_resolution_flags is not None:
                 _record_daily_resolution("invalid_model_output", daily_resolution_flags, channel)
             return empty_result
+        if daily_resolution_flags is None:
+            payload = _validate_quiet_scope(payload)
         if daily_resolution_flags is not None:
             return _commit_daily_resolution(payload, daily_rows, expected,
                 allowed=set(daily_resolution_flags), now=current,
@@ -353,7 +358,7 @@ def extract_and_update_context_flags(
             # final history freshness and the canonical CAS still guard the write.
             resolved = _validate_context_resolution(payload, daily_rows, expected,
                 allowed=_CONTEXT_BOOLEAN_FLAGS | set(_CONTEXT_ENUM_VALUES),
-                now=current, allow_equal_timestamp=True)
+                now=current, allow_equal_timestamp=True, allow_empty_flags=True)
             if resolved is None:
                 return None
             payload, source_event_at = resolved
@@ -438,12 +443,19 @@ def extract_and_update_context_flags(
         if payload.get("kid1_with_user") is True:
             payload["kid1_away_from_home"] = False
             
-        if payload.get("family_at_home") is True and payload.get("user_at_work") is not True:
-            payload["kid1_away_from_home"] = False
-            payload["kid1_with_user"] = True
-            payload["partner_with_user"] = True
-            payload["user_out_of_home"] = False
-            payload["user_at_work"] = False
+        if payload.get("family_at_home") is True:
+            if payload.get("user_out_of_home") is True:
+                # The canonical flag means everyone is home, including the owner.
+                payload["family_at_home"] = False
+            elif "user_out_of_home" not in payload:
+                from services.routine_context_evidence import evaluate_stored_evidence
+                at = current if current.tzinfo is not None else current.replace(tzinfo=ZoneInfo("Europe/Athens"))
+                owner = evaluate_stored_evidence(expected.get("user_out_of_home"), now=at)
+                if owner.effective_value is True:
+                    # An aggregate report cannot supply an unreported homecoming.
+                    payload.pop("family_at_home")
+            # Individual whereabouts/company must come from semantic extraction,
+            # never defaults that replace earlier person-specific observations.
 
         if payload.get("kid1_with_user") is True and payload.get("partner_with_user") is True:
             payload["kid1_with_partner"] = True
@@ -456,6 +468,13 @@ def extract_and_update_context_flags(
             payload["kid1_away_from_home"] = True
         elif payload.get("kid1_absence_scope") not in valid_absence_scopes:
             payload.pop("kid1_absence_scope", None)
+
+        if not payload and not clarification:
+            # Rejected context inferences cannot cancel independent routine work.
+            # Source-bound envelopes have already passed provenance/time checks.
+            if get_latest_trusted_user_rowid(**history_options) == source_version:
+                reconcile_context_message(user_text, source_version, history_options["db_path"], current)
+            return None
 
         def persist() -> frozenset[str] | None:
             """Apply the already validated semantic state through canonical writers."""
@@ -487,6 +506,26 @@ def extract_and_update_context_flags(
             _record_daily_resolution("resolution_error", daily_resolution_flags, channel)
         print(f"[ContextExtractor Error]: {exc!r}")
         return empty_result
+
+
+def _validate_quiet_scope(payload: object) -> object:
+    """Require typed owner-scope evidence before persisting a model-inferred mute.
+
+    The existing semantic call resolves subjects and intent. This validates its
+    bounded contract without interpreting user words or creating a stored flag.
+    Unsupported silence leaves existing quiet state and unrelated facts intact.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    flags = payload.get("flags", payload)
+    if not isinstance(flags, dict):
+        return payload
+    basis = flags.pop("quiet_hours_basis", None)
+    if flags.get("quiet_hours") is True and (
+            type(basis) is not str or basis not in {"owner_request", "shared_rest"}):
+        flags.pop("quiet_hours")
+        logging.getLogger(__name__).info("Ignored quiet-hours inference without supported owner scope")
+    return payload
 
 
 def reconcile_context_message(
@@ -565,19 +604,22 @@ def reconcile_context_message(
 def _validate_context_resolution(
     payload: object, rows: list[dict], expected: dict, *, allowed: set[str],
     now: datetime, allow_equal_timestamp: bool = False, owner_departure: bool = False,
+    allow_empty_flags: bool = False,
 ) -> tuple[dict, datetime] | None:
     """Validate typed state/time; equality requires a caller-verified latest source.
 
     Pre-question historical resolution retains strict timestamp ordering because
     its selected event need not be the latest source. Ordinary callers verify the
     latest row/text before permitting equality and recheck freshness before CAS.
+    Only ordinary callers may allow an empty flags map after a rejected inference;
+    envelope shape, support IDs and event freshness remain mandatory.
     """
     from services.routine_context_evidence import STORED_VALIDITY, _recorded_time
     if not isinstance(payload, dict) or set(payload) != {"flags", "event_rowid", "support_rowids"}:
         return None
     flags, event_id, support = payload["flags"], payload["event_rowid"], payload["support_rowids"]
     sources = {row["rowid"]: row for row in rows}
-    if (not isinstance(flags, dict) or not flags or not set(flags) <= allowed
+    if (not isinstance(flags, dict) or (not flags and not allow_empty_flags) or not set(flags) <= allowed
             or any(not _valid_context_flag_value(key, value) for key, value in flags.items())
             or type(event_id) is not int or event_id not in sources
             or not isinstance(support, list) or not support or len(support) > 12

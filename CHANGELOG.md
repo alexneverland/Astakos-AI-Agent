@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Keep explicit owner whereabouts and company when relatives are home, and
+  require owner-scoped quiet evidence so sleeping relatives elsewhere cannot
+  silence scheduled routine questions.
+
 - Preserve grounded partner presence through continuous GPS refreshes, invalidate
   duration proofs on actual location changes, and keep off-work status separate
   from location. Shared-workplace and mixed reports use semantic presence
