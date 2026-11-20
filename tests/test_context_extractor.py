@@ -341,7 +341,7 @@ def test_future_bedtime_does_not_apply_reconciler_quiet_hours(mocked_context_pip
 def test_explicit_current_quiet_hours_are_persisted(mocked_context_pipeline):
     """A current quiet request can still silence proactive messages."""
     mock_llm, mock_set, _ = mocked_context_pipeline
-    mock_llm.return_value = MagicMock(text='{"quiet_hours": true}')
+    mock_llm.return_value = MagicMock(text='{"quiet_hours": true, "quiet_hours_basis": "owner_request"}')
 
     extract_and_update_context_flags("Θέλω ησυχία τώρα, μην έρθουν ειδοποιήσεις.")
 

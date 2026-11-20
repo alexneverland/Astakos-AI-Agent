@@ -54,7 +54,7 @@ Available flags:
 8. "current_shift": one of "morning", "afternoon", or "night" only when the user directly confirms their active work shift now.
 9. "partner_at_work": (boolean) The partner is at work now.
 10. "partner_work_mode": "office" or "remote" only when the user directly states that the partner is working at their workplace or remotely/from home.
-11. "quiet_hours": (boolean) The user requests quiet or no interruptions now, or clearly says the child is already asleep now. A future bedtime does not activate quiet hours.
+11. "quiet_hours": (boolean) Silence for the owner, supported by the quiet-scope contract below. Another person's sleep alone does not request owner silence.
 12. "kid1_absence_scope": "extended" when the child is explicitly away from the family for a stay/overnight period and cannot take part in their routines; "temporary" for school or a short outing; "home" when the child has returned or is with the user. Do not infer an extended absence merely from being outside the house. Omit this key when the new message does not establish a different absence scope.
 13. "state:kid1:outing": "in_progress" only when a current report establishes that an outing with the child has actually begun; "done" when the outing ended or the current report clearly places them back home. Playing together at home plus a later outing plan is not an outing in progress. Resolve each clause's time and subjects separately; omit ambiguous changes. This state is not a routine completion.
 
@@ -252,6 +252,9 @@ def extract_and_update_context_flags(
                 recent_user_context=_recent_user_context_hint(channel),
                 ai_text=ai_text,
             )
+        if daily_resolution_flags is None:
+            prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
+                                "context_quiet_scope.md").read_text(encoding="utf-8")
         prompt += "\n" + (Path(__file__).resolve().parents[1] / "prompts" /
                             "daily_context_reference.md").read_text(encoding="utf-8")
         workplace_excludes_company = _partner_workplace_excludes_company()
@@ -319,6 +322,8 @@ def extract_and_update_context_flags(
             if daily_resolution_flags is not None:
                 _record_daily_resolution("invalid_model_output", daily_resolution_flags, channel)
             return empty_result
+        if daily_resolution_flags is None:
+            payload = _validate_quiet_scope(payload)
         if daily_resolution_flags is not None:
             return _commit_daily_resolution(payload, daily_rows, expected,
                 allowed=set(daily_resolution_flags), now=current,
@@ -438,12 +443,15 @@ def extract_and_update_context_flags(
         if payload.get("kid1_with_user") is True:
             payload["kid1_away_from_home"] = False
             
-        if payload.get("family_at_home") is True and payload.get("user_at_work") is not True:
-            payload["kid1_away_from_home"] = False
-            payload["kid1_with_user"] = True
-            payload["partner_with_user"] = True
-            payload["user_out_of_home"] = False
-            payload["user_at_work"] = False
+        if (payload.get("family_at_home") is True and payload.get("user_at_work") is not True
+                and payload.get("user_out_of_home") is not True):
+            # Aggregate household reports cannot overwrite explicit personal facts.
+            payload.setdefault("kid1_with_user", True)
+            payload.setdefault("partner_with_user", True)
+            payload.setdefault("user_out_of_home", False)
+            payload.setdefault("user_at_work", False)
+            if payload["kid1_with_user"] is True:
+                payload.setdefault("kid1_away_from_home", False)
 
         if payload.get("kid1_with_user") is True and payload.get("partner_with_user") is True:
             payload["kid1_with_partner"] = True
@@ -487,6 +495,26 @@ def extract_and_update_context_flags(
             _record_daily_resolution("resolution_error", daily_resolution_flags, channel)
         print(f"[ContextExtractor Error]: {exc!r}")
         return empty_result
+
+
+def _validate_quiet_scope(payload: object) -> object:
+    """Require typed owner-scope evidence before persisting a model-inferred mute.
+
+    The existing semantic call resolves subjects and intent. This validates its
+    bounded contract without interpreting user words or creating a stored flag.
+    Unsupported silence leaves existing quiet state and unrelated facts intact.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    flags = payload.get("flags", payload)
+    if not isinstance(flags, dict):
+        return payload
+    basis = flags.pop("quiet_hours_basis", None)
+    if flags.get("quiet_hours") is True and (
+            type(basis) is not str or basis not in {"owner_request", "shared_rest"}):
+        flags.pop("quiet_hours")
+        logging.getLogger(__name__).info("Ignored quiet-hours inference without supported owner scope")
+    return payload
 
 
 def reconcile_context_message(
