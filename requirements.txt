@@ -1,4 +1,4 @@
-tzdata>=2025.2
+tzdata>=2026.6
 chromadb==1.5.9
 ddgs==9.14.4
 fastapi==0.139.2
