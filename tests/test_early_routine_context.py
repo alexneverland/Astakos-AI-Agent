@@ -65,11 +65,16 @@ def test_default_quiet_window_allows_due_question_then_guarded_reminder(environm
         lambda text: delivered.append(text) or DeliveryReceipt(channel, "$departure"))
     monkeypatch.setattr(bot, "_dated_single_routine_sender", sender)
     monkeypatch.setattr(bot, "_dated_batch_routine_sender", sender)
+    monkeypatch.setattr(bot, "can_send_proactive", bot._can_send_proactive_impl)
+    monkeypatch.setattr(bot, "MAX_PROACTIVE_PER_HOUR", 1)
+    monkeypatch.setattr(bot, "_proactive_count", {"hour": -1, "count": 0})
     bot.job_check_routines()
     if quiet_at_dispatch:
+        assert bot._proactive_count["count"] == 0
         assert not delivered and all(row.delivered_at is None for row in store.occurrences(rid))
         return
     assert delivered == ["Σε δέκα λεπτά αναχώρηση"]
+    assert bot._proactive_count["count"] == 1
     assert store.occurrences(rid)[0].delivered_at == state["now"]
     bot.job_check_routines()
     assert len(delivered) == 1
@@ -126,8 +131,9 @@ def test_scheduled_quiet_policy_retains_explicit_state(environment, stored, expi
     assert resolve_quiet_hours(state["now"], scheduled=True) is scheduled
 
 
+@pytest.mark.parametrize("quiet_value", ["true", "invalid"])
 def test_explicit_quiet_hours_skips_job_check_routines_before_quota_and_llm(
-    environment: tuple, monkeypatch: pytest.MonkeyPatch,
+    environment: tuple, monkeypatch: pytest.MonkeyPatch, quiet_value: str,
 ) -> None:
     """Explicit quiet_hours must stop job_check_routines before consuming proactive budget or LLM."""
     from clients import telegram_bot as bot
@@ -135,17 +141,22 @@ def test_explicit_quiet_hours_skips_job_check_routines_before_quota_and_llm(
     state["now"] = state["now"].replace(hour=17, minute=45)
     db.update_routine_db(rid, new_time="18:00")
     _real_gates(worker, bot, monkeypatch, state, db)
-    db.set_context_state("quiet_hours", "true", state["now"].date().isoformat())
     monkeypatch.setattr(bot, "datetime", db.datetime)
+    monkeypatch.setattr(bot, "is_quiet_hours", lambda: quiet_value == "true")
+    db.set_context_state("quiet_hours", quiet_value, state["now"].date().isoformat())
     monkeypatch.setattr(bot, "pending_routine_confirmations", {})
     monkeypatch.setattr(bot, "can_send_proactive", lambda: pytest.fail("Should not consume proactive quota"))
     monkeypatch.setattr(bot, "_craft_proactive_msg", lambda *a, **k: pytest.fail("Should not call LLM"))
+    monkeypatch.setattr(worker, "schedule_context_clarification",
+                        lambda *a, **k: pytest.fail("Should stop before scheduling clarification"))
 
     bot.job_check_routines()
 
 
+@pytest.mark.parametrize("abort", ["quiet", "exception", "send_failed", "new_bucket", "send_success",
+                                  "final_stage_retry", "legacy_timeout"])
 def test_aborted_dispatch_refunds_proactive_slot_and_dedups_allowed_log(
-    environment: tuple, monkeypatch: pytest.MonkeyPatch,
+    environment: tuple, monkeypatch: pytest.MonkeyPatch, abort: str,
 ) -> None:
     """Aborted mid-generation dispatch refunds the proactive slot; allowed logs dedup until blocked."""
     from clients import telegram_bot as bot
@@ -154,6 +165,8 @@ def test_aborted_dispatch_refunds_proactive_slot_and_dedups_allowed_log(
     worker, db, rid, state, _, _, _, _ = environment
     state["now"] = state["now"].replace(hour=17, minute=45)
     db.update_routine_db(rid, new_time="18:00")
+    if abort in {"final_stage_retry", "legacy_timeout"}:
+        state["now"] = state["now"].replace(hour=17, minute=59, second=10)
     _real_gates(worker, bot, monkeypatch, state, db)
     db.set_routine_condition(rid, condition_type="context_flag",
         condition_payload='{"flag": "user_out_of_home", "equals": false}', condition_mode="allow_when_true")
@@ -163,21 +176,79 @@ def test_aborted_dispatch_refunds_proactive_slot_and_dedups_allowed_log(
     monkeypatch.setattr(bot, "datetime", db.datetime)
     monkeypatch.setattr(bot, "pending_routine_confirmations", {})
     monkeypatch.setattr(bot, "can_send_proactive", bot._can_send_proactive_impl)
-    bot._proactive_count.update({"hour": state["now"].hour, "count": 0})
-    bot._recent_routine_skip_events.clear()
+    monkeypatch.setattr(bot, "_proactive_count", {"hour": -1, "count": 0})
+    monkeypatch.setattr(bot, "_recent_routine_skip_events", {})
     allowed_events: list[tuple[str, str]] = []
     monkeypatch.setattr(event_log, "log_event", lambda cat, act, **kw: allowed_events.append((cat, act)) if act == "routine_condition_allowed" else None)
-    monkeypatch.setattr(bot, "log_event", lambda cat, act, **kw: allowed_events.append((cat, act)) if act == "routine_condition_allowed" else None)
+    reject_log = True
+
+    def write_log(category: str, action: str, **fields: object) -> bool:
+        """Simulate a failed write before accepting the next allowed event."""
+        if action == "routine_condition_allowed":
+            if reject_log:
+                return False
+            allowed_events.append((category, action))
+        return True
+
+    monkeypatch.setattr(bot, "log_event", write_log)
+    monkeypatch.setattr(bot, "_dated_single_routine_sender", None)
+    if abort == "legacy_timeout":
+        from services import external_assistant_delivery as delivery
+        from services.external_delivery import ExternalDeliveryRouter
+        attempts: list[str] = []
+
+        def timeout(text: str, *, silent: bool = False) -> str:
+            """Model a transport accepting text before its response times out."""
+            attempts.append(text)
+            raise TimeoutError("response lost")
+
+        router = ExternalDeliveryRouter(channel_selector=lambda: "telegram")
+        router.register("telegram", SimpleNamespace(send_text=timeout))
+        monkeypatch.setattr(delivery, "deliver_external_assistant_text",
+                            lambda text, **kw: router.send_text(text))
+    else:
+        monkeypatch.setattr(bot, "_send_and_record_assistant",
+                            lambda *a, **k: "$sent" if abort == "send_success" else None)
+
+    wording_calls = 0
 
     def change_context_during_llm(*a: object, **k: object) -> tuple[str, bool]:
         """Simulate a context change during LLM wording generation."""
+        nonlocal wording_calls
+        wording_calls += 1
         assert bot._proactive_count["count"] == 1
-        db.set_context_state("quiet_hours", "true", state["now"].date().isoformat())
+        if abort == "exception":
+            raise RuntimeError("wording failed")
+        if abort == "final_stage_retry":
+            raise RuntimeError("wording failed in the final stage")
+        if abort == "new_bucket":
+            state["now"] += timedelta(days=1)
+            assert bot.can_send_proactive()
+            assert bot._proactive_count["count"] == 1
+            return "Ώρα για ρουτίνα", False
+        if abort == "quiet":
+            db.set_context_state("quiet_hours", "true", state["now"].date().isoformat())
         return "Ώρα για ρουτίνα", False
 
     monkeypatch.setattr(bot, "_craft_proactive_msg", change_context_during_llm)
     bot.job_check_routines()
-    assert bot._proactive_count["count"] == 0
+    assert bot._proactive_count["count"] == int(abort in {"new_bucket", "send_success", "legacy_timeout"})
+    assert not allowed_events
+    if abort in {"final_stage_retry", "legacy_timeout"}:
+        state["now"] += timedelta(seconds=10)
+        bot.job_check_routines()
+        state["now"] += timedelta(seconds=10)
+        bot.job_check_routines()
+        assert wording_calls == (2 if abort == "final_stage_retry" else 1)
+        if abort == "legacy_timeout":
+            assert len(attempts) == 1
+        return
+    if abort != "quiet":
+        return
+
+    reject_log = False
+    db.set_context_state("quiet_hours", "false", state["now"].date().isoformat())
+    bot.job_check_routines()
     assert len(allowed_events) == 1
 
     # Second tick within 600s should not duplicate routine_condition_allowed.

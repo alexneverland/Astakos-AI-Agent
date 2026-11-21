@@ -26,7 +26,7 @@ import threading
 import queue
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
-from datetime import datetime
+from datetime import date, datetime
 from time import perf_counter
 from zoneinfo import ZoneInfo
 
@@ -272,7 +272,7 @@ MAX_PROACTIVE_PER_HOUR = 3       # max proactive messages/hour
 PROACTIVE_RECENT_ACTIVITY_GRACE_SECONDS = 15 * 60
 
 _proactive_count = {"hour": -1, "count": 0}
-_proactive_lock  = threading.Lock()
+_proactive_lock  = threading.RLock()
 
 def is_quiet_hours() -> bool:
     """True if we are within the quiet window or if it has been overridden by context state."""
@@ -282,7 +282,8 @@ def is_quiet_hours() -> bool:
 def _can_send_proactive_impl() -> bool:
     """Rate-limit: max MAX_PROACTIVE_PER_HOUR proactive messages/hour."""
     with _proactive_lock:
-        h = datetime.now().hour
+        now = datetime.now()
+        h = (now.date(), now.hour, now.fold)
         if _proactive_count["hour"] != h:
             _proactive_count["hour"]  = h
             _proactive_count["count"] = 0
@@ -297,11 +298,10 @@ def can_send_proactive() -> bool:
     return _can_send_proactive_impl()
 
 
-def _release_proactive_slot(reserved_hour: int | None = None) -> None:
+def _release_proactive_slot(reserved_hour: tuple[date, int, int]) -> None:
     """Refund a pre-reserved proactive slot for its original reservation hour."""
     with _proactive_lock:
-        target_hour = datetime.now().hour if reserved_hour is None else reserved_hour
-        if _proactive_count["hour"] == target_hour and _proactive_count["count"] > 0:
+        if _proactive_count["hour"] == reserved_hour and _proactive_count["count"] > 0:
             _proactive_count["count"] -= 1
 
 
@@ -1752,10 +1752,13 @@ def _send_and_record_assistant(
     content: str,
     chat_id: str | None = None,
     agent: str | None = "Chat_Agent",
-):
+    *,
+    report_uncertain: bool = False,
+) -> str | None:
     """Send assistant text through the selected external channel and record it."""
     from memory.conversation_history import append_message
     from services.external_assistant_delivery import deliver_external_assistant_text, AssistantHistoryError
+    from services.external_delivery import ExternalDeliveryUncertain
 
     def _record_delivery(channel, text, handling_agent, external_id):
         metadata = {
@@ -1794,6 +1797,8 @@ def _send_and_record_assistant(
         return exc.receipt.external_id
     except Exception as exc:
         print(f"[ExternalSend]: outbound send failed for agent={agent}: {exc}")
+        if report_uncertain and isinstance(exc, ExternalDeliveryUncertain):
+            raise
         return None
     return receipt.external_id
 
@@ -5046,12 +5051,16 @@ def job_check_routines():
         _log_vacation_routine_skip(routine_pause_until)
         return
 
-    if is_quiet_hours():
-        from services.routine_context import resolve_quiet_hours
-        if resolve_quiet_hours(datetime.now(), scheduled=True):
-            return
+    from services.routine_context import resolve_quiet_hours
+    if resolve_quiet_hours(datetime.now(), scheduled=True):
+        return
 
     # 1. Upcoming routine notifications
+    from services.external_delivery import ExternalDeliveryUncertain
+    reserved_hour = None
+    quota_used = False
+    retry_wording = True
+    due_context_candidates = []
     try:
         if os.path.exists(DB_PATH):
             from services.routine_context_clarification_scheduler import schedule_context_clarification
@@ -5097,7 +5106,6 @@ def job_check_routines():
                 from pathlib import Path
                 from services.routine_conditions import evaluate_routine_conditions
                 due_routines = []
-                due_context_candidates = []
                 triggered_conflict_groups = set()
                 aware_now = now.replace(tzinfo=ATHENS) if now.tzinfo is None else now
                 context_evidence = build_routine_context_evidence(aware_now)
@@ -5194,17 +5202,21 @@ def job_check_routines():
                         else:
                             for k in [key for key in _recent_routine_skip_events if key[:2] == (r_id, "routine_condition_blocked")]:
                                 _recent_routine_skip_events.pop(k, None)
-                            if _should_log_routine_skip(r_id, "routine_condition_allowed", "All conditions passed"):
-                                log_event(
+                            allowed_reason = "All conditions passed"
+                            if _should_log_routine_skip(r_id, "routine_condition_allowed", allowed_reason):
+                                written = log_event(
                                     "routines",
                                     "routine_condition_allowed",
                                     routine_id=r_id,
                                     event=event_name,
-                                    reason="All conditions passed",
+                                    reason=allowed_reason,
                                     debug_type="condition_eval",
                                     debug_source="scheduler",
                                     debug_effect="no_change",
                                 )
+                                if written is False:
+                                    _recent_routine_skip_events.pop(
+                                        (r_id, "routine_condition_allowed", allowed_reason), None)
 
                     # ── muted_until check ────────────────────────────────────
                     muted_until = get_routine_muted_until(r_id)
@@ -5249,7 +5261,11 @@ def job_check_routines():
                     conn.close()
                     return
 
-                if not can_send_proactive():
+                with _proactive_lock:
+                    quota_available = can_send_proactive()
+                    if quota_available:
+                        reserved_hour = _proactive_count["hour"]
+                if not quota_available:
                     for r_id, event_name, _ in due_routines:
                         log_event("routines", "routine_rate_limit_skip",
                                   routine_id=r_id, event=event_name,
@@ -5257,8 +5273,6 @@ def job_check_routines():
                     print(f"⏸️ [job_check_routines]: Rate limit, {len(due_routines)} routine(s) skipped")
                     conn.close()
                     return
-                with _proactive_lock:
-                    reserved_hour = _proactive_count["hour"]
 
                 routine_timing = {"now": aware_now.isoformat(), "slots": [
                     {"id": item.id, "name": item.name, "at": item.slot_at.isoformat()}
@@ -5285,18 +5299,17 @@ def job_check_routines():
                     )
                     dispatch_now = datetime.now()
                     if str(get_max_rowid()) != wording_history_marker:
-                        _release_proactive_slot(reserved_hour)
                         return
                     if not dispatch_context_current(tuple(due_context_candidates), rt_context,
                             clarification_store, dispatch_now.replace(tzinfo=ATHENS)
                             if dispatch_now.tzinfo is None else dispatch_now):
-                        _release_proactive_slot(reserved_hour)
                         return
 
                     if msg.strip().startswith("[CONTEXT_NOTE]"):
                         msg = msg.replace("[CONTEXT_NOTE]", "[CONTEXT_SKIP]", 1)
 
                     if msg.strip().startswith("[SILENT_SKIP]"):
+                        retry_wording = False
                         # First time SILENT_SKIP — estimate muted_until for each routine
                         try:
                             ctx = _build_proactive_memory_context(names)
@@ -5340,20 +5353,26 @@ def job_check_routines():
                                 """Reload the whole group's canonical gates before reservation."""
                                 return (batch_channel == _current_external_runtime_channel()
                                     and batch_channel == resolve_external_channel()
-                                    and can_send_proactive()
                                     and dispatch_context_current(tuple(due_context_candidates),
                                         rt_context, clarification_store, dated_batch_sender.now()))
                             result = dated_batch_sender.send_batch(occurrence_date=batch_date,
                                 text=msg, expected_revisions=batch_revisions, eligible=batch_eligible)
+                            quota_used = result.receipt is not None or result.status == "uncertain"
+                            retry_wording = not quota_used
                             if result.receipt is None:
-                                _release_proactive_slot(reserved_hour)
                                 return  # Never retry an uncertain group using legacy transport.
                             if result.delivery_repair is not None:
                                 enqueue_fast_task(result.delivery_repair)
                             if result.history_repair is not None:
                                 enqueue_fast_task(result.history_repair)
-                        elif not is_context_skip and not _send_and_record_assistant(msg, agent="Routine_Agent"):
-                            return
+                        elif not is_context_skip:
+                            quota_used = bool(_send_and_record_assistant(
+                                msg, agent="Routine_Agent", report_uncertain=True))
+                            retry_wording = not quota_used
+                            if not quota_used:
+                                return
+                        else:
+                            retry_wording = False
                         for r_id, event_name, confidence in due_routines:
                             if not is_context_skip:
                                 cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
@@ -5413,16 +5432,15 @@ def job_check_routines():
                     )
                     dispatch_now = datetime.now()
                     if str(get_max_rowid()) != wording_history_marker:
-                        _release_proactive_slot(reserved_hour)
                         return
                     if not dispatch_context_current(tuple(due_context_candidates), rt_context,
                             clarification_store, dispatch_now.replace(tzinfo=ATHENS)
                             if dispatch_now.tzinfo is None else dispatch_now):
-                        _release_proactive_slot(reserved_hour)
                         return
                     draft_offer = draft_offer and can_offer_messenger_draft
 
                     if msg.strip().startswith("[SILENT_SKIP]"):
+                        retry_wording = False
                         # First time SILENT_SKIP — estimate muted_until
                         try:
                             ctx = _build_proactive_memory_context(event_name)
@@ -5456,11 +5474,13 @@ def job_check_routines():
                             msg = context_skip_preview
 
                         if is_context_skip:
-                            _maybe_send_routine_context_note(due_context_candidates[0], rt_context,
+                            retry_wording = False
+                            note_outcome = _maybe_send_routine_context_note(due_context_candidates[0], rt_context,
                                 context_evidence, clarification_store, context_skip_preview,
                                 budget_reserved=True,
                                 prepared_message=prepared_context_note,
                                 prepared_history_marker=wording_history_marker if is_context_note else None)
+                            quota_used = note_outcome in {"sent", "sent_history_pending", "uncertain"}
                             _clear_routine_pending_confirmation(r_id)
                             muted_until = None
                             log_event(
@@ -5483,7 +5503,6 @@ def job_check_routines():
                                     """Reload canonical gates at the durable reservation boundary."""
                                     return (dated_channel == _current_external_runtime_channel()
                                         and dated_channel == resolve_external_channel()
-                                        and can_send_proactive()
                                         and dispatch_context_current(tuple(due_context_candidates),
                                             rt_context, clarification_store, dated_sender.now()))
                                 draft_options = {"draft_event": event_name} if draft_offer else {}
@@ -5491,8 +5510,9 @@ def job_check_routines():
                                     occurrence_date=dated_date, text=msg,
                                     expected_revision=dated_revision, eligible=dated_eligible,
                                     **draft_options)
+                                quota_used = result.receipt is not None or result.status == "uncertain"
+                                retry_wording = not quota_used
                                 if result.receipt is None:
-                                    _release_proactive_slot(reserved_hour)
                                     return  # A blocked/unknown send never falls back to legacy transport.
                                 if result.delivery_repair is not None:
                                     if draft_offer:
@@ -5506,8 +5526,12 @@ def job_check_routines():
                                         enqueue_fast_task(result.delivery_repair)
                                 if result.history_repair is not None:
                                     enqueue_fast_task(result.history_repair)
-                            elif not _send_and_record_assistant(msg, agent="Routine_Agent"):
-                                return
+                            else:
+                                quota_used = bool(_send_and_record_assistant(
+                                    msg, agent="Routine_Agent", report_uncertain=True))
+                                retry_wording = not quota_used
+                                if not quota_used:
+                                    return
                             cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
                             conn.commit()
                             if not dated_delivery:
@@ -5539,8 +5563,21 @@ def job_check_routines():
                 conn.close()
             finally:
                 conn.close()
+    except ExternalDeliveryUncertain:
+        quota_used = True
+        retry_wording = False
     except Exception as e:
         print(f"❌ [job_check_routines]: {e}")
+    finally:
+        if reserved_hour is not None and not quota_used:
+            _release_proactive_slot(reserved_hour)
+        if retry_wording and due_context_candidates:
+            try:
+                for candidate in due_context_candidates:
+                    clarification_store.release_final_wording_for_retry(
+                        candidate.id, candidate.slot_at, claimed_at=aware_now)
+            except Exception:
+                logger.exception("Could not release final routine wording for retry")
 
 
 def job_proactive_scan():

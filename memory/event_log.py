@@ -67,9 +67,9 @@ def _release_cross_process_lock(f):
 # EVENT LOGGING
 # ────────────────────────────────────────────────────────────────
 
-def log_event(job: str, action: str, **kwargs):
+def log_event(job: str, action: str, **kwargs: object) -> bool:
     """
-    Logs an event to a daily JSON file (logs/events/YYYY-MM-DD.json).
+    Log an event to the daily JSON file and report whether it was written.
 
     Example:
         log_event("routine_scan", "triggered", routine_id=14, confidence=0.8)
@@ -150,9 +150,11 @@ def log_event(job: str, action: str, **kwargs):
                             break
             finally:
                 _release_cross_process_lock(_cross_lock)
+        return True
 
     except Exception as e:
         print(f"⚠️ [event_log]: {e}")
+        return False
 
 
 def get_events(date_str: str = None, job: str = None, action: str = None, *, strict: bool = False) -> list:
