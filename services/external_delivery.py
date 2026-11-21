@@ -14,6 +14,10 @@ class ExternalDeliveryError(RuntimeError):
     """Raised when the selected external transport cannot deliver a message."""
 
 
+class ExternalDeliveryUncertain(ExternalDeliveryError):
+    """Transport was invoked but no confirmed receipt is available."""
+
+
 @dataclass(frozen=True)
 class ApprovalDeliveryRequest:
     """Channel-neutral content required to render one approval request."""
@@ -93,7 +97,7 @@ class ExternalDeliveryRouter:
     @staticmethod
     def _receipt(channel: ExternalChannel, external_id: str | int | None) -> DeliveryReceipt:
         if external_id is None or not str(external_id).strip():
-            raise ExternalDeliveryError(
+            raise ExternalDeliveryUncertain(
                 f"Selected external transport '{channel}' did not confirm delivery"
             )
         return DeliveryReceipt(channel=channel, external_id=str(external_id))
@@ -107,7 +111,7 @@ class ExternalDeliveryRouter:
         try:
             external_id = transport.send_text(normalized, silent=silent)
         except Exception as exc:
-            raise ExternalDeliveryError(
+            raise ExternalDeliveryUncertain(
                 f"Selected external transport '{channel}' failed"
             ) from exc
         return self._receipt(channel, external_id)
@@ -125,7 +129,7 @@ class ExternalDeliveryRouter:
         try:
             external_id = transport.send_text(normalized, silent=silent)
         except Exception as exc:
-            raise ExternalDeliveryError(
+            raise ExternalDeliveryUncertain(
                 f"Selected external transport '{channel}' failed"
             ) from exc
         return self._receipt(channel, external_id)

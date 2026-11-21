@@ -1752,10 +1752,13 @@ def _send_and_record_assistant(
     content: str,
     chat_id: str | None = None,
     agent: str | None = "Chat_Agent",
-):
+    *,
+    report_uncertain: bool = False,
+) -> str | None:
     """Send assistant text through the selected external channel and record it."""
     from memory.conversation_history import append_message
     from services.external_assistant_delivery import deliver_external_assistant_text, AssistantHistoryError
+    from services.external_delivery import ExternalDeliveryUncertain
 
     def _record_delivery(channel, text, handling_agent, external_id):
         metadata = {
@@ -1794,6 +1797,8 @@ def _send_and_record_assistant(
         return exc.receipt.external_id
     except Exception as exc:
         print(f"[ExternalSend]: outbound send failed for agent={agent}: {exc}")
+        if report_uncertain and isinstance(exc, ExternalDeliveryUncertain):
+            raise
         return None
     return receipt.external_id
 
@@ -5051,8 +5056,11 @@ def job_check_routines():
         return
 
     # 1. Upcoming routine notifications
+    from services.external_delivery import ExternalDeliveryUncertain
     reserved_hour = None
     quota_used = False
+    retry_wording = True
+    due_context_candidates = []
     try:
         if os.path.exists(DB_PATH):
             from services.routine_context_clarification_scheduler import schedule_context_clarification
@@ -5098,7 +5106,6 @@ def job_check_routines():
                 from pathlib import Path
                 from services.routine_conditions import evaluate_routine_conditions
                 due_routines = []
-                due_context_candidates = []
                 triggered_conflict_groups = set()
                 aware_now = now.replace(tzinfo=ATHENS) if now.tzinfo is None else now
                 context_evidence = build_routine_context_evidence(aware_now)
@@ -5302,6 +5309,7 @@ def job_check_routines():
                         msg = msg.replace("[CONTEXT_NOTE]", "[CONTEXT_SKIP]", 1)
 
                     if msg.strip().startswith("[SILENT_SKIP]"):
+                        retry_wording = False
                         # First time SILENT_SKIP — estimate muted_until for each routine
                         try:
                             ctx = _build_proactive_memory_context(names)
@@ -5350,6 +5358,7 @@ def job_check_routines():
                             result = dated_batch_sender.send_batch(occurrence_date=batch_date,
                                 text=msg, expected_revisions=batch_revisions, eligible=batch_eligible)
                             quota_used = result.receipt is not None or result.status == "uncertain"
+                            retry_wording = not quota_used
                             if result.receipt is None:
                                 return  # Never retry an uncertain group using legacy transport.
                             if result.delivery_repair is not None:
@@ -5357,9 +5366,13 @@ def job_check_routines():
                             if result.history_repair is not None:
                                 enqueue_fast_task(result.history_repair)
                         elif not is_context_skip:
-                            quota_used = bool(_send_and_record_assistant(msg, agent="Routine_Agent"))
+                            quota_used = bool(_send_and_record_assistant(
+                                msg, agent="Routine_Agent", report_uncertain=True))
+                            retry_wording = not quota_used
                             if not quota_used:
                                 return
+                        else:
+                            retry_wording = False
                         for r_id, event_name, confidence in due_routines:
                             if not is_context_skip:
                                 cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
@@ -5427,6 +5440,7 @@ def job_check_routines():
                     draft_offer = draft_offer and can_offer_messenger_draft
 
                     if msg.strip().startswith("[SILENT_SKIP]"):
+                        retry_wording = False
                         # First time SILENT_SKIP — estimate muted_until
                         try:
                             ctx = _build_proactive_memory_context(event_name)
@@ -5460,6 +5474,7 @@ def job_check_routines():
                             msg = context_skip_preview
 
                         if is_context_skip:
+                            retry_wording = False
                             note_outcome = _maybe_send_routine_context_note(due_context_candidates[0], rt_context,
                                 context_evidence, clarification_store, context_skip_preview,
                                 budget_reserved=True,
@@ -5496,6 +5511,7 @@ def job_check_routines():
                                     expected_revision=dated_revision, eligible=dated_eligible,
                                     **draft_options)
                                 quota_used = result.receipt is not None or result.status == "uncertain"
+                                retry_wording = not quota_used
                                 if result.receipt is None:
                                     return  # A blocked/unknown send never falls back to legacy transport.
                                 if result.delivery_repair is not None:
@@ -5511,7 +5527,9 @@ def job_check_routines():
                                 if result.history_repair is not None:
                                     enqueue_fast_task(result.history_repair)
                             else:
-                                quota_used = bool(_send_and_record_assistant(msg, agent="Routine_Agent"))
+                                quota_used = bool(_send_and_record_assistant(
+                                    msg, agent="Routine_Agent", report_uncertain=True))
+                                retry_wording = not quota_used
                                 if not quota_used:
                                     return
                             cursor.execute("UPDATE routines SET last_triggered=? WHERE id=?", (today_str, r_id))
@@ -5545,11 +5563,21 @@ def job_check_routines():
                 conn.close()
             finally:
                 conn.close()
+    except ExternalDeliveryUncertain:
+        quota_used = True
+        retry_wording = False
     except Exception as e:
         print(f"❌ [job_check_routines]: {e}")
     finally:
         if reserved_hour is not None and not quota_used:
             _release_proactive_slot(reserved_hour)
+        if retry_wording and due_context_candidates:
+            try:
+                for candidate in due_context_candidates:
+                    clarification_store.release_final_wording_for_retry(
+                        candidate.id, candidate.slot_at, claimed_at=aware_now)
+            except Exception:
+                logger.exception("Could not release final routine wording for retry")
 
 
 def job_proactive_scan():

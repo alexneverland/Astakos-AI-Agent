@@ -255,8 +255,7 @@ class ClarificationStore:
         if not 0 <= seconds_to_slot <= 900:
             return False
         stage = 3 if seconds_to_slot <= 60 else int((900 - seconds_to_slot) // 300)
-        identity = f"{int(routine_id)}:{slot.isoformat()}:{stage}"
-        key = "wording-" + sha256(identity.encode()).hexdigest()
+        key = self._wording_key(routine_id, slot, stage)
         with self._lock():
             state = self._load()
             if any(item["fingerprint"] == key for item in state["evaluations"]):
@@ -266,6 +265,32 @@ class ClarificationStore:
                 return False
             self._save(state)
             return True
+
+    @staticmethod
+    def _wording_key(routine_id: str, slot: datetime, stage: int) -> str:
+        """Identify one wording stage for a canonical occurrence."""
+        identity = f"{int(routine_id)}:{slot.isoformat()}:{stage}"
+        return "wording-" + sha256(identity.encode()).hexdigest()
+
+    def release_final_wording_for_retry(
+        self, routine_id: str, slot_at: datetime, *, claimed_at: datetime,
+    ) -> None:
+        """Allow one final-stage retry after a confirmed pre-delivery abort."""
+        slot = _aware(slot_at)
+        if not 0 <= (slot - _aware(claimed_at)).total_seconds() <= 60:
+            return
+        key = self._wording_key(routine_id, slot, 3)
+        retry = key + "-retry"
+        with self._lock():
+            state = self._load()
+            rows = state["evaluations"]
+            if any(row["fingerprint"] == retry for row in rows):
+                return
+            for row in rows:
+                if row["fingerprint"] == key:
+                    row["fingerprint"] = retry
+                    self._save(state)
+                    return
 
     def evaluation_flags(self, fingerprint: str, *, now: datetime) -> tuple[str, ...] | None:
         """Read validated dependency output; an unfinished/failed claim is unknown."""
