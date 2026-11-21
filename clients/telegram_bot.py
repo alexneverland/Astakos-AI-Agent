@@ -292,6 +292,13 @@ def can_send_proactive() -> bool:
         return True
 
 
+def _release_proactive_slot() -> None:
+    """Refund a pre-reserved proactive slot when dispatch aborts before sending."""
+    with _proactive_lock:
+        if _proactive_count["hour"] == datetime.now().hour and _proactive_count["count"] > 0:
+            _proactive_count["count"] -= 1
+
+
 def _seconds_since_user_activity() -> float:
     """Shared last-user-activity across web/Telegram, with local fallback."""
     try:
@@ -5033,6 +5040,11 @@ def job_check_routines():
         _log_vacation_routine_skip(routine_pause_until)
         return
 
+    if is_quiet_hours():
+        from services.routine_context import resolve_quiet_hours
+        if resolve_quiet_hours(datetime.now(), scheduled=True):
+            return
+
     # 1. Upcoming routine notifications
     try:
         if os.path.exists(DB_PATH):
@@ -5173,16 +5185,17 @@ def job_check_routines():
                                 print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('failed_count')} failed) — skipped")
                             continue  # A note can never fall through to action/reminder delivery.
                         else:
-                            log_event(
-                                "routines", 
-                                "routine_condition_allowed",
-                                routine_id=r_id, 
-                                event=event_name,
-                                reason="All conditions passed",
-                                debug_type="condition_eval",
-                                debug_source="scheduler",
-                                debug_effect="no_change",
-                            )
+                            if _should_log_routine_skip(r_id, "routine_condition_allowed", "All conditions passed"):
+                                log_event(
+                                    "routines",
+                                    "routine_condition_allowed",
+                                    routine_id=r_id,
+                                    event=event_name,
+                                    reason="All conditions passed",
+                                    debug_type="condition_eval",
+                                    debug_source="scheduler",
+                                    debug_effect="no_change",
+                                )
 
                     # ── muted_until check ────────────────────────────────────
                     muted_until = get_routine_muted_until(r_id)
@@ -5261,10 +5274,12 @@ def job_check_routines():
                     )
                     dispatch_now = datetime.now()
                     if str(get_max_rowid()) != wording_history_marker:
+                        _release_proactive_slot()
                         return
                     if not dispatch_context_current(tuple(due_context_candidates), rt_context,
                             clarification_store, dispatch_now.replace(tzinfo=ATHENS)
                             if dispatch_now.tzinfo is None else dispatch_now):
+                        _release_proactive_slot()
                         return
 
                     if msg.strip().startswith("[CONTEXT_NOTE]"):
@@ -5386,10 +5401,12 @@ def job_check_routines():
                     )
                     dispatch_now = datetime.now()
                     if str(get_max_rowid()) != wording_history_marker:
+                        _release_proactive_slot()
                         return
                     if not dispatch_context_current(tuple(due_context_candidates), rt_context,
                             clarification_store, dispatch_now.replace(tzinfo=ATHENS)
                             if dispatch_now.tzinfo is None else dispatch_now):
+                        _release_proactive_slot()
                         return
                     draft_offer = draft_offer and can_offer_messenger_draft
 

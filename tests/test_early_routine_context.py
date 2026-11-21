@@ -126,6 +126,60 @@ def test_scheduled_quiet_policy_retains_explicit_state(environment, stored, expi
     assert resolve_quiet_hours(state["now"], scheduled=True) is scheduled
 
 
+def test_explicit_quiet_hours_skips_job_check_routines_before_quota_and_llm(environment, monkeypatch):
+    """Explicit quiet_hours must stop job_check_routines before consuming proactive budget or LLM."""
+    from clients import telegram_bot as bot
+    worker, db, rid, state, _, _, _, _ = environment
+    state["now"] = state["now"].replace(hour=17, minute=45)
+    db.update_routine_db(rid, new_time="18:00")
+    _real_gates(worker, bot, monkeypatch, state, db)
+    db.set_context_state("quiet_hours", "true", state["now"].date().isoformat())
+    monkeypatch.setattr(bot, "datetime", db.datetime)
+    monkeypatch.setattr(bot, "pending_routine_confirmations", {})
+    monkeypatch.setattr(bot, "can_send_proactive", lambda: pytest.fail("Should not consume proactive quota"))
+    monkeypatch.setattr(bot, "_craft_proactive_msg", lambda *a, **k: pytest.fail("Should not call LLM"))
+
+    bot.job_check_routines()
+
+
+def test_aborted_dispatch_refunds_proactive_slot_and_dedups_allowed_log(environment, monkeypatch):
+    """Aborted mid-generation dispatch refunds the proactive slot; allowed logs are deduplicated."""
+    from clients import telegram_bot as bot
+    from memory import event_log
+    from services import routine_context as context
+    worker, db, rid, state, _, _, _, _ = environment
+    state["now"] = state["now"].replace(hour=17, minute=45)
+    db.update_routine_db(rid, new_time="18:00")
+    _real_gates(worker, bot, monkeypatch, state, db)
+    db.set_routine_condition(rid, condition_type="context_flag",
+        condition_payload='{"flag": "user_out_of_home", "equals": false}', condition_mode="allow_when_true")
+    state["evidence"] = {"user_out_of_home": ContextEvidence(effective_value=False, status="known", recorded_at=state["now"])}
+    monkeypatch.setattr(context, "build_routine_context_evidence", lambda *a, **k: state["evidence"])
+    monkeypatch.setattr(context, "build_runtime_routine_context", lambda *a, **k: {"user_out_of_home": False})
+    monkeypatch.setattr(bot, "datetime", db.datetime)
+    monkeypatch.setattr(bot, "pending_routine_confirmations", {})
+    monkeypatch.setattr(bot, "can_send_proactive", bot.can_send_proactive)
+    bot._proactive_count.update({"hour": state["now"].hour, "count": 0})
+    bot._recent_routine_skip_events.clear()
+    allowed_events = []
+    monkeypatch.setattr(event_log, "log_event", lambda cat, act, **kw: allowed_events.append((cat, act)) if act == "routine_condition_allowed" else None)
+    monkeypatch.setattr(bot, "log_event", lambda cat, act, **kw: allowed_events.append((cat, act)) if act == "routine_condition_allowed" else None)
+
+    def change_context_during_llm(*a, **k):
+        db.set_context_state("quiet_hours", "true", state["now"].date().isoformat())
+        return "Ώρα για ρουτίνα", False
+
+    monkeypatch.setattr(bot, "_craft_proactive_msg", change_context_during_llm)
+    bot.job_check_routines()
+    assert bot._proactive_count["count"] == 0
+    assert len(allowed_events) == 1
+
+    # Second tick within 600s should not duplicate routine_condition_allowed.
+    db.set_context_state("quiet_hours", "false", state["now"].date().isoformat())
+    bot.job_check_routines()
+    assert len(allowed_events) == 1
+
+
 def _real_gates(worker, bot, monkeypatch, state, db):
     """Restore production gating while isolating transport/history-only checks."""
     from memory import event_log
