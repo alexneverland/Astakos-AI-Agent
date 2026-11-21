@@ -279,7 +279,7 @@ def is_quiet_hours() -> bool:
     from services.routine_context import resolve_quiet_hours
     return resolve_quiet_hours()
 
-def can_send_proactive() -> bool:
+def _can_send_proactive_impl() -> bool:
     """Rate-limit: max MAX_PROACTIVE_PER_HOUR proactive messages/hour."""
     with _proactive_lock:
         h = datetime.now().hour
@@ -290,6 +290,19 @@ def can_send_proactive() -> bool:
             return False
         _proactive_count["count"] += 1
         return True
+
+
+def can_send_proactive() -> bool:
+    """Rate-limit: max MAX_PROACTIVE_PER_HOUR proactive messages/hour."""
+    return _can_send_proactive_impl()
+
+
+def _release_proactive_slot(reserved_hour: int | None = None) -> None:
+    """Refund a pre-reserved proactive slot for its original reservation hour."""
+    with _proactive_lock:
+        target_hour = datetime.now().hour if reserved_hour is None else reserved_hour
+        if _proactive_count["hour"] == target_hour and _proactive_count["count"] > 0:
+            _proactive_count["count"] -= 1
 
 
 def _seconds_since_user_activity() -> float:
@@ -5033,6 +5046,11 @@ def job_check_routines():
         _log_vacation_routine_skip(routine_pause_until)
         return
 
+    if is_quiet_hours():
+        from services.routine_context import resolve_quiet_hours
+        if resolve_quiet_hours(datetime.now(), scheduled=True):
+            return
+
     # 1. Upcoming routine notifications
     try:
         if os.path.exists(DB_PATH):
@@ -5153,6 +5171,7 @@ def job_check_routines():
                     if cond_list:
                         cond_result = evaluate_routine_conditions(cond_list, rt_context, now=now)
                         if not cond_result.get("allowed", True):
+                            _recent_routine_skip_events.pop((r_id, "routine_condition_allowed", "All conditions passed"), None)
                             blocked_reason = str(cond_result.get("results"))
                             should_log = _should_log_routine_skip(r_id, "routine_condition_blocked", blocked_reason)
                             if should_log:
@@ -5173,16 +5192,19 @@ def job_check_routines():
                                 print(f"\U0001f6ab [job_check_routines]: #{r_id} '{event_name}' condition blocked ({cond_result.get('failed_count')} failed) — skipped")
                             continue  # A note can never fall through to action/reminder delivery.
                         else:
-                            log_event(
-                                "routines", 
-                                "routine_condition_allowed",
-                                routine_id=r_id, 
-                                event=event_name,
-                                reason="All conditions passed",
-                                debug_type="condition_eval",
-                                debug_source="scheduler",
-                                debug_effect="no_change",
-                            )
+                            for k in [key for key in _recent_routine_skip_events if key[:2] == (r_id, "routine_condition_blocked")]:
+                                _recent_routine_skip_events.pop(k, None)
+                            if _should_log_routine_skip(r_id, "routine_condition_allowed", "All conditions passed"):
+                                log_event(
+                                    "routines",
+                                    "routine_condition_allowed",
+                                    routine_id=r_id,
+                                    event=event_name,
+                                    reason="All conditions passed",
+                                    debug_type="condition_eval",
+                                    debug_source="scheduler",
+                                    debug_effect="no_change",
+                                )
 
                     # ── muted_until check ────────────────────────────────────
                     muted_until = get_routine_muted_until(r_id)
@@ -5235,6 +5257,8 @@ def job_check_routines():
                     print(f"⏸️ [job_check_routines]: Rate limit, {len(due_routines)} routine(s) skipped")
                     conn.close()
                     return
+                with _proactive_lock:
+                    reserved_hour = _proactive_count["hour"]
 
                 routine_timing = {"now": aware_now.isoformat(), "slots": [
                     {"id": item.id, "name": item.name, "at": item.slot_at.isoformat()}
@@ -5261,10 +5285,12 @@ def job_check_routines():
                     )
                     dispatch_now = datetime.now()
                     if str(get_max_rowid()) != wording_history_marker:
+                        _release_proactive_slot(reserved_hour)
                         return
                     if not dispatch_context_current(tuple(due_context_candidates), rt_context,
                             clarification_store, dispatch_now.replace(tzinfo=ATHENS)
                             if dispatch_now.tzinfo is None else dispatch_now):
+                        _release_proactive_slot(reserved_hour)
                         return
 
                     if msg.strip().startswith("[CONTEXT_NOTE]"):
@@ -5320,6 +5346,7 @@ def job_check_routines():
                             result = dated_batch_sender.send_batch(occurrence_date=batch_date,
                                 text=msg, expected_revisions=batch_revisions, eligible=batch_eligible)
                             if result.receipt is None:
+                                _release_proactive_slot(reserved_hour)
                                 return  # Never retry an uncertain group using legacy transport.
                             if result.delivery_repair is not None:
                                 enqueue_fast_task(result.delivery_repair)
@@ -5386,10 +5413,12 @@ def job_check_routines():
                     )
                     dispatch_now = datetime.now()
                     if str(get_max_rowid()) != wording_history_marker:
+                        _release_proactive_slot(reserved_hour)
                         return
                     if not dispatch_context_current(tuple(due_context_candidates), rt_context,
                             clarification_store, dispatch_now.replace(tzinfo=ATHENS)
                             if dispatch_now.tzinfo is None else dispatch_now):
+                        _release_proactive_slot(reserved_hour)
                         return
                     draft_offer = draft_offer and can_offer_messenger_draft
 
@@ -5463,6 +5492,7 @@ def job_check_routines():
                                     expected_revision=dated_revision, eligible=dated_eligible,
                                     **draft_options)
                                 if result.receipt is None:
+                                    _release_proactive_slot(reserved_hour)
                                     return  # A blocked/unknown send never falls back to legacy transport.
                                 if result.delivery_repair is not None:
                                     if draft_offer:
