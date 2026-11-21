@@ -270,6 +270,7 @@ def _stub_modules():
         flag: ContextEvidence(effective_value=False, status="known") for flag in VOLATILE_FLAGS}
     sys.modules["services.routine_context"].project_routine_context = lambda context, evidence: dict(context)
     sys.modules["services.routine_context"].kid1_unavailable_for_routine = _real_child_absence
+    sys.modules["services.routine_context"].resolve_quiet_hours = MagicMock(return_value=False)
     sys.modules["services.gemini"].safe_gemini_call = MagicMock(return_value="ok")
     sys.modules["services.embeddings"].embeddings   = MagicMock()
     sys.modules["services.routine_conditions"].evaluate_routine_condition = MagicMock(

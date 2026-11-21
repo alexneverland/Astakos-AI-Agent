@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Apply scheduled quiet policy before preparing reminders. Reserve one quota
+  slot per routine dispatch, return unused slots to their original hour, and
+  retry condition-allowed logs after a failed write.
+
 - Keep explicit owner whereabouts and company when relatives are home, and
   require owner-scoped quiet evidence so sleeping relatives elsewhere cannot
   silence scheduled routine questions.
