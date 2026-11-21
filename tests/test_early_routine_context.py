@@ -126,7 +126,9 @@ def test_scheduled_quiet_policy_retains_explicit_state(environment, stored, expi
     assert resolve_quiet_hours(state["now"], scheduled=True) is scheduled
 
 
-def test_explicit_quiet_hours_skips_job_check_routines_before_quota_and_llm(environment, monkeypatch):
+def test_explicit_quiet_hours_skips_job_check_routines_before_quota_and_llm(
+    environment: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Explicit quiet_hours must stop job_check_routines before consuming proactive budget or LLM."""
     from clients import telegram_bot as bot
     worker, db, rid, state, _, _, _, _ = environment
@@ -142,8 +144,10 @@ def test_explicit_quiet_hours_skips_job_check_routines_before_quota_and_llm(envi
     bot.job_check_routines()
 
 
-def test_aborted_dispatch_refunds_proactive_slot_and_dedups_allowed_log(environment, monkeypatch):
-    """Aborted mid-generation dispatch refunds the proactive slot; allowed logs are deduplicated."""
+def test_aborted_dispatch_refunds_proactive_slot_and_dedups_allowed_log(
+    environment: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Aborted mid-generation dispatch refunds the proactive slot; allowed logs dedup until blocked."""
     from clients import telegram_bot as bot
     from memory import event_log
     from services import routine_context as context
@@ -158,14 +162,16 @@ def test_aborted_dispatch_refunds_proactive_slot_and_dedups_allowed_log(environm
     monkeypatch.setattr(context, "build_runtime_routine_context", lambda *a, **k: {"user_out_of_home": False})
     monkeypatch.setattr(bot, "datetime", db.datetime)
     monkeypatch.setattr(bot, "pending_routine_confirmations", {})
-    monkeypatch.setattr(bot, "can_send_proactive", bot.can_send_proactive)
+    monkeypatch.setattr(bot, "can_send_proactive", bot._can_send_proactive_impl)
     bot._proactive_count.update({"hour": state["now"].hour, "count": 0})
     bot._recent_routine_skip_events.clear()
-    allowed_events = []
+    allowed_events: list[tuple[str, str]] = []
     monkeypatch.setattr(event_log, "log_event", lambda cat, act, **kw: allowed_events.append((cat, act)) if act == "routine_condition_allowed" else None)
     monkeypatch.setattr(bot, "log_event", lambda cat, act, **kw: allowed_events.append((cat, act)) if act == "routine_condition_allowed" else None)
 
-    def change_context_during_llm(*a, **k):
+    def change_context_during_llm(*a: object, **k: object) -> tuple[str, bool]:
+        """Simulate a context change during LLM wording generation."""
+        assert bot._proactive_count["count"] == 1
         db.set_context_state("quiet_hours", "true", state["now"].date().isoformat())
         return "Ώρα για ρουτίνα", False
 
@@ -178,6 +184,13 @@ def test_aborted_dispatch_refunds_proactive_slot_and_dedups_allowed_log(environm
     db.set_context_state("quiet_hours", "false", state["now"].date().isoformat())
     bot.job_check_routines()
     assert len(allowed_events) == 1
+
+    # Transitioning blocked -> allowed resets dedup so recovery is logged immediately.
+    state["evidence"] = {"user_out_of_home": ContextEvidence(effective_value=True, status="known", recorded_at=state["now"])}
+    bot.job_check_routines()
+    state["evidence"] = {"user_out_of_home": ContextEvidence(effective_value=False, status="known", recorded_at=state["now"])}
+    bot.job_check_routines()
+    assert len(allowed_events) == 2
 
 
 def _real_gates(worker, bot, monkeypatch, state, db):
